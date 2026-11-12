@@ -14,6 +14,7 @@ follow the roadmap's order. If a request is unclear, or would change a decision 
 | `docs/IDEAS.md` | Ideas (`IDEA-n`) that may become requirements later, by theme; own next free ID on its last line. | Not a plan: new ideas go here. When one is picked, write requirements in the roadmap and mark the idea. |
 | `docs/FEATURES.md` | Implemented **and verified** features by requirement ID, and how each was verified. | Add an entry only when the requirement is fully met, tested, and checked in the running app; record which OS. Otherwise it goes under "In progress". |
 | `docs/REQUIREMENTS.md` | The text of every completed requirement. | When a requirement is verified, move its row here from the roadmap. |
+| `docs/PRD.md`, `docs/ARCHITECTURE.md` | The product summary and the design with diagrams (`docs/images/`), for readers new to Parley. | Summaries that link IDs, not specs: update them when a phase ends or the design changes; never copy requirement text into them. |
 
 ## Working efficiently
 

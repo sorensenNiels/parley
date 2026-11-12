@@ -6,6 +6,19 @@ A TN5250 terminal emulator for IBM i, written in Rust, for Windows, Linux and ma
 > takes input in its fields. It has been checked against a real IBM i up to the sign-on screen; see
 > [docs/FEATURES.md](docs/FEATURES.md) for what is verified and [docs/ROADMAP.md](docs/ROADMAP.md) for the plan.
 
+![Parley connected to PUB400.COM, showing the IBM i sign-on screen](docs/images/sign-on-pub400.png)
+
+## Documentation
+
+| Document | What it holds |
+|---|---|
+| [docs/PRD.md](docs/PRD.md) | What Parley is, for whom and why; scope, principles and the release plan. |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How it is built, with diagrams: the crates, one connection at run time, sign-on, macros, testing. |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | The plan: open requirements and the decisions behind the design. |
+| [docs/FEATURES.md](docs/FEATURES.md) · [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | What is done and how it was verified. |
+| [docs/IDEAS.md](docs/IDEAS.md) | Ideas that may become requirements. |
+| [docs/RELEASING.md](docs/RELEASING.md) | How releases and installers are made. |
+
 ## Using it
 
 ```sh

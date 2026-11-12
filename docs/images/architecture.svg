@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" width="960" height="600" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>Parley: the three crates and what they talk to</title>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#57606a"/>
+    </marker>
+    <style>
+      .crate-title { font-size: 15px; font-weight: 600; fill: #1f2328; }
+      .crate-sub { font-size: 12px; fill: #57606a; }
+      .chip { fill: #ffffff; stroke: #d0d7de; }
+      .chip-title { font-family: 'JetBrains Mono', Consolas, Menlo, monospace; font-size: 13px; font-weight: 600; fill: #1f2328; }
+      .chip-sub { font-size: 11px; fill: #57606a; }
+      .ext { fill: #f6f8fa; stroke: #8c959f; stroke-dasharray: 5 4; }
+      .ext-title { font-size: 13px; font-weight: 600; fill: #1f2328; }
+      .ext-sub { font-size: 11px; fill: #57606a; }
+      .link { stroke: #57606a; stroke-width: 1.5; fill: none; }
+      .label { font-size: 11px; fill: #57606a; }
+    </style>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="959" height="599" rx="12" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="32" y="42" font-size="20" font-weight="600" fill="#1f2328">Parley: three crates, one engine</text>
+
+  <!-- parley-app -->
+  <rect x="32" y="64" width="608" height="116" rx="10" fill="#eef6ff" stroke="#8fb8e8"/>
+  <text x="48" y="90" class="crate-title">parley-app</text>
+  <text x="140" y="90" class="crate-sub">the parley binary: a thin eframe launcher, the only platform code</text>
+  <g>
+    <rect x="48" y="112" width="138" height="52" rx="8" class="chip"/>
+    <text x="60" y="133" class="chip-title">desktop</text>
+    <text x="60" y="152" class="chip-sub">window, command line</text>
+    <rect x="194" y="112" width="138" height="52" rx="8" class="chip"/>
+    <text x="206" y="133" class="chip-title">keychain</text>
+    <text x="206" y="152" class="chip-sub">passwords (keyring)</text>
+    <rect x="340" y="112" width="138" height="52" rx="8" class="chip"/>
+    <text x="352" y="133" class="chip-title">macros</text>
+    <text x="352" y="152" class="chip-sub">macro files on disk</text>
+    <rect x="486" y="112" width="138" height="52" rx="8" class="chip"/>
+    <text x="498" y="133" class="chip-title">screenshot</text>
+    <text x="498" y="152" class="chip-sub">--screenshot FILE</text>
+  </g>
+
+  <line x1="336" y1="180" x2="336" y2="204" class="link" marker-end="url(#arrow)"/>
+
+  <!-- parley-ui-egui -->
+  <rect x="32" y="206" width="608" height="156" rx="10" fill="#ecfdf8" stroke="#6cc9b4"/>
+  <text x="48" y="232" class="crate-title">parley-ui-egui</text>
+  <text x="170" y="232" class="crate-sub">the UI (egui 0.37, Tortuga's look), no platform code</text>
+  <g>
+    <rect x="48" y="246" width="138" height="48" rx="8" class="chip"/>
+    <text x="60" y="266" class="chip-title">ParleyUi</text>
+    <text x="60" y="283" class="chip-sub">frame and actions</text>
+    <rect x="194" y="246" width="138" height="48" rx="8" class="chip"/>
+    <text x="206" y="266" class="chip-title">terminal</text>
+    <text x="206" y="283" class="chip-sub">the 5250 screen</text>
+    <rect x="340" y="246" width="138" height="48" rx="8" class="chip"/>
+    <text x="352" y="266" class="chip-title">keymap</text>
+    <text x="352" y="283" class="chip-sub">PC keys to 5250 keys</text>
+    <rect x="486" y="246" width="138" height="48" rx="8" class="chip"/>
+    <text x="498" y="266" class="chip-title">menu, status</text>
+    <text x="498" y="283" class="chip-sub">bars, status line</text>
+
+    <rect x="48" y="302" width="138" height="48" rx="8" class="chip"/>
+    <text x="60" y="322" class="chip-title">sessions</text>
+    <text x="60" y="339" class="chip-sub">start screen, dialog</text>
+    <rect x="194" y="302" width="138" height="48" rx="8" class="chip"/>
+    <text x="206" y="322" class="chip-title">profile</text>
+    <text x="206" y="339" class="chip-sub">saved sessions</text>
+    <rect x="340" y="302" width="138" height="48" rx="8" class="chip"/>
+    <text x="352" y="322" class="chip-title">settings</text>
+    <text x="352" y="339" class="chip-sub">fonts, theme</text>
+    <rect x="486" y="302" width="138" height="48" rx="8" class="chip"/>
+    <text x="498" y="322" class="chip-title">macros</text>
+    <text x="498" y="339" class="chip-sub">macro dialogs</text>
+  </g>
+
+  <line x1="336" y1="362" x2="336" y2="386" class="link" marker-end="url(#arrow)"/>
+
+  <!-- parley-core -->
+  <rect x="32" y="388" width="608" height="192" rx="10" fill="#fff8e6" stroke="#e0b44c"/>
+  <text x="48" y="414" class="crate-title">parley-core</text>
+  <text x="152" y="414" class="crate-sub">the TN5250 engine: sans-I/O, no UI code, tested byte for byte</text>
+  <g>
+    <rect x="48" y="428" width="138" height="48" rx="8" class="chip"/>
+    <text x="60" y="448" class="chip-title">telnet</text>
+    <text x="60" y="465" class="chip-sub">RFC 1205 / 2877</text>
+    <rect x="194" y="428" width="138" height="48" rx="8" class="chip"/>
+    <text x="206" y="448" class="chip-title">record</text>
+    <text x="206" y="465" class="chip-sub">5250 record header</text>
+    <rect x="340" y="428" width="138" height="48" rx="8" class="chip"/>
+    <text x="352" y="448" class="chip-title">session</text>
+    <text x="352" y="465" class="chip-sub">data stream, keys</text>
+    <rect x="486" y="428" width="138" height="48" rx="8" class="chip"/>
+    <text x="498" y="448" class="chip-title">screen</text>
+    <text x="498" y="465" class="chip-sub">buffer, fields</text>
+
+    <rect x="48" y="484" width="138" height="48" rx="8" class="chip"/>
+    <text x="60" y="504" class="chip-title">ebcdic</text>
+    <text x="60" y="521" class="chip-sub">CCSID 37, 277, 1140…</text>
+    <rect x="194" y="484" width="138" height="48" rx="8" class="chip"/>
+    <text x="206" y="504" class="chip-title">signon</text>
+    <text x="206" y="521" class="chip-sub">RFC 4777 substitutes</text>
+    <rect x="340" y="484" width="138" height="48" rx="8" class="chip"/>
+    <text x="352" y="504" class="chip-title">macros</text>
+    <text x="352" y="521" class="chip-sub">steps, text format</text>
+    <rect x="486" y="484" width="138" height="48" rx="8" class="chip"/>
+    <text x="498" y="504" class="chip-title">update</text>
+    <text x="498" y="521" class="chip-sub">latest release</text>
+
+    <rect x="48" y="540" width="576" height="30" rx="8" class="chip"/>
+    <text x="60" y="560" class="chip-title">net</text>
+    <text x="96" y="560" class="chip-sub">runs a Session over TCP or TLS (rustls) on its own thread</text>
+  </g>
+
+  <!-- external systems -->
+  <rect x="700" y="72" width="228" height="48" rx="8" class="ext"/>
+  <text x="714" y="92" class="ext-title">OS keychain</text>
+  <text x="714" y="109" class="ext-sub">Keychain, Credential Mgr, Secret Svc</text>
+
+  <rect x="700" y="128" width="228" height="48" rx="8" class="ext"/>
+  <text x="714" y="148" class="ext-title">Macro folder</text>
+  <text x="714" y="165" class="ext-sub">one &lt;name&gt;.macro text file each</text>
+
+  <rect x="700" y="482" width="228" height="48" rx="8" class="ext"/>
+  <text x="714" y="502" class="ext-title">GitHub releases API</text>
+  <text x="714" y="519" class="ext-sub">is a newer version out? (D13)</text>
+
+  <rect x="700" y="538" width="228" height="48" rx="8" fill="#fff1f0" stroke="#d1242f" stroke-dasharray="5 4"/>
+  <text x="714" y="558" class="ext-title">IBM i host</text>
+  <text x="714" y="575" class="ext-sub">telnet 23 · TLS 992</text>
+
+  <line x1="640" y1="96" x2="698" y2="96" class="link" marker-end="url(#arrow)"/>
+  <line x1="640" y1="152" x2="698" y2="152" class="link" marker-end="url(#arrow)"/>
+  <line x1="624" y1="508" x2="698" y2="508" class="link" marker-end="url(#arrow)"/>
+  <line x1="624" y1="558" x2="698" y2="558" class="link" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+
+</svg>
