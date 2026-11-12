@@ -25,14 +25,17 @@ pub enum Action {
     Key(Key),
 }
 
+/// The app's icon and name, then the menus; Help on the right.
 pub fn menu_bar(
     ui: &mut Ui,
     connected: bool,
     shortcuts_shown: bool,
     profiles: &[Profile],
+    logo: Option<&egui::TextureHandle>,
 ) -> Option<Action> {
     let mut action = None;
     MenuBar::new().ui(ui, |ui| {
+        brand(ui, logo);
         ui.menu_button("File", |ui| {
             if ui.button("New session…").clicked() {
                 action = Some(Action::NewSession);
@@ -84,18 +87,69 @@ pub fn menu_bar(
                 action = Some(Action::Settings);
             }
         });
-        ui.menu_button("Help", |ui| {
-            if ui.button("Keyboard shortcuts").clicked() {
-                action = Some(Action::ToggleShortcuts);
-            }
-            ui.separator();
-            ui.add_enabled(
-                false,
-                Button::new(format!("Parley {}", env!("CARGO_PKG_VERSION"))),
-            );
+        theme::button_row(ui, |ui| {
+            ui.menu_button("Help", |ui| {
+                if ui.button("Keyboard shortcuts").clicked() {
+                    action = Some(Action::ToggleShortcuts);
+                }
+                ui.separator();
+                ui.add_enabled(
+                    false,
+                    Button::new(format!("Parley {}", env!("CARGO_PKG_VERSION"))),
+                );
+            });
         });
     });
     action
+}
+
+/// The app icon for the menu bar: the decoded image until the first frame makes it a texture.
+#[derive(Default)]
+pub struct Logo {
+    image: Option<egui::ColorImage>,
+    texture: Option<egui::TextureHandle>,
+}
+
+impl std::fmt::Debug for Logo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.texture.is_some() || self.image.is_some() {
+            "Logo"
+        } else {
+            "Logo(none)"
+        })
+    }
+}
+
+impl Logo {
+    pub fn new(image: egui::ColorImage) -> Self {
+        Self {
+            image: Some(image),
+            texture: None,
+        }
+    }
+
+    /// The icon as a texture, made on first use.
+    pub fn texture(&mut self, ctx: &egui::Context) -> Option<&egui::TextureHandle> {
+        if let Some(image) = self.image.take() {
+            self.texture = Some(ctx.load_texture("logo", image, egui::TextureOptions::LINEAR));
+        }
+        self.texture.as_ref()
+    }
+}
+
+/// The app's icon and name, as Tortuga shows its own at the start of its top bar.
+fn brand(ui: &mut Ui, logo: Option<&egui::TextureHandle>) {
+    if let Some(logo) = logo {
+        ui.add(
+            egui::Image::new(logo)
+                .fit_to_exact_size(egui::vec2(18.0, 18.0))
+                .alt_text("Parley"),
+        );
+    }
+    ui.label(theme::semibold("Parley").size(15.0));
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(2.0);
 }
 
 /// 5250 keys a PC keyboard lacks, and the common actions, as buttons.

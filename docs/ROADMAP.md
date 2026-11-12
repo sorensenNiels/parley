@@ -46,7 +46,7 @@ Known gaps are IDEA-1..10.
 
 Several named sessions with their own settings, a session dialog, passwords in the keychain, auto sign-on (typed or
 bypassed per RFC 4777) and keep-alive: R-UI-5, R-NET-4, R-NET-5. A roomier look and a settings dialog with the terminal
-font: R-UI-6. Close buttons on popups: R-UI-7. Settings in pages: R-UI-8. Tortuga's look: R-UI-9.
+font: R-UI-6. Close buttons on popups: R-UI-7. Settings in pages: R-UI-8. Tortuga's look: R-UI-9. App name in the menu bar, Help on the right: R-UI-10.
 
 ### Later (unordered, to be planned)
 
@@ -78,6 +78,7 @@ Open requirements, in the order they are planned. Areas: `NET` connection and te
 | R-UI-7 | Every popup and side panel has a close button (×) at the top right of its title row (2026-11-12): the session dialog (closes without saving, as Cancel), Settings (as Cancel: the old settings come back), the exit question (as Cancel) and the keyboard shortcuts panel (hides it). Screen readers name it "Close". | 2 |
 | R-UI-8 | The settings dialog in pages (2026-11-12): a list of groups on the left (Appearance, Terminal; new settings add a group or go into one), the chosen page on the right with its title and a one-line description. The dialog keeps one size whichever page is shown. "Restore defaults" resets only the page shown. | 2 |
 | R-UI-9 | Tortuga's look (2026-11-12, D12): `theme.rs` ported from Tortuga: Inter (Regular, SemiBold for headings) and JetBrains Mono, the same light and dark palette (teal accent), text sizes, spacing, corner radii and shadows, thin floating scroll bars; the menu bar, toolbar and status bar in the chrome colour; filled primary (Connect, Save, Enter, Exit) and danger (Delete) buttons; switches for on/off options and segmented choices; dialogs with Tortuga's frame and Cancel/confirm row; the settings dialog laid out as Tortuga's (pages under section headings, groups of rows on cards); a Density setting (Comfortable / Compact). The 5250 screen keeps its own colours. | 2 |
+| R-UI-10 | The menu bar starts with the app icon (the launcher's PNG, 18 px) and "Parley" in SemiBold, then a separator and File, Edit, View, Tools; Help sits at the right edge (2026-11-12). As Tortuga shows its own name at the start of its top bar. | 2 |
 | R-NET-4 | Auto sign-on (2026-11-12). *Screen*: on the first screen whose first two input fields are a user field and a non-display field, type the user and password and press Enter, once per connection. *Bypass*: answer the host's NEW-ENVIRON SEND with `VAR USER`, `USERVAR IBMRSEED` (a random client seed) and `USERVAR IBMSUBSPW` (the password substitute) per RFC 4777 section 5, DES (5.1) or SHA-1 (5.2) as the session's password-encryption setting says (QPWDLVL 0–1 or 2–3); the host needs QRMTSIGN `*VERIFY` or `*SAMEPRF`. Only when the host sends its seed: the password never goes in clear text. Checked against the RFC's test vectors and its example negotiation, byte for byte. | 2 |
 | R-NET-5 | Keep-alive (2026-11-12): a session with it on sends telnet NOP (IAC X'F1') after 60 s without sending anything, so firewalls keep an idle connection. | 2 |
 
@@ -122,4 +123,4 @@ Open requirements, in the order they are planned. Areas: `NET` connection and te
   with how it was verified in [FEATURES.md](FEATURES.md).
 - A choice that future work must respect becomes a decision in §7.
 
-Next free IDs (removed rows keep their numbers): `R-P-5` · `R-NET-6` · `R-DS-5` · `R-EBC-2` · `R-KEY-2` · `R-UI-10` · `R-NF-2` · `IDEA-13` · `D13`.
+Next free IDs (removed rows keep their numbers): `R-P-5` · `R-NET-6` · `R-DS-5` · `R-EBC-2` · `R-KEY-2` · `R-UI-11` · `R-NF-2` · `IDEA-13` · `D13`.

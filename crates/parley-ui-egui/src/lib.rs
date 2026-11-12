@@ -50,6 +50,7 @@ pub struct ParleyUi {
     applied: Option<Settings>,
     settings_dialog: Option<settings::Dialog>,
     keymap: Keymap,
+    logo: menu::Logo,
     /// Give the terminal the keyboard focus on the next frame.
     focus_terminal: bool,
     show_shortcuts: bool,
@@ -81,11 +82,17 @@ impl ParleyUi {
             applied: None,
             settings_dialog: None,
             keymap: Keymap::default(),
+            logo: menu::Logo::default(),
             focus_terminal: false,
             show_shortcuts: false,
             asking_to_exit: false,
             exit_confirmed: false,
         }
+    }
+
+    /// The app icon to show before the name in the menu bar (the launcher has it as a PNG).
+    pub fn set_logo(&mut self, image: egui::ColorImage) {
+        self.logo = menu::Logo::new(image);
     }
 
     /// The settings, for the launcher to keep.
@@ -192,6 +199,7 @@ impl ParleyUi {
                 connected,
                 self.show_shortcuts,
                 &self.profiles,
+                self.logo.texture(ui.ctx()),
             ));
         });
         Panel::top("toolbar").frame(tool_frame).show(ui, |ui| {
@@ -630,6 +638,32 @@ mod tests {
             }
         });
         harness.run();
+    }
+
+    #[test]
+    fn the_menu_bar_starts_with_the_app_and_ends_with_help() {
+        // R-UI-10
+        let mut app = ParleyUi::default();
+        app.set_logo(egui::ColorImage::filled([4, 4], egui::Color32::WHITE));
+        let harness = Harness::builder()
+            .with_size(egui::vec2(1000.0, 800.0))
+            .build_ui_state(|ui, app: &mut ParleyUi| app.ui(ui), app);
+        assert!(
+            harness.query_all_by_label("Parley").count() >= 1,
+            "the name"
+        );
+        let file = harness.get_by_label("File").rect();
+        let tools = harness.get_by_label("Tools").rect();
+        let help = harness
+            .get_all_by_label("Help")
+            .map(|n| n.rect())
+            .find(|r| (r.center().y - file.center().y).abs() < 1.0)
+            .expect("Help in the menu bar");
+        assert!(
+            help.left() > tools.right() + 400.0,
+            "Help on the right: {help:?}"
+        );
+        assert!(help.right() > 950.0, "at the edge: {help:?}");
     }
 
     #[test]

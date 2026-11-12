@@ -74,6 +74,13 @@ pub fn run() -> eframe::Result {
             if let Some(settings) = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)) {
                 ui.set_settings(settings);
             }
+            match eframe::icon_data::from_png_bytes(include_bytes!("../icons/64.png")) {
+                Ok(icon) => ui.set_logo(egui::ColorImage::from_rgba_unmultiplied(
+                    [icon.width as usize, icon.height as usize],
+                    &icon.rgba,
+                )),
+                Err(e) => eprintln!("parley: could not load the menu bar icon: {e}"),
+            }
             let connect_on_start = match args.host {
                 Some((host, port)) => Some(command_line_profile(&ui, host, port, args.tls)),
                 None => ui.startup_profile().cloned(),
