@@ -1,5 +1,5 @@
-//! Settings (R-UI-6, R-UI-8, R-UI-11): theme, text size, density, the terminal font and
-//! looking for new versions, with what this build is on the About page, in a dialog
+//! Settings (R-UI-6, R-UI-8, R-UI-11, R-ADD-1): theme, text size, density, the terminal font,
+//! add-ons and looking for new versions, with what this build is on the About page, in a dialog
 //! from Tools ▸ Settings… laid out as Tortuga's (D12): pages listed on the left, and on the
 //! right groups of rows, each a name with a short line about it and the control beside it.
 //! Changes show at once; Cancel puts the old ones back.
@@ -7,6 +7,7 @@
 use egui::{Align, ComboBox, CornerRadius, Frame, Id, Layout, Margin, RichText, Stroke, Ui, vec2};
 use serde::{Deserialize, Serialize};
 
+use crate::addons::{AddOn, AddOnSettings};
 use crate::fonts::{self, Installed};
 use crate::theme::{self, Density};
 use crate::updates::UpdateStatus;
@@ -37,6 +38,8 @@ pub struct Settings {
     pub terminal_font: String,
     /// Look for a new version when Parley starts (R-UI-11).
     pub check_for_updates: bool,
+    /// Which add-ons are on (R-ADD-1).
+    pub addons: AddOnSettings,
 }
 
 impl Default for Settings {
@@ -47,6 +50,7 @@ impl Default for Settings {
             density: Density::Comfortable,
             terminal_font: fonts::DEFAULT_TERMINAL_FONT.to_owned(),
             check_for_updates: true,
+            addons: AddOnSettings::default(),
         }
     }
 }
@@ -82,6 +86,7 @@ pub fn apply(ctx: &egui::Context, old: Option<&Settings>, new: &Settings) -> Opt
 pub enum Page {
     Appearance,
     Terminal,
+    AddOns,
     About,
 }
 
@@ -90,6 +95,7 @@ impl Page {
         match self {
             Self::Appearance => "Appearance",
             Self::Terminal => "Terminal",
+            Self::AddOns => "Add-ons",
             Self::About => "About",
         }
     }
@@ -104,6 +110,7 @@ impl Page {
                 settings.density = defaults.density;
             }
             Self::Terminal => settings.terminal_font = defaults.terminal_font,
+            Self::AddOns => settings.addons = defaults.addons,
             Self::About => settings.check_for_updates = defaults.check_for_updates,
         }
     }
@@ -112,7 +119,7 @@ impl Page {
 /// The pages under their headings, in the order the list shows them.
 const SECTIONS: [(&str, &[Page]); 2] = [
     ("General", &[Page::Appearance, Page::Terminal]),
-    ("App", &[Page::About]),
+    ("App", &[Page::AddOns, Page::About]),
 ];
 
 /// Where the source and the issues are.
@@ -225,6 +232,7 @@ impl Dialog {
         match self.page {
             Page::Appearance => appearance_page(ui, settings),
             Page::Terminal => self.terminal_page(ui, settings),
+            Page::AddOns => addons_page(ui, &mut settings.addons),
             Page::About => self.about_page(ui, settings, updates),
         }
     }
@@ -236,7 +244,7 @@ impl Dialog {
         ui.label(theme::semibold("Parley").size(18.0));
         ui.label(RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION"))).color(p.muted));
         ui.add_space(14.0);
-        group(ui, "About", |rows| {
+        group(ui, "About", None, |rows| {
             rows.fact("Built for", |ui| {
                 ui.label(format!(
                     "{} {}",
@@ -265,7 +273,7 @@ impl Dialog {
             theme::hint(ui, "This build doesn't look for new versions.");
             return;
         }
-        group(ui, "Updates", |rows| {
+        group(ui, "Updates", None, |rows| {
             rows.switch(
                 "Look for a new version when Parley starts",
                 Some("Asks GitHub for the latest release; sends nothing else."),
@@ -322,7 +330,7 @@ impl Dialog {
 
     fn terminal_page(&self, ui: &mut Ui, settings: &mut Settings) {
         let installed = self.installed.get();
-        group(ui, "Font", |rows| {
+        group(ui, "Font", None, |rows| {
             rows.row(
                 "Font",
                 Some("A bundled font, or a monospace font on this computer."),
@@ -402,10 +410,20 @@ fn nav_item(ui: &mut Ui, page: &mut Page, value: Page) {
     }
 }
 
-/// A titled group of rows on a card.
-fn group<R>(ui: &mut Ui, title: &str, add: impl FnOnce(&mut Rows<'_>) -> R) -> R {
+/// A titled group of rows on a card; `note` is a short line under the title and a longer
+/// one on hover, as Tortuga's.
+fn group<R>(
+    ui: &mut Ui,
+    title: &str,
+    note: Option<(&str, &str)>,
+    add: impl FnOnce(&mut Rows<'_>) -> R,
+) -> R {
     let p = theme::palette(ui);
     theme::section_label(ui, title);
+    if let Some((short, long)) = note {
+        ui.add(egui::Label::new(RichText::new(short).small().color(p.muted)).wrap())
+            .on_hover_text(long);
+    }
     ui.add_space(4.0);
     let inner = Frame::new()
         .fill(p.bg)
@@ -517,9 +535,25 @@ impl Rows<'_> {
     }
 }
 
+/// A switch per add-on (R-ADD-1), as Tortuga's Settings → Add-ons.
+fn addons_page(ui: &mut Ui, addons: &mut AddOnSettings) {
+    let note = (
+        "An add-on that is off is not loaded. Changes take effect when you save.",
+        "Add-ons are parts of Parley not everyone needs. Turning one on adds its menu items; \
+         turning it off removes them and stops what it is doing.",
+    );
+    group(ui, "Add-ons", Some(note), |rows| {
+        for addon in AddOn::ALL {
+            let mut on = addons.enabled(addon);
+            rows.switch(addon.name(), Some(addon.about()), &mut on);
+            addons.set_enabled(addon, on);
+        }
+    });
+}
+
 /// Theme, text size and density.
 fn appearance_page(ui: &mut Ui, settings: &mut Settings) {
-    group(ui, "Theme", |rows| {
+    group(ui, "Theme", None, |rows| {
         rows.row("Theme", None, |ui, _| {
             theme::segmented(
                 ui,
@@ -532,7 +566,7 @@ fn appearance_page(ui: &mut Ui, settings: &mut Settings) {
             );
         });
     });
-    group(ui, "Text", |rows| {
+    group(ui, "Text", None, |rows| {
         rows.row(
             "Text size",
             Some("Everything, the screen included."),

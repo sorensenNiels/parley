@@ -107,6 +107,21 @@ impl Macros {
         macros
     }
 
+    /// The macros in `store`, not read yet: the Macros add-on is off (R-ADD-2).
+    pub fn unloaded(store: Box<dyn MacroStore>) -> Self {
+        Self {
+            store,
+            list: Vec::new(),
+            problem: None,
+        }
+    }
+
+    /// Forgets the macros read, as when the Macros add-on is turned off (R-ADD-2).
+    pub fn unload(&mut self) {
+        self.list.clear();
+        self.problem = None;
+    }
+
     pub fn reload(&mut self) {
         match self.store.list() {
             Ok(list) => {

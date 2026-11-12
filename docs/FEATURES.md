@@ -25,6 +25,14 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
   used to wait for a screen past sign-on that it brings itself). **Left:** the owner records and runs a macro after
   signing on (Tools ▸ Record macro, Run macro, Run macro after auto sign-on, Macros…), then move R-KEY-3 and R-KEY-4
   to REQUIREMENTS.md.
+- **R-ADD-1, R-ADD-2** (2026-11-12): Settings ▸ Add-ons, with Macros as the first add-on (on by default), built;
+  D15. **Automated** (`make test`): each add-on starts with its default, only a change from it is kept, unknown ids
+  still load (`addons.rs`); in kittest the Add-ons page turning Macros off on Save, Cancel leaving it as it was, the
+  dialog keeping its place; while off no macro items in Tools, no Run macro in the session dialog, the macro folder not
+  read (and read again when turned on), a session's Run macro kept but not run on connect; turned off while connected,
+  a recording asks for its name and a running macro stops (against a local port that never answers). **Left:** the
+  owner checks the page and turning Macros off and on in the running app, then move R-ADD-1 and R-ADD-2 to
+  REQUIREMENTS.md.
 - **R-NET-4 on Linux** (2026-11-12): auto sign-on is verified on Windows and macOS, but not yet on a Linux desktop.
   Under WSL2 it stops with "no keychain is available": WSL runs no Secret Service, so there is no saved password (D11).
   **Left:** the owner checks auto sign-on, by screen and bypassed, on a Linux desktop with GNOME Keyring or KDE Wallet.

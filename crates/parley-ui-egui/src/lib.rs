@@ -3,6 +3,7 @@
 //! No platform code lives here: the launcher (`parley-app`) opens the window and hands the UI
 //! an [`egui::Ui`] to draw in each frame.
 
+mod addons;
 mod connect;
 mod dialog;
 mod fonts;
@@ -20,6 +21,7 @@ mod updates;
 use egui::{CentralPanel, Frame, Margin, Panel, Ui, ViewportCommand};
 use parley_core::net::{Connection, LinkState};
 
+pub use addons::{AddOn, AddOnSettings};
 use keymap::Keymap;
 use macros::Macros;
 pub use macros::{MacroStore, NoMacroStore, StoredMacro};
@@ -54,6 +56,8 @@ pub struct ParleyUi {
     /// The settings in effect; `None` until the first frame puts them into effect.
     applied: Option<Settings>,
     settings_dialog: Option<settings::Dialog>,
+    /// The add-ons in effect: the settings' add-ons as last saved (R-ADD-1).
+    addons: AddOnSettings,
     keymap: Keymap,
     logo: menu::Logo,
     updates: updates::Updates,
@@ -93,6 +97,7 @@ impl ParleyUi {
             settings: Settings::default(),
             applied: None,
             settings_dialog: None,
+            addons: AddOnSettings::default(),
             keymap: Keymap::default(),
             logo: menu::Logo::default(),
             updates: updates::Updates::default(),
@@ -107,9 +112,14 @@ impl ParleyUi {
         }
     }
 
-    /// Where macros are kept (R-KEY-3). Without one, a recording cannot be saved.
+    /// Where macros are kept (R-KEY-3). Without one, a recording cannot be saved. The folder
+    /// is read only while the Macros add-on is on (R-ADD-2), so set the settings first.
     pub fn set_macro_store(&mut self, store: Box<dyn MacroStore>) {
-        self.macros = Macros::new(store);
+        self.macros = if self.addon_on(AddOn::Macros) {
+            Macros::new(store)
+        } else {
+            Macros::unloaded(store)
+        };
     }
 
     /// The app icon to show before the name in the menu bar (the launcher has it as a PNG).
@@ -128,9 +138,27 @@ impl ParleyUi {
         &self.settings
     }
 
-    /// Replaces the settings; they take effect on the next frame.
+    /// Replaces the settings; they take effect on the next frame, the add-ons at once.
     pub fn set_settings(&mut self, settings: Settings) {
+        let addons = settings.addons.clone();
         self.settings = settings;
+        self.set_addons(addons);
+    }
+
+    /// Whether `addon` is on (R-ADD-1): the one question the UI asks about an add-on.
+    fn addon_on(&self, addon: AddOn) -> bool {
+        self.addons.enabled(addon)
+    }
+
+    /// Puts `addons` into effect: an add-on turned on is loaded, one turned off is unloaded.
+    fn set_addons(&mut self, addons: AddOnSettings) {
+        let was = self.addon_on(AddOn::Macros);
+        self.addons = addons;
+        match (was, self.addon_on(AddOn::Macros)) {
+            (false, true) => self.macros.reload(),
+            (true, false) => self.macros_off(),
+            (true, true) | (false, false) => {}
+        }
     }
 
     /// The saved sessions, for the launcher to keep.
@@ -173,7 +201,7 @@ impl ParleyUi {
         }
         let ctx = ctx.clone();
         let connection = Connection::open(config, move || ctx.request_repaint());
-        if !profile.run_macro.is_empty() {
+        if self.addon_on(AddOn::Macros) && !profile.run_macro.is_empty() {
             self.play(&mut connection.session(), &profile.run_macro, true);
         }
         self.connection = Some(connection);
@@ -247,6 +275,7 @@ impl ParleyUi {
                     link.as_ref(),
                     self.current.as_ref().is_some_and(|p| p.config.tls),
                     self.closed.as_deref().or(self.warning.as_deref()),
+                    self.addon_on(AddOn::Macros),
                 );
             });
         if self.show_shortcuts {
@@ -315,6 +344,7 @@ impl ParleyUi {
             state: session.map(parley_core::Session::macro_state),
             names: &macro_names,
         };
+        let macros_on = self.addon_on(AddOn::Macros);
         Panel::top("menu_bar")
             .frame(frame)
             .show(ui, |ui| {
@@ -325,7 +355,7 @@ impl ParleyUi {
                     &self.profiles,
                     self.logo.texture(ui.ctx()),
                     self.updates.available(),
-                    &macro_menu,
+                    macros_on.then_some(&macro_menu),
                 )
             })
             .inner
@@ -472,7 +502,10 @@ impl ParleyUi {
             self.updates.start(ctx, updates::Check::Now);
         }
         match closed {
-            Some(settings::Closed::Keep) => self.settings_dialog = None,
+            Some(settings::Closed::Keep) => {
+                self.settings_dialog = None;
+                self.set_addons(self.settings.addons.clone());
+            }
             Some(settings::Closed::Revert) => {
                 self.settings = dialog.original().clone();
                 self.settings_dialog = None;
@@ -482,6 +515,7 @@ impl ParleyUi {
     }
 
     fn show_editor(&mut self, ctx: &egui::Context) {
+        let macros_on = self.addon_on(AddOn::Macros);
         let Some(editor) = &mut self.editor else {
             return;
         };
@@ -491,7 +525,7 @@ impl ParleyUi {
             &mut self.profiles,
             self.keychain.as_ref(),
             connected,
-            &self.macros,
+            macros_on.then_some(&self.macros),
         );
         if let Some((old, new)) = editor.take_renamed()
             && let Err(e) = self.macros.rename_session(&old, &new)
@@ -524,6 +558,25 @@ impl ParleyUi {
             Some(Err(e)) => self.warning = Some(format!("Macro \"{name}\" cannot be run: {e}")),
             None => self.warning = Some(format!("There is no macro called \"{name}\".")),
         }
+    }
+
+    /// The Macros add-on was turned off (R-ADD-2): stops a running macro, ends a recording
+    /// (asking for its name, so nothing is lost), closes the Macros dialog and forgets the list.
+    fn macros_off(&mut self) {
+        self.macros.unload();
+        self.macro_manager = None;
+        self.macro_password = None;
+        let connection = self.connection.take();
+        if let Some(connection) = &connection {
+            let mut session = connection.session();
+            if session.playing().is_some() {
+                // Reset stops a running macro without reaching the host, as Stop macro does.
+                session.key(parley_core::Key::Reset);
+            }
+            self.end_recording(&mut session);
+            drop(session);
+        }
+        self.connection = connection;
     }
 
     /// Stops recording, if the session was, and asks for a name for the recording.
@@ -1298,7 +1351,14 @@ mod tests {
         // R-UI-2
         let session = test_support::waiting_session();
         let harness = Harness::new_ui(move |ui| {
-            status::status_bar(ui, Some(&session), Some(&LinkState::Connected), true, None);
+            status::status_bar(
+                ui,
+                Some(&session),
+                Some(&LinkState::Connected),
+                true,
+                None,
+                true,
+            );
         });
         for text in ["Ready", "Online", "TLS", "2,2"] {
             harness.get_by_label(text);
@@ -1359,5 +1419,164 @@ mod tests {
         harness.get_by_label("Apply").click();
         harness.run();
         assert_eq!(store.0.borrow()["m"].session.as_deref(), Some("Old 2"));
+    }
+
+    /// A session connected to a local port that never answers: enough for a live session.
+    /// Keep the listener until the test ends.
+    fn connect_locally(
+        harness: &mut Harness<'static, ParleyUi>,
+        run_macro: &str,
+    ) -> std::net::TcpListener {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a local port");
+        let mut local = profile("Local", "127.0.0.1");
+        local.config.port = listener.local_addr().expect("its address").port();
+        local.config.tls = false;
+        local.run_macro = run_macro.to_owned();
+        let ctx = harness.ctx.clone();
+        harness.state_mut().connect(&ctx, local);
+        harness.run();
+        listener
+    }
+
+    fn macros_off() -> Settings {
+        let mut settings = Settings::default();
+        settings.addons.set_enabled(AddOn::Macros, false);
+        settings
+    }
+
+    /// Settings ▸ Add-ons, then the Macros switch.
+    fn switch_macros_in_settings(harness: &mut Harness<'static, ParleyUi>) {
+        harness.get_by_label("Tools").click();
+        harness.run();
+        harness.get_by_label("Settings…").click();
+        harness.run();
+        harness.get_by_label("Add-ons").click();
+        harness.run();
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::CheckBox, "Macros")
+            .click();
+        harness.run();
+    }
+
+    #[test]
+    fn the_add_ons_page_turns_macros_off_when_saved_r_add_1() {
+        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        assert!(harness.state().addon_on(AddOn::Macros), "on by default");
+        switch_macros_in_settings(&mut harness);
+        harness.get_by_label(AddOn::Macros.about());
+        assert!(
+            harness.state().addon_on(AddOn::Macros),
+            "nothing changes before Save"
+        );
+        harness.get_by_label("Save").click();
+        harness.run();
+        assert!(!harness.state().addon_on(AddOn::Macros));
+        assert!(
+            harness
+                .state()
+                .settings()
+                .addons
+                .disabled
+                .contains("macros")
+        );
+    }
+
+    #[test]
+    fn cancel_leaves_the_add_ons_as_they_were_r_add_1() {
+        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        switch_macros_in_settings(&mut harness);
+        harness.get_by_label("Cancel").click();
+        harness.run();
+        assert!(harness.state().addon_on(AddOn::Macros));
+        assert_eq!(harness.state().settings(), &Settings::default());
+    }
+
+    #[test]
+    fn the_add_ons_page_keeps_the_dialog_in_place_r_add_1() {
+        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        switch_macros_in_settings(&mut harness);
+        let before = harness.get_by_label("Save").rect();
+        harness.run_steps(5);
+        assert_eq!(harness.get_by_label("Save").rect(), before);
+    }
+
+    #[test]
+    fn while_macros_are_off_nothing_of_them_is_in_the_app_r_add_2() {
+        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        harness.state_mut().set_settings(macros_off());
+        harness
+            .state_mut()
+            .set_macro_store(Box::new(test_support::macros_with("Jobs")));
+        assert!(harness.state().macros.list().is_empty(), "folder not read");
+        harness.run();
+        harness.get_by_label("Tools").click();
+        harness.run();
+        harness.get_by_label("Settings…");
+        for item in ["Record macro", "Run macro", "Macros…"] {
+            assert!(harness.query_by_label(item).is_none(), "{item} in Tools");
+        }
+        harness.get_by_label("Tools").click();
+        harness.run();
+        harness.get_by_label("New session…").click();
+        harness.run();
+        assert!(harness.query_by_label("Run macro").is_none());
+
+        // Turned on again, the folder is read.
+        harness.state_mut().set_settings(Settings::default());
+        assert_eq!(harness.state().macro_names(), ["Jobs"]);
+    }
+
+    #[test]
+    fn while_macros_are_off_a_session_s_run_macro_is_kept_but_not_run_r_add_2() {
+        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        harness.state_mut().set_settings(macros_off());
+        harness
+            .state_mut()
+            .set_macro_store(Box::new(test_support::macros_with("Jobs")));
+        let _host = connect_locally(&mut harness, "Jobs");
+        let app = harness.state();
+        let connection = app.connection.as_ref().expect("connected");
+        assert_eq!(connection.session().playing(), None);
+        assert_eq!(
+            app.current.as_ref().map(|p| p.run_macro.as_str()),
+            Some("Jobs")
+        );
+    }
+
+    #[test]
+    fn turning_macros_off_asks_for_the_name_of_a_recording_r_add_2() {
+        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let _host = connect_locally(&mut harness, "");
+        let app = harness.state();
+        app.connection
+            .as_ref()
+            .expect("connected")
+            .session()
+            .start_recording();
+        switch_macros_in_settings(&mut harness);
+        harness.get_by_label("Save").click();
+        harness.run();
+        let app = harness.state();
+        let session = app.connection.as_ref().expect("connected").session();
+        assert_eq!(session.macro_state(), parley_core::MacroState::Off);
+        assert!(app.save_macro.is_some(), "the recording is not lost");
+    }
+
+    #[test]
+    fn turning_macros_off_stops_a_running_macro_r_add_2() {
+        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        harness
+            .state_mut()
+            .set_macro_store(Box::new(test_support::macros_with("Jobs")));
+        harness.state_mut().macro_manager = Some(macros::Manager::default());
+        let _host = connect_locally(&mut harness, "Jobs");
+        let playing = |app: &ParleyUi| {
+            let connection = app.connection.as_ref().expect("connected");
+            connection.session().playing().map(str::to_owned)
+        };
+        assert_eq!(playing(harness.state()).as_deref(), Some("Jobs"));
+        harness.state_mut().set_settings(macros_off());
+        assert_eq!(playing(harness.state()), None);
+        assert!(harness.state().macro_manager.is_none());
     }
 }

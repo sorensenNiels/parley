@@ -9,13 +9,15 @@ use parley_core::{KeyboardState, MacroState, Session};
 use crate::theme;
 
 /// `session` and `link` are `None` while there is no connection. `note` is why the last one
-/// ended, or a warning about the open one.
+/// ended, or a warning about the open one. The macro box is there only with `macros` (the
+/// Macros add-on, R-ADD-2).
 pub fn status_bar(
     ui: &mut Ui,
     session: Option<&Session>,
     link: Option<&LinkState>,
     tls: bool,
     note: Option<&str>,
+    macros: bool,
 ) {
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
@@ -37,7 +39,9 @@ pub fn status_bar(
                 .strong(),
         )
         .on_hover_text("Message waiting");
-        macro_segment(ui, session);
+        if macros {
+            macro_segment(ui, session);
+        }
         let insert = session.is_some_and(Session::insert_mode);
         segment(ui, 56.0, RichText::new(if insert { "Insert" } else { "" }));
         let secure = tls && link.is_some();

@@ -29,7 +29,7 @@ modern take on what surrounds the screen: sessions, keyboard mapping, copy and p
 | Phase 0: development environment | Done (2026-11-12): workspace, Makefile, setup scripts, CI, lints, Claude Code setup. |
 | Phase 1: connect and show a screen | Done (2026-11-12): verified on Windows, macOS, Linux and WSL2 (FEATURES.md). |
 | Phase 2: saved sessions and auto sign-on | Done (2026-11-12): verified on Windows, macOS, Linux and WSL2 (FEATURES.md), except auto sign-on on Linux, which waits for a check on a Linux desktop. |
-| Phase 3: keyboard maps and macros | In progress: R-DS-5 done (2026-11-12); R-KEY-3 and R-KEY-4 built, waiting for a check in the running app; then R-NET-6, R-KEY-2. |
+| Phase 3: keyboard maps and macros | In progress: R-DS-5 done (2026-11-12); R-KEY-3 and R-KEY-4 built, waiting for a check in the running app; add-ons, with macros as the first (R-ADD-1, R-ADD-2), built; then R-NET-6, R-KEY-2. |
 
 ## 4. Phases
 
@@ -54,7 +54,8 @@ R-UI-11, R-UI-12.
 
 First two small correctness steps (R-P-2): the points of the data stream built from memory checked against IBM's
 manual (R-DS-5, from IDEA-1) and why a bypass sign-on failed (R-NET-6, from IDEA-12). Then keyboard maps chosen per
-session (R-KEY-2, from IDEA-9) and macros, recorded (R-KEY-3) and run (R-KEY-4), from IDEA-11.
+session (R-KEY-2, from IDEA-9) and macros, recorded (R-KEY-3) and run (R-KEY-4), from IDEA-11. Settings ▸ Add-ons
+(R-ADD-1, D15), with macros as the first add-on (R-ADD-2).
 
 ### Later (unordered, to be planned)
 
@@ -64,7 +65,7 @@ Printer sessions (IDEA-18), SQL against the session's host (IDEA-13); see [IDEAS
 
 Open requirements, in the order they are planned. The done ones are in [REQUIREMENTS.md](REQUIREMENTS.md); new
 ones come from [IDEAS.md](IDEAS.md). Areas: `NET` connection and telnet, `DS` the 5250 data stream,
-`EBC` character sets, `KEY` keyboard, `UI` user interface, `NF` non-functional.
+`EBC` character sets, `KEY` keyboard, `UI` user interface, `ADD` add-ons, `NF` non-functional.
 
 | ID | Requirement | Phase |
 |---|---|---|
@@ -72,6 +73,8 @@ ones come from [IDEAS.md](IDEAS.md). Areas: `NET` connection and telnet, `DS` th
 | R-KEY-2 | **Keyboard maps** (from IDEA-9). Settings ▸ Keyboard lists every 5250 key and Parley action (Enter, Field Exit, Field+/-, Reset, F1–F24, Attention, System Request, Roll, Erase EOF, Insert, Copy, Paste, …) with the PC keys bound to it; select one and press a key to add a binding, remove a binding, "Restore defaults". The map R-KEY-1 defines is the built-in **Default** map, which cannot be changed; the user can copy it under a new name, edit, rename and delete their own maps. A key bound twice in one map is flagged and the new binding wins only after the user confirms. A key egui cannot tell apart (e.g. left and right Ctrl, R-KEY-1) cannot be bound. The session dialog has "Keyboard map" (Default unless chosen); a session whose map was deleted falls back to Default. Maps are saved with the settings. | 3 |
 | R-KEY-3 | **Record a macro** (from IDEA-11). Tools ▸ Record macro starts recording on the connected session; the status bar shows "REC" until Tools ▸ Stop recording, then Parley asks for a name and whether the macro is only for this session (else for all). A macro is the 5250 keys and text typed (not mouse clicks), with a `wait` step after each AID key, Attention and System Request. Keys the session refuses are not recorded, nor the Reset that clears their error. Text typed into a non-display field is never recorded: it becomes one `password` step, which plays the session's saved password (D11) or asks for it. Recording stops when the connection ends or on Disconnect, and the name is asked then. Macros are saved as text files (D14), one per macro, so users can edit and share them; renaming a session moves its macros along. *A key in the keyboard map to start and stop recording comes with R-KEY-2.* | 3 |
 | R-KEY-4 | **Run a macro** (from IDEA-11). Tools ▸ Run macro ▸ lists the macros for all sessions and for this one; the session dialog's "Run macro" (disabled since R-UI-5) runs one at connect: with auto sign-on, from the first unlocked screen that is not a sign-on screen; without it, from the first unlocked screen, so the macro can sign on itself. The status bar shows "⏵ Macro" while one runs. A running macro waits at each `wait` step until the host has answered and unlocked the keyboard (giving up after 30 s with a message; not while waiting for sign-on), stops at an operator error (the error stays on screen), and stops when the user presses Reset or Esc (Attention), chooses Tools ▸ Stop macro, or the connection ends; other keys are ignored while it runs. Tools ▸ Macros… lists the macros to rename or delete, shows their folder (Open folder, Copy path, Read again for files edited by hand). A macro file that cannot be read is listed with the reason (and the line) and cannot be run. *A key in the keyboard map to run a given macro comes with R-KEY-2.* | 3 |
+| R-ADD-1 | **Settings ▸ Add-ons** (D15; as Tortuga's R-ADD-1). A page "Add-ons" of the settings dialog, under App before About, lists every add-on with its name, one line on what it does and a switch. **Each add-on has its own default** (Macros: on). The settings keep only the ids that differ from their default (turned on, or turned off), so an add-on a later version brings starts with its default and an id this version doesn't know still loads. A switch takes effect when the dialog is saved; Cancel and the close button leave the add-ons as they were; Restore defaults on the page puts every add-on back to its default. | 3 |
+| R-ADD-2 | **Macros are an add-on, on by default** (D15). "Macros" in Settings ▸ Add-ons ("Record keystrokes and play them back, also right after sign-on."). While it is off, nothing of it is in the app: the Tools menu has no Record macro, Run macro ▸, Stop macro or Macros…, the status bar has no macro box, the session dialog has no Run macro, a session's Run macro is not run when it connects (the choice is kept for when the add-on is on again), and the macro folder is not read. Turning it off while connected stops a running macro, and ends a recording by asking for its name as Stop recording does, so nothing is lost; the Macros… dialog closes. Macro files stay where they are. *(Changes R-KEY-3, R-KEY-4: their menu items and the session dialog's Run macro exist only while the add-on is on.)* | 3 |
 
 ## 6. Ideas
 
@@ -95,6 +98,7 @@ Ideas that might become requirements later are in [IDEAS.md](IDEAS.md) (`IDEA-n`
 | D13 | How does Parley tell that a new version is available (R-UI-11)? | **As Tortuga (its D63): a check at start-up, on by default, that can be turned off, plus "Check now" in Settings → About**; the source is GitHub's latest published release, asked with `ureq` (blocking, on a thread; rustls with the OS trust store as D6) from `parley_core::update`; the result is a quiet link in the menu bar, never a pop-up (2026-11-12). It is the one connection Parley makes besides the IBM i hosts; it sends nothing but the request. Tests use a fake checker or a local server, never GitHub. | Only a button the user clicks; no check at all. |
 | D10 | Are installers signed? | **Not yet**: macOS and Windows warn on first start (docs/RELEASING.md says how to go on). Signing needs an Apple Developer ID and a Windows certificate. | Sign from the first release. |
 | D14 | How are macros saved (R-KEY-3)? | **One UTF-8 text file per macro**, `<name>.macro` in a `macros` folder beside the settings (eframe's folder for the app id `parley`: `~/.local/share/parley/macros` on Linux, `~/Library/Application Support/parley/macros` on macOS, `%APPDATA%\parley\data\macros` on Windows), behind a `MacroStore` trait so tests use memory (2026-11-12). One step per line: `text "…"`, a key name (`enter`, `f3`, `field-exit`, …), `wait`, `password`, `move ROW COLUMN`; an optional `session "NAME"` line first keeps a macro to one saved session; `#` starts a comment (`parley_core::macros`). Passwords are never in the file. The name is the file name, so names may not hold `/ \ : * ? " < > \|` or start with a dot. | JSON or TOML through serde; all macros inside the settings file. |
+| D15 | How are features not everyone needs added (add-ons)? Changes R-KEY-3, R-KEY-4. | **As Tortuga (its D78): add-ons are built in, each with its own default, turned on or off in Settings ▸ Add-ons, and not loaded while off** (2026-11-12). One `AddOn` enum in `parley-ui-egui/src/addons.rs` is the list the rest of the UI asks ("is this add-on on?"); the settings keep only the ids that differ from each default. Each add-on keeps its code in its own modules (macros: `parley-ui-egui/src/macros.rs`, `parley_core::macros`, `session/playback`). Not a plugin system for third parties. Macros are the first add-on, on by default since they are a main feature of Phase 3 (the owner, 2026-11-12). | Hide features in a Settings page without unloading them; a Cargo feature per add-on (separate builds); plugins loaded at run time. |
 
 ## 8. How to change this roadmap
 
@@ -104,4 +108,4 @@ Ideas that might become requirements later are in [IDEAS.md](IDEAS.md) (`IDEA-n`
 - A choice that future work must respect becomes a decision in §7.
 - An idea is not a plan: it goes in [IDEAS.md](IDEAS.md) until it is picked, then becomes requirements here.
 
-Next free IDs (removed rows keep their numbers): `R-P-5` · `R-NET-7` · `R-DS-6` · `R-EBC-2` · `R-KEY-5` · `R-UI-13` · `R-NF-2` · `D15` (ideas: last line of IDEAS.md).
+Next free IDs (removed rows keep their numbers): `R-P-5` · `R-NET-7` · `R-DS-6` · `R-EBC-2` · `R-KEY-5` · `R-UI-13` · `R-ADD-3` · `R-NF-2` · `D16` (ideas: last line of IDEAS.md).

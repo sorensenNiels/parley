@@ -79,6 +79,7 @@ tested against recorded host traffic.
 | Keyboard | Default map, field rules (numeric only, auto enter, field exit required, …) | R-KEY-1 | Done |
 | | Keyboard maps of the user's own, chosen per session | R-KEY-2 | Planned (Phase 3) |
 | | Record and run macros, saved as text files | R-KEY-3, R-KEY-4 | Built, waiting for a check in the app |
+| Add-ons | Settings ▸ Add-ons turns optional parts on or off; Macros is the first, on by default | R-ADD-1, R-ADD-2 | Built, waiting for a check in the app |
 | Screen and window | Scalable 5250 screen, colours, cursor, copy and paste; status bar; menu and toolbar | R-UI-1, R-UI-2, R-UI-4 | Done |
 | | Saved sessions and the session dialog | R-UI-3, R-UI-5 | Done |
 | | Settings (theme, size, terminal font, density) in pages; Tortuga's look | R-UI-6..10 | Done |

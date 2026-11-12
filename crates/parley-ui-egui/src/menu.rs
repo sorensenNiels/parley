@@ -51,7 +51,7 @@ pub fn menu_bar(
     profiles: &[Profile],
     logo: Option<&egui::TextureHandle>,
     newer: Option<&parley_core::update::Release>,
-    macros: &MacroMenu<'_>,
+    macros: Option<&MacroMenu<'_>>,
 ) -> Option<Action> {
     let mut action = None;
     MenuBar::new().ui(ui, |ui| {
@@ -103,10 +103,13 @@ pub fn menu_bar(
             }
         });
         ui.menu_button("Tools", |ui| {
-            if let Some(chosen) = macro_items(ui, macros) {
-                action = Some(chosen);
+            // Only while the Macros add-on is on (R-ADD-2).
+            if let Some(macros) = macros {
+                if let Some(chosen) = macro_items(ui, macros) {
+                    action = Some(chosen);
+                }
+                ui.separator();
             }
-            ui.separator();
             if ui.button("Settings…").clicked() {
                 action = Some(Action::Settings);
             }

@@ -96,7 +96,7 @@ impl Editor {
         profiles: &mut Vec<Profile>,
         keychain: &dyn Keychain,
         connected: bool,
-        macros: &Macros,
+        macros: Option<&Macros>,
     ) -> Option<Outcome> {
         let title = if self.index.is_some() {
             "Edit session"
@@ -219,8 +219,11 @@ impl Editor {
         }
     }
 
-    fn options(&mut self, ui: &mut Ui, macros: &Macros) {
-        self.run_macro(ui, macros);
+    /// `macros` is `None` while the Macros add-on is off: no Run macro then (R-ADD-2).
+    fn options(&mut self, ui: &mut Ui, macros: Option<&Macros>) {
+        if let Some(macros) = macros {
+            self.run_macro(ui, macros);
+        }
         let profile = &mut self.draft;
         theme::switch_row(ui, "Exit when the session ends", &mut profile.exit_on_close);
         theme::switch_row(ui, "Confirm exit", &mut profile.confirm_exit);
