@@ -10,7 +10,7 @@ use crate::theme;
 
 /// `session` and `link` are `None` while there is no connection. `note` is why the last one
 /// ended, or a warning about the open one. The macro box is there only with `macros` (the
-/// Macros add-on, R-ADD-2).
+/// Macros add-on, R-ADD-2). Returns true when its Stop button was clicked (R-KEY-6).
 pub fn status_bar(
     ui: &mut Ui,
     session: Option<&Session>,
@@ -18,7 +18,7 @@ pub fn status_bar(
     tls: bool,
     note: Option<&str>,
     macros: bool,
-) {
+) -> bool {
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         let cursor = session.map(|s| {
@@ -39,9 +39,7 @@ pub fn status_bar(
                 .strong(),
         )
         .on_hover_text("Message waiting");
-        if macros {
-            macro_segment(ui, session);
-        }
+        let stop = macros && macro_segment(ui, session);
         let insert = session.is_some_and(Session::insert_mode);
         segment(ui, 56.0, RichText::new(if insert { "Insert" } else { "" }));
         let secure = tls && link.is_some();
@@ -57,7 +55,9 @@ pub fn status_bar(
         let message = message(ui, session, link, note);
         let rest = (ui.available_width() - 20.0).max(40.0);
         segment(ui, rest, message);
-    });
+        stop
+    })
+    .inner
 }
 
 /// The first box: what the keyboard is doing, or why the last connection ended.
@@ -89,37 +89,59 @@ fn message(
     }
 }
 
-/// "REC" while recording a macro, "⏵ Macro" while one runs (R-KEY-3, R-KEY-4).
-fn macro_segment(ui: &mut Ui, session: Option<&Session>) {
+/// The macro box's width: room for "REC" and Stop, always, so the boxes beside it don't move
+/// when a recording starts.
+const MACRO_WIDTH: f32 = 104.0;
+
+/// "REC" and a Stop button while recording a macro (R-KEY-3, R-KEY-6), "⏵ Macro" while one
+/// runs (R-KEY-4). Returns true when Stop was clicked.
+fn macro_segment(ui: &mut Ui, session: Option<&Session>) -> bool {
     let p = theme::palette(ui);
     let (text, hover) = match session.map(|s| (s.macro_state(), s.playing())) {
-        Some((MacroState::Recording, _)) => (
-            RichText::new("REC").color(p.fail).strong(),
-            "Recording a macro: Stop recording is in the Tools menu".to_owned(),
-        ),
+        Some((MacroState::Recording, _)) => return recording_segment(ui),
         Some((MacroState::Playing | MacroState::NeedsPassword, name)) => (
             RichText::new("⏵ Macro").color(p.ok),
             format!("Running \"{}\": Reset stops it", name.unwrap_or_default()),
         ),
         Some((MacroState::Off, _)) | None => (RichText::new(""), String::new()),
     };
-    let response = segment(ui, 64.0, text);
+    let response = segment(ui, MACRO_WIDTH, text);
     if !hover.is_empty() {
         response.on_hover_text(hover);
     }
+    false
+}
+
+/// "REC" and a small Stop button, which ends the recording as Tools ▸ Stop recording does.
+fn recording_segment(ui: &mut Ui) -> bool {
+    let rec = RichText::new("REC").color(theme::palette(ui).fail).strong();
+    framed(ui, MACRO_WIDTH, |ui| {
+        ui.label(rec).on_hover_text("Recording a macro");
+        let stop = egui::Button::new(RichText::new("Stop").small()).small();
+        ui.add(stop)
+            .on_hover_text("Stop recording and name the macro")
+            .clicked()
+    })
+    .inner
 }
 
 /// One box of the status bar, `width` wide, its text on the left.
 fn segment(ui: &mut Ui, width: f32, text: RichText) -> egui::Response {
+    framed(ui, width, |ui| {
+        ui.add(egui::Label::new(text).truncate());
+    })
+    .response
+}
+
+/// A box of the status bar, `width` wide, with `add` laid out from the left.
+fn framed<R>(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
     Frame::new()
         .stroke(Stroke::new(1.0, theme::palette(ui).border))
         .inner_margin(Margin::symmetric(8, 3))
         .corner_radius(3)
         .show(ui, |ui| {
             ui.set_width(width);
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                ui.add(egui::Label::new(text).truncate());
-            });
+            ui.with_layout(Layout::left_to_right(Align::Center), add)
+                .inner
         })
-        .response
 }

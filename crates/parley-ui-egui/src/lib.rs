@@ -24,7 +24,7 @@ use parley_core::net::{Connection, LinkState};
 pub use addons::{AddOn, AddOnSettings};
 use keymap::{Function, KeyInput, KeyMap};
 use macros::Macros;
-pub use macros::{MacroStore, NoMacroStore, StoredMacro};
+pub use macros::{MacroStore, NoMacroStore, StoredMacro, check_name as check_macro_name};
 use menu::Action;
 pub use profile::Profile;
 use sessions::{Editor, Outcome};
@@ -205,6 +205,29 @@ impl ParleyUi {
         }
     }
 
+    /// The status bar; true when its Stop (beside REC) was clicked (R-KEY-6).
+    fn status_panel(
+        &self,
+        ui: &mut Ui,
+        frame: Frame,
+        session: Option<&parley_core::Session>,
+        link: Option<&LinkState>,
+    ) -> bool {
+        Panel::bottom("status_bar")
+            .frame(frame)
+            .show(ui, |ui| {
+                status::status_bar(
+                    ui,
+                    session,
+                    link,
+                    self.current.as_ref().is_some_and(|p| p.config.tls),
+                    self.closed.as_deref().or(self.warning.as_deref()),
+                    self.addon_on(AddOn::Macros),
+                )
+            })
+            .inner
+    }
+
     /// View ▸ Keyboard shortcuts: the keys of the map in use, in a side panel; true when its
     /// close button was clicked.
     fn shortcuts_panel(&self, ui: &mut Ui) -> bool {
@@ -289,18 +312,9 @@ impl ParleyUi {
                 .map(|p| &p.config);
             actions.extend(menu::toolbar(ui, config));
         });
-        Panel::bottom("status_bar")
-            .frame(status_frame)
-            .show(ui, |ui| {
-                status::status_bar(
-                    ui,
-                    session.as_deref(),
-                    link.as_ref(),
-                    self.current.as_ref().is_some_and(|p| p.config.tls),
-                    self.closed.as_deref().or(self.warning.as_deref()),
-                    self.addon_on(AddOn::Macros),
-                );
-            });
+        if self.status_panel(ui, status_frame, session.as_deref(), link.as_ref()) {
+            actions.push(Action::StopRecording);
+        }
         if self.show_shortcuts && self.shortcuts_panel(ui) {
             actions.push(Action::ToggleShortcuts);
         }
@@ -761,10 +775,15 @@ pub(crate) mod test_support {
                 .collect())
         }
 
-        fn save(&self, name: &str, contents: &Macro) -> Result<(), String> {
-            self.0
-                .borrow_mut()
-                .insert(name.to_owned(), contents.clone());
+        fn read_text(&self, name: &str) -> Result<String, String> {
+            let macros = self.0.borrow();
+            let m = macros.get(name).ok_or("no such macro")?;
+            Ok(m.to_text())
+        }
+
+        fn save_text(&self, name: &str, text: &str) -> Result<(), String> {
+            let m = Macro::parse(text).map_err(|e| e.to_string())?;
+            self.0.borrow_mut().insert(name.to_owned(), m);
             Ok(())
         }
 
@@ -781,6 +800,19 @@ pub(crate) mod test_support {
 
         fn folder(&self) -> Option<String> {
             Some("/memory".to_owned())
+        }
+
+        /// As if the file `Imported.macro` was chosen.
+        fn import(&self) -> Vec<Result<String, String>> {
+            self.0
+                .borrow_mut()
+                .insert("Imported".to_owned(), Macro::default());
+            vec![Ok("Imported".to_owned())]
+        }
+
+        /// As if the copy was saved in `/elsewhere`.
+        fn export(&self, name: &str) -> Result<Option<String>, String> {
+            Ok(Some(format!("/elsewhere/{name}.macro")))
         }
     }
 
@@ -1725,5 +1757,40 @@ mod tests {
         harness.get_by_label("Apply").click();
         harness.run();
         assert_eq!(harness.state().profiles()[0].keyboard_map, "Mine");
+    }
+
+    #[test]
+    fn stop_beside_rec_in_the_status_bar_ends_the_recording_r_key_6() {
+        let mut harness = app_with(Vec::new());
+        let _host = connect_locally(&mut harness, "");
+        assert!(
+            harness.query_by_label("Stop").is_none(),
+            "only while recording"
+        );
+        // The connection comes up on its own thread.
+        for _ in 0..200 {
+            if harness.query_by_label("Online").is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            harness.run();
+        }
+        let online = harness.get_by_label("Online").rect();
+        harness
+            .state()
+            .connection
+            .as_ref()
+            .expect("connected")
+            .session()
+            .start_recording();
+        harness.run();
+        // A taller box would make the bar grow and move the others.
+        assert_eq!(harness.get_by_label("Online").rect(), online);
+        harness.get_by_label("Stop").click();
+        harness.run();
+        let app = harness.state();
+        let session = app.connection.as_ref().expect("connected").session();
+        assert_eq!(session.macro_state(), parley_core::MacroState::Off);
+        assert!(app.save_macro.is_some(), "it asks for the macro's name");
     }
 }

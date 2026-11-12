@@ -13,7 +13,22 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
-Nothing at the moment.
+- **R-KEY-5** (2026-11-12): editing a macro in Parley, built. **Automated** (`make test`): in kittest, Edit opens the
+  file's text, a change is saved, text that does not read names its line and cannot be saved, Cancel leaves the file,
+  New macro… saves a macro written by hand, the editor keeps its place; in parley-app the text is written and read
+  back with its comments. **Seen** in a `--screenshot` of the editor (WSL2, dark). **Left:** the owner edits and adds
+  a macro on Windows, macOS and Linux, then move R-KEY-5 to REQUIREMENTS.md.
+- **R-KEY-6** (2026-11-12): Stop beside REC in the status bar, built. **Automated** (`make test`): in kittest, with a
+  session connected to a local port, Stop is there only while recording, clicking it ends the recording and asks for
+  the name, and the boxes beside it keep their place. **Left:** the owner records a macro and stops it from the
+  status bar, in light and dark, then move R-KEY-6 to REQUIREMENTS.md.
+- **R-KEY-7** (2026-11-12): importing and exporting macro files through the system's file window (rfd, GTK 3 on
+  Linux as Tortuga), built. **Automated** (`make test`): in parley-app, files are copied in as they are (comments,
+  `æøå` in the name), a file that does not read is refused with its line, a name already taken is refused, export
+  copies the file and a missing macro is an error; in kittest, Import… and Export… report what happened and the list
+  shows an imported macro at once; Open folder is gone. `cargo deny` passes with the GTK crates. **Not seen:** the file window itself (it
+  needs a click in the running app). **Left:** the owner imports and exports macros on Windows, macOS, Linux and
+  WSL, then move R-KEY-7 to REQUIREMENTS.md.
 
 ## Implemented
 

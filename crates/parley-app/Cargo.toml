@@ -18,6 +18,14 @@ eframe.workspace = true
 parley-core.workspace = true
 keyring = "4.2"
 
+# File windows for importing and exporting macros (R-KEY-7). GTK on Linux, as Tortuga: the
+# xdg-desktop-portal backend fails silently where no portal runs (WSL).
+[target.'cfg(target_os = "linux")'.dependencies]
+rfd = { version = "0.17", default-features = false, features = ["gtk3"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+rfd = { version = "0.17", default-features = false }
+
 [build-dependencies]
 winresource.workspace = true
 
@@ -41,8 +49,8 @@ resources = ["../parley-ui-egui/assets/fonts/Inter-LICENSE.txt", "../parley-ui-e
 
 [package.metadata.packager.deb]
 # X11 keyboard and OpenGL/EGL are loaded at run time by the window library; fontconfig by
-# the settings, to list the installed fonts.
-depends = ["libxkbcommon-x11-0", "libegl1", "libgl1", "libfontconfig1"]
+# the settings, to list the installed fonts; GTK 3 by the macro file windows (R-KEY-7).
+depends = ["libgtk-3-0", "libxkbcommon-x11-0", "libegl1", "libgl1", "libfontconfig1"]
 section = "net"
 
 [package.metadata.packager.appimage]

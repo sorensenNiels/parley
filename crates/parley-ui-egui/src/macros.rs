@@ -2,6 +2,8 @@
 //! list the menus show, and the dialogs to name a recording, give a password and manage them.
 //! Recording and playing are in `parley_core` ([`parley_core::Session`]).
 
+mod editor;
+
 use egui::{Button, ScrollArea, TextEdit, Ui};
 use parley_core::macros::Macro;
 
@@ -33,13 +35,25 @@ impl StoredMacro {
 pub trait MacroStore: std::fmt::Debug {
     /// Every macro, sorted by name.
     fn list(&self) -> Result<Vec<StoredMacro>, String>;
-    /// Saves a macro, replacing one of the same name.
-    fn save(&self, name: &str, contents: &Macro) -> Result<(), String>;
+    /// A macro's file as it is, comments and all (R-KEY-5).
+    fn read_text(&self, name: &str) -> Result<String, String>;
+    /// Writes `text` as the macro `name`, replacing one of the same name (R-KEY-5).
+    fn save_text(&self, name: &str, text: &str) -> Result<(), String>;
+    /// Saves a recorded macro, replacing one of the same name.
+    fn save(&self, name: &str, contents: &Macro) -> Result<(), String> {
+        self.save_text(name, &contents.to_text())
+    }
     fn delete(&self, name: &str) -> Result<(), String>;
     /// Renames a macro; an existing `new` name is an error.
     fn rename(&self, old: &str, new: &str) -> Result<(), String>;
     /// The folder the files are in, to show and open; `None` if there is none.
     fn folder(&self) -> Option<String>;
+    /// Asks for macro files in a file window and copies them in (R-KEY-7): for each file
+    /// chosen, the name of the macro it became or why it was not taken. Empty if cancelled.
+    fn import(&self) -> Vec<Result<String, String>>;
+    /// Asks where to save a copy of the macro `name` and saves it there (R-KEY-7): where it
+    /// went, or `None` if cancelled.
+    fn export(&self, name: &str) -> Result<Option<String>, String>;
 }
 
 /// A store that keeps nothing, for a UI built without one.
@@ -51,8 +65,12 @@ impl MacroStore for NoMacroStore {
         Ok(Vec::new())
     }
 
-    fn save(&self, _: &str, _: &Macro) -> Result<(), String> {
-        Err("Parley has no place to keep macros.".to_owned())
+    fn read_text(&self, _: &str) -> Result<String, String> {
+        Err(NO_PLACE.to_owned())
+    }
+
+    fn save_text(&self, _: &str, _: &str) -> Result<(), String> {
+        Err(NO_PLACE.to_owned())
     }
 
     fn delete(&self, _: &str) -> Result<(), String> {
@@ -60,13 +78,23 @@ impl MacroStore for NoMacroStore {
     }
 
     fn rename(&self, _: &str, _: &str) -> Result<(), String> {
-        Err("Parley has no place to keep macros.".to_owned())
+        Err(NO_PLACE.to_owned())
     }
 
     fn folder(&self) -> Option<String> {
         None
     }
+
+    fn import(&self) -> Vec<Result<String, String>> {
+        vec![Err(NO_PLACE.to_owned())]
+    }
+
+    fn export(&self, _: &str) -> Result<Option<String>, String> {
+        Err(NO_PLACE.to_owned())
+    }
 }
+
+const NO_PLACE: &str = "Parley has no place to keep macros.";
 
 /// A trimmed macro name, or why it cannot be one.
 pub fn check_name(name: &str) -> Result<String, String> {
@@ -331,6 +359,8 @@ pub struct Manager {
     message: Option<String>,
     /// A macro renamed since the last call to `take_renamed`: (old name, new name).
     renamed: Option<(String, String)>,
+    /// A macro's text being edited, over this dialog (R-KEY-5).
+    editor: Option<editor::Editor>,
 }
 
 /// The list's height: fixed, so the dialog keeps its size (CLAUDE.md "Layout traps").
@@ -358,24 +388,38 @@ impl Manager {
                 Some(folder) => {
                     theme::hint(ui, format!("Each macro is a text file in {folder}"));
                     ui.horizontal(|ui| {
-                        if ui.add(theme::ghost_button("Open folder")).clicked() {
-                            ui.ctx()
-                                .open_url(egui::OpenUrl::new_tab(format!("file://{folder}")));
-                        }
                         if ui.add(theme::ghost_button("Copy path")).clicked() {
                             ui.ctx().copy_text(folder.clone());
                         }
                         if ui.add(theme::ghost_button("Read again")).clicked() {
                             macros.reload();
                         }
+                        if ui
+                            .add(theme::ghost_button("Import…"))
+                            .on_hover_text("Copy macro files from another folder")
+                            .clicked()
+                        {
+                            self.import(macros);
+                        }
                     });
                 }
                 None => theme::hint(ui, "Parley has no place to keep macros."),
             }
             ui.add_space(16.0);
-            theme::button_row(ui, |ui| ui.add(theme::primary_button(ui, "Done")).clicked())
+            ui.horizontal(|ui| {
+                if ui.button("New macro…").clicked() {
+                    self.editor = Some(editor::Editor::new_macro());
+                }
+                theme::button_row(ui, |ui| ui.add(theme::primary_button(ui, "Done")).clicked())
+            })
+            .inner
         });
-        close || done
+        if let Some(editor) = &mut self.editor
+            && editor.show(ctx, macros)
+        {
+            self.editor = None;
+        }
+        (close || done) && self.editor.is_none()
     }
 
     fn rows(&mut self, ui: &mut Ui, macros: &mut Macros) {
@@ -405,6 +449,16 @@ impl Manager {
                         if ui.add(theme::ghost_button("Rename")).clicked() {
                             chosen = Some(Row::Rename(stored.name.clone()));
                         }
+                        if ui.add(theme::ghost_button("Edit")).clicked() {
+                            chosen = Some(Row::Edit(stored.name.clone()));
+                        }
+                        if ui
+                            .add(theme::ghost_button("Export…"))
+                            .on_hover_text("Save a copy, to share")
+                            .clicked()
+                        {
+                            chosen = Some(Row::Export(stored.name.clone()));
+                        }
                     });
                 });
                 if let Some((old, new)) = self.renaming.as_mut().filter(|(o, _)| *o == stored.name)
@@ -423,6 +477,17 @@ impl Manager {
         }
         match chosen {
             Some(Row::Rename(name)) => self.renaming = Some((name.clone(), name)),
+            Some(Row::Export(name)) => {
+                self.message = match macros.store.export(&name) {
+                    Ok(Some(path)) => Some(format!("Saved \"{name}\" to {path}.")),
+                    Ok(None) => None,
+                    Err(e) => Some(format!("Could not export \"{name}\": {e}")),
+                };
+            }
+            Some(Row::Edit(name)) => match editor::Editor::open(macros, &name) {
+                Ok(editor) => self.editor = Some(editor),
+                Err(e) => self.message = Some(format!("Could not read \"{name}\": {e}")),
+            },
             Some(Row::Renamed(old, new)) => self.rename(macros, &old, &new),
             Some(Row::Delete(name)) => {
                 self.message = Some(match macros.store.delete(&name) {
@@ -433,6 +498,23 @@ impl Manager {
             }
             None => {}
         }
+    }
+
+    /// Import…: copies the macro files chosen into the folder and says what came of each.
+    fn import(&mut self, macros: &mut Macros) {
+        let results = macros.store.import();
+        if results.is_empty() {
+            return;
+        }
+        let (taken, refused): (Vec<_>, Vec<_>) = results.into_iter().partition(Result::is_ok);
+        let mut lines = Vec::new();
+        let names: Vec<String> = taken.into_iter().filter_map(Result::ok).collect();
+        if !names.is_empty() {
+            lines.push(format!("Imported {}.", names.join(", ")));
+        }
+        lines.extend(refused.into_iter().filter_map(Result::err));
+        self.message = Some(lines.join("\n"));
+        macros.reload();
     }
 
     /// A macro renamed since the last call, so keys that run it can follow (R-KEY-2).
@@ -464,6 +546,8 @@ impl Manager {
 /// What a row of the manager asked for.
 enum Row {
     Rename(String),
+    Edit(String),
+    Export(String),
     Renamed(String, String),
     Delete(String),
 }
@@ -633,5 +717,105 @@ mod tests {
             assert!(check_name(bad).is_err(), "{bad:?}");
         }
         assert!(check_name(&"x".repeat(MAX_NAME + 1)).is_err());
+    }
+
+    /// The Macros dialog over a store holding "Jobs", with the editor of "Jobs" open.
+    fn editing_jobs() -> (MemoryMacros, Harness<'static, (Manager, Macros, bool)>) {
+        let store = macros_with("Jobs");
+        let macros = Macros::new(Box::new(store.clone()));
+        let mut harness = harness_for(Manager::default(), macros, Manager::show);
+        harness.run();
+        harness.get_by_label("Edit").click();
+        harness.run();
+        (store, harness)
+    }
+
+    /// Replaces the text in the editor with `text`.
+    fn replace_text(harness: &mut Harness<'static, (Manager, Macros, bool)>, text: &str) {
+        let role = egui::accesskit::Role::MultilineTextInput;
+        harness.get_by_role(role).focus();
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run();
+        harness.get_by_role(role).type_text(text);
+        harness.run();
+    }
+
+    #[test]
+    fn a_macro_is_edited_and_saved_as_text_r_key_5() {
+        let (store, mut harness) = editing_jobs();
+        harness.get_by_label("Edit macro");
+        replace_text(&mut harness, "# mine, æøå\nf3\n");
+        harness.get_by_label("1 steps · every session");
+        harness.get_by_label("Save").click();
+        harness.run();
+        let f3 = parley_core::Key::Aid(parley_core::Aid::function(3).expect("F3"));
+        assert_eq!(store.0.borrow()["Jobs"].steps, [Step::Key(f3)]);
+        assert!(harness.query_by_label("Edit macro").is_none(), "closed");
+        assert!(!harness.state().2, "the Macros dialog stays open");
+    }
+
+    #[test]
+    fn text_that_does_not_read_cannot_be_saved_r_key_5() {
+        let (store, mut harness) = editing_jobs();
+        let before = store.0.borrow()["Jobs"].clone();
+        replace_text(&mut harness, "teleport\n");
+        harness.get_by_label_contains("line 1: unknown key teleport");
+        harness.get_by_label("Save").click();
+        harness.run();
+        assert_eq!(store.0.borrow()["Jobs"], before);
+        harness.get_by_label("Cancel").click();
+        harness.run();
+        assert!(harness.query_by_label("Edit macro").is_none());
+        assert_eq!(store.0.borrow()["Jobs"], before);
+    }
+
+    #[test]
+    fn a_new_macro_is_written_by_hand_r_key_5() {
+        let store = MemoryMacros::default();
+        let macros = Macros::new(Box::new(store.clone()));
+        let mut harness = harness_for(Manager::default(), macros, Manager::show);
+        harness.run();
+        harness.get_by_label("New macro…").click();
+        harness.run();
+        harness.get_by_label("Name").focus();
+        harness.run();
+        harness.get_by_label("Name").type_text("Hand");
+        harness.run();
+        replace_text(&mut harness, "enter\n");
+        harness.get_by_label("Save").click();
+        harness.run();
+        let enter = parley_core::Key::Aid(parley_core::Aid::ENTER);
+        assert_eq!(store.0.borrow()["Hand"].steps, [Step::Key(enter)]);
+    }
+
+    #[test]
+    fn the_editor_keeps_its_place_r_key_5() {
+        let (_, mut harness) = editing_jobs();
+        let before = harness.get_by_label("Save").rect();
+        harness.run_steps(5);
+        assert_eq!(harness.get_by_label("Save").rect(), before);
+    }
+
+    #[test]
+    fn import_and_export_say_what_happened_r_key_7() {
+        let store = macros_with("Jobs");
+        let macros = Macros::new(Box::new(store.clone()));
+        let mut harness = harness_for(Manager::default(), macros, Manager::show);
+        harness.run();
+        harness.get_by_label("Import…").click();
+        harness.run();
+        harness.get_by_label_contains("Imported Imported.");
+        assert!(
+            harness.state().1.find("Imported").is_some(),
+            "listed at once"
+        );
+        harness
+            .get_all_by_label("Export…")
+            .next()
+            .expect("a button")
+            .click();
+        harness.run();
+        harness.get_by_label_contains("to /elsewhere/");
     }
 }

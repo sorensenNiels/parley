@@ -29,7 +29,7 @@ modern take on what surrounds the screen: sessions, keyboard mapping, copy and p
 | Phase 0: development environment | Done (2026-11-12): workspace, Makefile, setup scripts, CI, lints, Claude Code setup. |
 | Phase 1: connect and show a screen | Done (2026-11-12): verified on Windows, macOS, Linux and WSL2 (FEATURES.md). |
 | Phase 2: saved sessions and auto sign-on | Done (2026-11-12): verified on Windows, macOS, Linux and WSL2 (FEATURES.md). Auto sign-on and saved passwords were removed again in Phase 3 (R-NET-7, D16). |
-| Phase 3: keyboard maps and macros | Done (2026-11-12): verified on Windows, macOS and Linux (FEATURES.md): R-DS-5, keyboard maps (R-KEY-2), macros (R-KEY-3, R-KEY-4), add-ons (R-ADD-1, R-ADD-2), auto sign-on removed (R-NET-7, D16). |
+| Phase 3: keyboard maps and macros | Done (2026-11-12): verified on Windows, macOS and Linux (FEATURES.md): R-DS-5, keyboard maps (R-KEY-2), macros (R-KEY-3, R-KEY-4), add-ons (R-ADD-1, R-ADD-2), auto sign-on removed (R-NET-7, D16). Then the macro editor (R-KEY-5) Stop in the status bar (R-KEY-6) and import and export of macros (R-KEY-7), built, waiting for a check in the running app. |
 
 ## 4. Phases
 
@@ -70,7 +70,9 @@ ones come from [IDEAS.md](IDEAS.md). Areas: `NET` connection and telnet, `DS` th
 
 | ID | Requirement | Phase |
 |---|---|---|
-| — | *None open: Phase 3 is done. The next phase is planned from [IDEAS.md](IDEAS.md).* | — |
+| R-KEY-5 | **Edit a macro in Parley** (2026-11-12, asked by the owner). Tools ▸ Macros… has "Edit" on each macro and "New macro…": a dialog with the macro's file as text (monospace, comments and blank lines kept as typed) and, for a new one, its name. The text is checked as it is typed with the reader that runs macros (R-KEY-4); a line that does not read is named ("line 7: unknown key teleport") and Save stays off until it reads; a short line under it gives the syntax. Save writes the file and the list reads it again; Cancel and 🗙 leave the file as it was. A new macro needs a name no macro has. | 3 |
+| R-KEY-6 | **Stop recording from the status bar** (2026-11-12, asked by the owner). While a macro is being recorded, the status bar's macro box shows "REC" and a small Stop button beside it; Stop does what Tools ▸ Stop recording does (asks for the name). The macro box keeps one width, so the boxes beside it don't move when a recording starts or stops, and the bar keeps its height. *(Changes R-KEY-3: Stop recording was only in the Tools menu.)* | 3 |
+| R-KEY-7 | **Import and export macros** (2026-11-12, asked by the owner). Tools ▸ Macros… has "Import…" beside Copy path and "Export…" on each macro, both opening the system's file window (GTK 3 on Linux, also under WSL, as Tortuga's file windows; the xdg portal fails silently where none runs). Import takes one or more `.macro` files and copies each in as it is, named after the file; a file that does not read as a macro (its line named), whose name is not a valid macro name, or whose name a macro already has is not taken, and the dialog says which were imported and why the others were not. Export saves a copy of the file where the operator chooses (`NAME.macro` offered) and says where. Cancelling either changes nothing. GTK 3 is a new build and run dependency on Linux (CI, release, the .deb, `scripts/setup-linux.sh`). *R-KEY-4's "Open folder" is removed (the owner, 2026-11-12): Edit, New macro…, Import… and Export… do what it was for; the dialog still shows the folder with Copy path, and Read again.* | 3 |
 
 ## 6. Ideas
 
@@ -105,4 +107,4 @@ Ideas that might become requirements later are in [IDEAS.md](IDEAS.md) (`IDEA-n`
 - A choice that future work must respect becomes a decision in §7.
 - An idea is not a plan: it goes in [IDEAS.md](IDEAS.md) until it is picked, then becomes requirements here.
 
-Next free IDs (removed rows keep their numbers): `R-P-5` · `R-NET-8` · `R-DS-6` · `R-EBC-2` · `R-KEY-5` · `R-UI-13` · `R-ADD-3` · `R-NF-2` · `D17` (ideas: last line of IDEAS.md).
+Next free IDs (removed rows keep their numbers): `R-P-5` · `R-NET-8` · `R-DS-6` · `R-EBC-2` · `R-KEY-8` · `R-UI-13` · `R-ADD-3` · `R-NF-2` · `D17` (ideas: last line of IDEAS.md).
