@@ -4,8 +4,8 @@
 > [REQUIREMENTS.md](REQUIREMENTS.md), and how each was verified is in [FEATURES.md](FEATURES.md).
 > Look things up with `grep -n` (an ID such as `"R-NET-1 "`, `"| D3 "` or a heading) rather than reading the whole file.
 
-**Status of this document:** a first draft written while setting up the development environment (2026-11-12),
-updated when Phase 1 was built the same day. The vision, principles and requirements are proposals to review.
+**Status of this document:** first written while setting up the development environment (2026-11-12); Phases 1 and 2
+were built and verified the same day. The vision, principles and requirements are proposals to review.
 
 ## 1. Vision
 
@@ -27,8 +27,9 @@ modern take on what surrounds the screen: sessions, keyboard mapping, copy and p
 | Phase | State |
 |---|---|
 | Phase 0: development environment | Done (2026-11-12): workspace, Makefile, setup scripts, CI, lints, Claude Code setup. |
-| Phase 1: connect and show a screen | Built (2026-11-12); in progress until signing on with a real account is checked (FEATURES.md "In progress"). |
-| Phase 2: saved sessions and auto sign-on | Built (2026-11-12); in progress until auto sign-on is checked against a real IBM i. |
+| Phase 1: connect and show a screen | Done (2026-11-12): verified on Windows, macOS, Linux and WSL2 (FEATURES.md). |
+| Phase 2: saved sessions and auto sign-on | Done (2026-11-12): verified on Windows, macOS, Linux and WSL2 (FEATURES.md). |
+| Phase 3: keyboard maps and macros | In progress: R-DS-5 done (2026-11-12); next R-NET-6, then R-KEY-2..4. |
 
 ## 4. Phases
 
@@ -37,70 +38,44 @@ modern take on what surrounds the screen: sessions, keyboard mapping, copy and p
 Workspace with `parley-core`, `parley-ui-egui`, `parley-app`; `make verify` as the local quality gate (= CI);
 setup scripts for Linux, macOS and Windows; the app opens a window with a blank 24×80 screen.
 
-### Phase 1 — Connect and show a screen (built, being verified)
+### Phase 1 — Connect and show a screen (done)
 
 Open a session to an IBM i, sign on and use simple screens: R-NET-1..3, R-DS-1..4, R-EBC-1, R-KEY-1, R-UI-1..4.
-Known gaps are IDEA-1..10.
+Known gaps are IDEA-1..10 ([IDEAS.md](IDEAS.md); IDEA-1 became R-DS-5).
 
-### Phase 2 — Saved sessions and auto sign-on (built 2026-11-12, being verified)
+### Phase 2 — Saved sessions and auto sign-on (done)
 
 Several named sessions with their own settings, a session dialog, passwords in the keychain, auto sign-on (typed or
 bypassed per RFC 4777) and keep-alive: R-UI-5, R-NET-4, R-NET-5. A roomier look and a settings dialog with the terminal
 font: R-UI-6. Close buttons on popups: R-UI-7. Settings in pages: R-UI-8. Tortuga's look: R-UI-9. App name in the menu bar, Help on the right: R-UI-10. New version available, with the download command on Linux:
 R-UI-11, R-UI-12.
 
+### Phase 3 — Keyboard maps and macros (planned)
+
+First two small correctness steps (R-P-2): the points of the data stream built from memory checked against IBM's
+manual (R-DS-5, from IDEA-1) and why a bypass sign-on failed (R-NET-6, from IDEA-12). Then keyboard maps chosen per
+session (R-KEY-2, from IDEA-9) and macros, recorded (R-KEY-3) and run (R-KEY-4), from IDEA-11.
+
 ### Later (unordered, to be planned)
 
-Printer sessions, macros/scripting (IDEA-11), a keyboard map per session.
+Printer sessions (IDEA-18), SQL against the session's host (IDEA-13); see [IDEAS.md](IDEAS.md).
 
 ## 5. Requirements
 
-Open requirements, in the order they are planned. Areas: `NET` connection and telnet, `DS` the 5250 data stream,
+Open requirements, in the order they are planned. The done ones are in [REQUIREMENTS.md](REQUIREMENTS.md); new
+ones come from [IDEAS.md](IDEAS.md). Areas: `NET` connection and telnet, `DS` the 5250 data stream,
 `EBC` character sets, `KEY` keyboard, `UI` user interface, `NF` non-functional.
 
 | ID | Requirement | Phase |
 |---|---|---|
-| R-NET-1 | Open a TCP connection to a host and port (default 23) and negotiate TN5250 per RFC 1205 / RFC 2877: terminal type (`IBM-3179-2`), binary, end-of-record. | 1 |
-| R-NET-2 | TLS connections (default port 992), checking the server certificate; a session can trust a given CA certificate. | 1 |
-| R-NET-3 | Request a device name through the NEW-ENVIRON option (RFC 2877), and show the host's error when it is refused. | 1 |
-| R-DS-1 | Parse the 5250 data stream commands needed for sign-on and menus: Clear Unit, Write To Display (with its orders: Set Buffer Address, Start of Header, Start of Field, Insert Cursor, Repeat to Address), Read MDT Fields, Read Input Fields. | 1 |
-| R-DS-2 | A screen model: character buffer, field table (attributes, input/output, mandatory, bypass), cursor and the operator-information line. | 1 |
-| R-DS-3 | Send AID keys (Enter, F1–F24, Page Up/Down, Clear, Help, Sys Req, Attention) with the modified fields. | 1 |
-| R-DS-4 | The other commands an IBM i sends in normal use: Write Error Code (message on the error line, keyboard inhibited until Reset), Save Screen / Restore Screen, Roll, Clear Unit Alternate (27×132), Clear Format Table, Read Immediate, Read Screen Immediate, and the reply to the 5250 Query structured field. Erase to Address, Transparent Data and Move Cursor orders. | 1 |
-| R-EBC-1 | Convert EBCDIC to and from Unicode for CCSID 37 (US) and 277 (Danish/Norwegian), and their euro variants 1140 and 1142; the session chooses the CCSID and announces it to the host (`KBDTYPE`, `CODEPAGE`, `CHARSET`, RFC 4777). | 1 |
-| R-KEY-1 | A default keyboard mapping: Enter; Shift+Enter or Ctrl+Enter for Field Exit; Ctrl++ / Ctrl+- (and + / - in signed numeric fields) for Field+ / Field-; a Ctrl key pressed alone or Ctrl+R for Reset; Tab / Shift+Tab between fields; F1–F24 (Shift+F1–F12 for F13–F24); Page Up / Down to roll; Esc / Shift+Esc for Attention / System Request; Insert, Delete, Backspace, Home, End, Ctrl+End (Erase EOF), arrows. The field rules of the field format word: bypass, alpha/numeric/digits/signed numeric only, monocase, auto enter, field exit required, right adjust. (Right Ctrl for Enter, as in IBM's emulators, is not possible: egui does not tell left and right Ctrl apart.) | 1 |
-| R-UI-1 | The screen in a monospace grid that scales with the window, with the 5250 colours, reverse image, underline, column separators and non-display; a block cursor (a bar in insert mode); a click moves the cursor; Ctrl+C copies the screen as text; Ctrl+V pastes into fields (a line break moves to the next field). | 1 |
-| R-UI-2 | The operator information area under the screen: Ready / X SYSTEM / the operator error and "press Reset", insert mode, message waiting, cursor row/column, and the last problem in the host's data. A list of the keyboard shortcuts. | 1 |
-| R-UI-4 | A menu bar (File, Edit, View, Tools, Help) and a toolbar (Disconnect, Copy, Paste, Clear, Attn, Sysreq, Reset, Help, Enter) above the screen, and the status bar of R-UI-2 as boxes along the bottom (message, Online/Offline, TLS, Insert, MW, row,column), as in IBM's emulators; all three also show without a connection. The menus hold today's actions; their full contents come later. | 1 |
-| R-NF-1 | Installers for every platform, built by the Release workflow from a `vX.Y.Z` tag and attached to a GitHub release: `.msi` (Windows), `.dmg` (macOS, Apple silicon and Intel), `.deb` and `.AppImage` (Linux, glibc 2.35+). `make release-patch/minor/major` bumps the version, verifies, tags and pushes (docs/RELEASING.md). | 1 |
-| R-UI-3 | A connection form (host, port, TLS, CA certificate file, code page, screen size, device name) that remembers the last settings; `parley HOST[:PORT] [--tls]` connects straight away. *Since 2026-11-12 the form is the session dialog of R-UI-5; `HOST` uses the saved session for that host if there is one.* | 1 |
-| R-UI-5 | Saved sessions (2026-11-12): the start screen lists them (Connect, Edit…, New session…) and File has New session…, Edit sessions… and Connect to ▸. A session dialog, as in IBM-style emulators: name (and a menu to switch session), host, port and TLS, CA certificate, code page, terminal size (27×132 / 24×80), device name; auto sign-on (user, password, enable, bypass the sign-on screen, password encryption); run macro (shown disabled until IDEA-11); exit when the host ends the session; confirm exit while connected; send keep-alive; connect on program start (one session at most); Help; Cancel, Delete, Apply, Connect (disabled while connected: one session per window). New sessions default to TLS on 992 (R-P-3). Passwords go to the operating system's keychain (D11), never to the settings file; renaming or deleting a session moves or removes its password. The single connection Parley 0.1 remembered becomes the first saved session. | 2 |
-| R-UI-6 | A roomier look and settings (2026-11-12): Inter as the UI font, larger text and more padding and spacing (sizes since R-UI-9: Tortuga's) in menus, toolbar, status bar, dialogs and the start screen (sessions as cards). Tools ▸ Settings…: theme (System / Light / Dark), size (90–175 %), and the terminal font: one of the bundled JetBrains Mono (default since R-UI-9), IBM Plex Mono and Hack, or any installed monospace font (found on a background thread; a font counts as monospace when i, M, W and . are equally wide), with a preview. Changes show at once; Cancel restores them; the settings are remembered. A saved font that is no longer installed falls back to the default with a note. Installers carry the fonts' OFL licence files. | 2 |
-| R-UI-7 | Every popup and side panel has a close button (×) at the top right of its title row (2026-11-12): the session dialog (closes without saving, as Cancel), Settings (as Cancel: the old settings come back), the exit question (as Cancel) and the keyboard shortcuts panel (hides it). Screen readers name it "Close". | 2 |
-| R-UI-8 | The settings dialog in pages (2026-11-12): a list of groups on the left (Appearance, Terminal; new settings add a group or go into one), the chosen page on the right with its title and a one-line description. The dialog keeps one size whichever page is shown. "Restore defaults" resets only the page shown. | 2 |
-| R-UI-9 | Tortuga's look (2026-11-12, D12): `theme.rs` ported from Tortuga: Inter (Regular, SemiBold for headings) and JetBrains Mono, the same light and dark palette (teal accent), text sizes, spacing, corner radii and shadows, thin floating scroll bars; the menu bar, toolbar and status bar in the chrome colour; filled primary (Connect, Save, Enter, Exit) and danger (Delete) buttons; switches for on/off options and segmented choices; dialogs with Tortuga's frame and Cancel/confirm row; the settings dialog laid out as Tortuga's (pages under section headings, groups of rows on cards); a Density setting (Comfortable / Compact). The 5250 screen keeps its own colours. | 2 |
-| R-UI-10 | The menu bar starts with the app icon (the launcher's PNG, 18 px) and "Parley" in SemiBold, then a separator and File, Edit, View, Tools; Help sits at the right edge (2026-11-12). As Tortuga shows its own name at the start of its top bar. | 2 |
-| R-UI-11 | **New version available** (2026-11-12, D13; as Tortuga's R-SET-15). Parley asks GitHub for the latest published release (`api.github.com/repos/sorensenNiels/parley/releases/latest`, HTTPS with the operating system's trust store), sending nothing but the request (`User-Agent: Parley/<version>`). **At start-up**, in the background, unless Settings → About → "Look for a new version when Parley starts" (on by default) is off: a newer version shows as a quiet link in the menu bar, beside Help ("Parley 0.3.0 is available"), that opens its release page; nothing pops up, and a failed check says nothing. **Check now** on the About page, and Help ▸ **Check for updates…** (which opens the About page), say what they found: up to date, the newer version with a link, or why it failed. Only published releases count; a pre-release version is older than its release. The About page also shows the version, the platform it was built for, the licence and the source link, and copies the version. | 2 |
-| R-UI-12 | **Download command on Linux** (2026-11-12; as Tortuga's R-SET-18). When a newer version is available, on Linux a **Copy download command** menu sits beside the link on Settings → About and lists the release's `.deb` and `.AppImage` by file name; picking one copies `curl -fLO '<url>'` and the page says what was copied. The URLs come from GitHub's answer (only `https` ones that can't break out of the quotes). Nothing is installed by the app. | 2 |
-| R-NET-4 | Auto sign-on (2026-11-12). *Screen*: on the first screen whose first two input fields are a user field and a non-display field, type the user and password and press Enter, once per connection. *Bypass*: answer the host's NEW-ENVIRON SEND with `VAR USER`, `USERVAR IBMRSEED` (a random client seed) and `USERVAR IBMSUBSPW` (the password substitute) per RFC 4777 section 5, DES (5.1) or SHA-1 (5.2) as the session's password-encryption setting says (QPWDLVL 0–1 or 2–3); the host needs QRMTSIGN `*VERIFY` or `*SAMEPRF`. Only when the host sends its seed: the password never goes in clear text. Checked against the RFC's test vectors and its example negotiation, byte for byte. | 2 |
-| R-NET-5 | Keep-alive (2026-11-12): a session with it on sends telnet NOP (IAC X'F1') after 60 s without sending anything, so firewalls keep an idle connection. | 2 |
+| R-NET-6 | **Why a bypass sign-on failed** (from IDEA-12). With bypass on (R-NET-4) Parley asks for the Startup Response Record (`USERVAR IBMSENDCONFREC` = `YES`, RFC 4777 section 10) and reads it before the first screen. On success nothing changes. On failure the status bar and a line on the start of the session say why, in words, with the host's response code (e.g. "Password expired", "User profile not found"; the codes and their meanings taken from RFC 4777 section 10, checked when this is built), and the sign-on screen the host sends next is shown as now. A truncated or malformed record is a reported error, not a panic. Tested with hand-built records. | 3 |
+| R-KEY-2 | **Keyboard maps** (from IDEA-9). Settings ▸ Keyboard lists every 5250 key and Parley action (Enter, Field Exit, Field+/-, Reset, F1–F24, Attention, System Request, Roll, Erase EOF, Insert, Copy, Paste, …) with the PC keys bound to it; select one and press a key to add a binding, remove a binding, "Restore defaults". The map R-KEY-1 defines is the built-in **Default** map, which cannot be changed; the user can copy it under a new name, edit, rename and delete their own maps. A key bound twice in one map is flagged and the new binding wins only after the user confirms. A key egui cannot tell apart (e.g. left and right Ctrl, R-KEY-1) cannot be bound. The session dialog has "Keyboard map" (Default unless chosen); a session whose map was deleted falls back to Default. Maps are saved with the settings. | 3 |
+| R-KEY-3 | **Record a macro** (from IDEA-11). Tools ▸ Record macro (and a key in the keyboard map) starts recording on the connected session; the status bar shows "REC" until Tools ▸ Stop recording (the same key), then Parley asks for a name and whether the macro is for all sessions or this one. A macro is the 5250 keys and text typed (not mouse clicks), with a "wait until the keyboard unlocks" step after each AID key. Text typed into a non-display field is never recorded: the step becomes "type the password", which plays the session's saved password (D11) or asks for it. Recording stops on its own when the connection ends. Macros are saved as readable text files next to the settings (the format is a decision, D14, taken when this is built), one per macro, so users can edit and share them. | 3 |
+| R-KEY-4 | **Run a macro** (from IDEA-11). Tools ▸ Run macro ▸ lists the macros for all sessions and for this one; a key in the keyboard map can run a given macro; the session dialog's "Run macro" (disabled since R-UI-5) runs one after sign-on. A running macro shows in the status bar, waits at each "wait" step until the host unlocks the keyboard (giving up after 30 s with a message), stops at an operator error (the error stays on screen), and stops when the user presses Reset or Esc, or the connection ends. Tools ▸ Macros… lists the macros to rename, delete or open their folder. A macro file that cannot be read is listed with the reason and cannot be run. | 3 |
 
 ## 6. Ideas
 
-| ID | Idea |
-|---|---|
-| IDEA-1 | Check against IBM's 5250 Functions Reference the points built from memory of the spec, not yet seen on a real host: Start of Header clears the format table; Read MDT Fields sends nulls as blanks; a signed numeric field is sent without its sign position, a minus making the last digit's zone X'D'; the query reply's capability bytes. |
-| IDEA-2 | Operator error codes (0005 and so on) next to the messages, as IBM's emulators show them, once the codes are checked against the manual. |
-| IDEA-3 | Mandatory enter, mandatory fill and self-check (modulo 10/11) fields: not enforced yet; the host checks them. |
-| IDEA-4 | The Start of Header command-key bits that say whether F1–F24 return field data: all keys return data now. |
-| IDEA-5 | Extended attributes (Write Extended Attribute) and the GUI structured fields (windows, menus, scroll bars, WDSF): ignored now; Parley's query reply does not ask for them. |
-| IDEA-6 | Sound the alarm (CC2 bit) and blink (blink attributes): both are ignored now. |
-| IDEA-7 | Save Partial Screen / Restore Partial Screen and Read Immediate Alternate: not supported yet (the host gets a notice-level error). |
-| IDEA-8 | Insert mode accepts trailing blanks as room, not only nulls as on a real 5250: kinder, but check it does not surprise people. |
-| IDEA-9 | Session profiles: several saved connections, each with its own settings and keyboard map. *Saved sessions are R-UI-5 (2026-11-12); the keyboard map per session is still open.* |
-| IDEA-11 | Macros: record and play keystrokes, and run one after sign-on ("Run macro" in the session dialog, disabled until then). |
-| IDEA-12 | Startup Response Record (RFC 4777 section 10, `IBMSENDCONFREC`): show why a bypass sign-on failed (user unknown, password expired, and so on) instead of only the sign-on screen. |
-| IDEA-10 | A trace window (the host's records, decoded) for support, built on `PARLEY_TRACE`. |
+Ideas that might become requirements later are in [IDEAS.md](IDEAS.md) (`IDEA-n`, with their own next free ID).
 
 ## 7. Decisions
 
@@ -126,5 +101,6 @@ Open requirements, in the order they are planned. Areas: `NET` connection and te
 - A requirement that is implemented, tested and checked in the running app moves to [REQUIREMENTS.md](REQUIREMENTS.md),
   with how it was verified in [FEATURES.md](FEATURES.md).
 - A choice that future work must respect becomes a decision in §7.
+- An idea is not a plan: it goes in [IDEAS.md](IDEAS.md) until it is picked, then becomes requirements here.
 
-Next free IDs (removed rows keep their numbers): `R-P-5` · `R-NET-6` · `R-DS-5` · `R-EBC-2` · `R-KEY-2` · `R-UI-13` · `R-NF-2` · `IDEA-13` · `D14`.
+Next free IDs (removed rows keep their numbers): `R-P-5` · `R-NET-7` · `R-DS-6` · `R-EBC-2` · `R-KEY-5` · `R-UI-13` · `R-NF-2` · `D14` (ideas: last line of IDEAS.md).

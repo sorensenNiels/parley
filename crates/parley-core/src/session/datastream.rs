@@ -1,6 +1,7 @@
 //! The 5250 data stream from the host (R-DS-1): commands, each after an ESC byte, and the
 //! orders inside Write To Display. References are to IBM's "5250 Functions Reference"
-//! (SA21-9247), chapter 15 "5494 data stream", and RFC 1205.
+//! (SA21-9247), chapter 15 "5494 data stream", IBM's "5494 Remote Control Unit Functions
+//! Reference" (SC30-3533-02), chapter 12 "Display Data Streams", and RFC 1205.
 
 use super::{MAX_SAVED_SCREENS, ReadKind, SavedScreen, Session};
 use crate::error::{Error, Result};
@@ -224,10 +225,15 @@ impl Session {
         Ok(())
     }
 
-    /// Start of Header: begins a new format table and may move the error line.
+    /// Start of Header (5494 Functions Reference SC30-3533-02, "Start of Header Order"): clears
+    /// the format table and may move the error line. The length byte counts the bytes after it;
+    /// 0 or more than 7 is a parameter error. Byte 4 (here `header[3]`) is the error row: 0 or a
+    /// row past the screen means the default, the last row. Byte 1 (cursor and screen-reverse
+    /// flags), byte 3 (resequencing) and bytes 5-7 (command keys that return no data, IDEA-4)
+    /// are not used yet.
     fn start_of_header(&mut self, r: &mut Reader<'_>) -> Result<()> {
         let len = r.byte("Start of Header")?;
-        if len > 7 {
+        if len == 0 || len > 7 {
             return Err(Error::data(format!("Start of Header with length {len}")));
         }
         let header = r.take(usize::from(len), "Start of Header")?;

@@ -8,17 +8,20 @@
 > been checked in the running app on at least one OS. Note which OSes were checked. Then move the
 > requirement's row from the roadmap to [REQUIREMENTS.md](REQUIREMENTS.md).
 
-**Verified on:** Linux = Ubuntu under WSL2/WSLg (desktop build), against PUB400.COM (IBM i 7.5). Windows and macOS have
-not been run yet.
+**Verified on:** Windows, macOS, Linux (desktop) and Linux under WSL2/WSLg, by the owner in the running app (2026-11-12);
+Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's IBM i (sign-on screen only).
 
 ## In progress
 
-### Phase 1: connect and show a screen (2026-11-12)
+(nothing)
 
-Built: R-NET-1..3, R-DS-1..4, R-EBC-1, R-KEY-1, R-UI-1..4, R-NF-1. The requirements stay in the roadmap until signing on
-with a real account has been tried in the running app.
+## Implemented
 
-Checked so far:
+### Phase 1: connect and show a screen (2026-11-12) — R-NET-1..3, R-DS-1..4, R-EBC-1, R-KEY-1, R-UI-1..4, R-NF-1
+
+Verified by the owner in the running app on Windows, macOS, Linux and WSL2 (2026-11-12).
+
+How it was checked:
 - **Automated** (`make test`): telnet negotiation and framing; record header; every command and order in R-DS-1 and
   R-DS-4 with hand-built records; field rules and keys; the exact bytes of Enter, Read Immediate, the query reply and
   Save Screen; CCSID 37/277/1140/1142 tables (generated from iconv by `scripts/gen-ebcdic.py`); 6000 random records
@@ -32,14 +35,12 @@ Checked so far:
 - **Running app** (`parley pub400.com --screenshot FILE`): the sign-on screen drawn with the host's colours, reverse
   image and underlines, the block cursor in the user field, "Ready" in the status line.
 
-Not checked yet: signing on and using menus, prompts (F4), Save/Restore Screen from a real host, 27×132 screens,
-the device name of R-NET-3 (a taken name), typing in the running app, a CA certificate file, Windows and macOS.
 
-### Phase 2: saved sessions and auto sign-on (2026-11-12)
+### Phase 2: saved sessions, auto sign-on and the look (2026-11-12) — R-NET-4, R-NET-5, R-UI-5..12
 
-Built: R-UI-5, R-NET-4, R-NET-5, R-UI-6, R-UI-7, R-UI-8, R-UI-9, R-UI-10, R-UI-11, R-UI-12.
+Verified by the owner in the running app on Windows, macOS, Linux and WSL2 (2026-11-12).
 
-Checked so far:
+How it was checked:
 - **Automated**: the DES and SHA-1 password substitutes against RFC 4777's test vectors (sections 5.1 and 5.2) and
   the RFC's example negotiation byte for byte; no credentials without a host seed; a truncated or escaped seed;
   typed sign-on sends the same record as an operator typing, only once; keep-alive bytes; in egui_kittest, the start
@@ -63,9 +64,17 @@ Checked so far:
   preview, and PUB400's sign-on screen in IBM Plex Mono with the roomier bars; `make package` puts the OFL files in
   the .deb (66 ms to list this machine's installed monospace fonts).
 
-Not checked yet: auto sign-on (typed or bypassed) against a real IBM i with a real account, the keychain on Windows,
-macOS and a Linux desktop, installed fonts on Windows and macOS, the light theme, keep-alive over a long idle period, exit when the host ends the session, confirm exit.
+### Phase 3: keyboard maps and macros (in progress) — R-DS-5
 
-## Implemented
+**R-DS-5** (2026-11-12): verified by the owner on their IBM i in the running app on Windows, macOS, Linux and WSL2
+(signed on; a spooled file shown at 27×132 in a wide session).
 
-(none yet)
+How it was checked:
+- **Against the manual**: IBM's 5494 Remote Control Unit Functions Reference (SC30-3533-02, chapter 12), cited next to
+  the code. Start of Header matched (clears the format table; error row in byte 4) except that length 0 is now an
+  error. Nulls as blanks and the negative zone matched; Read MDT Alternate now strips trailing nulls and sends only the
+  address for an all-null field. The query reply sent a 2-byte model where the manual has 3, so every later byte was
+  one early and the screen sizes landed in capability byte 0; fixed, with 256 input fields and the colour bit.
+- **Automated** (`make test`): a test per fix in `tests/session.rs` (`*_r_ds_5`), each failing without its fix.
+- **Against PUB400.COM**: the same sign-on screen at 24×80 and 27×132 before and after (it sends no Query before
+  sign-on).

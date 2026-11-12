@@ -10,7 +10,8 @@ follow the roadmap's order. If a request is unclear, or would change a decision 
 
 | File | Holds | Rule |
 |---|---|---|
-| `docs/ROADMAP.md` | Vision, principles, phases, open requirements (`R-NET-1`), ideas (`IDEA-n`), decisions (`D1`), next free IDs. | The plan and the spec for what is not done. Implement requirements as written; record new decisions there. |
+| `docs/ROADMAP.md` | Vision, principles, phases, open requirements (`R-NET-1`), decisions (`D1`), next free IDs. | The plan and the spec for what is not done. Implement requirements as written; record new decisions there. |
+| `docs/IDEAS.md` | Ideas (`IDEA-n`) that may become requirements later, by theme; own next free ID on its last line. | Not a plan: new ideas go here. When one is picked, write requirements in the roadmap and mark the idea. |
 | `docs/FEATURES.md` | Implemented **and verified** features by requirement ID, and how each was verified. | Add an entry only when the requirement is fully met, tested, and checked in the running app; record which OS. Otherwise it goes under "In progress". |
 | `docs/REQUIREMENTS.md` | The text of every completed requirement. | When a requirement is verified, move its row here from the roadmap. |
 
@@ -18,7 +19,7 @@ follow the roadmap's order. If a request is unclear, or would change a decision 
 
 Context is the budget; spend it on code that changes.
 - Once they grow, don't read the planning docs or `README.md` whole: `grep -n` the ID (`"R-NET-1 "`, `"| D3 "`) or
-  heading, then read that range. Next free IDs are the roadmap's last line.
+  heading, then read that range. Next free IDs are the roadmap's last line (ideas: the last line of `IDEAS.md`).
 - Source files over ~500 lines: `grep -n` the symbol, then read with offset/limit. Don't re-read a file after editing it.
 - While working, run the narrowest check (`cargo test -p <crate> <filter>`); run `/verify` once at the end. Send long
   command output to a file under `target/` and grep it instead of printing it.
