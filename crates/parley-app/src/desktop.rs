@@ -71,6 +71,10 @@ pub fn run() -> eframe::Result {
         Box::new(move |cc| {
             let profiles = cc.storage.map(saved_profiles).unwrap_or_default();
             let mut ui = ParleyUi::new(profiles, Box::new(SystemKeychain));
+            match crate::macros::MacroFolder::beside_settings() {
+                Some(folder) => ui.set_macro_store(Box::new(folder)),
+                None => eprintln!("parley: no folder for macros on this system"),
+            }
             if let Some(settings) = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)) {
                 ui.set_settings(settings);
             }

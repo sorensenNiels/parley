@@ -5,6 +5,7 @@ use egui::{Button, ComboBox, DragValue, Grid, TextEdit, Ui};
 use parley_core::signon::{PasswordLevel, SignOn};
 use parley_core::{CodePage, ScreenSize, SessionConfig};
 
+use crate::macros::Macros;
 use crate::profile::{Keychain, Profile};
 use crate::{dialog, theme};
 
@@ -26,7 +27,9 @@ Exit when the session ends: close Parley when the IBM i ends the session (sign-o
 Confirm exit: ask before closing Parley while connected.
 Send keep-alive: send a telnet no-operation after a minute without traffic, so firewalls \
 keep an idle connection open.
-Connect on program start: connect to this session when Parley starts.";
+Connect on program start: connect to this session when Parley starts.
+Run macro: on connecting, run a macro recorded with Record macro in the Tools menu \
+(after auto sign-on, if that is on).";
 
 /// What the dialog asks [`crate::ParleyUi`] to do when it closes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +52,8 @@ pub struct Editor {
     message: Option<String>,
     /// The body's height last frame (see [`dialog::fitting_scroll_area`]).
     body_height: f32,
+    /// A saved session renamed by Apply or Connect: (old name, new name).
+    renamed: Option<(String, String)>,
 }
 
 impl Editor {
@@ -62,6 +67,7 @@ impl Editor {
             show_help: false,
             message: None,
             body_height: 0.0,
+            renamed: None,
         };
         editor.select(profiles, index, keychain);
         editor
@@ -90,6 +96,7 @@ impl Editor {
         profiles: &mut Vec<Profile>,
         keychain: &dyn Keychain,
         connected: bool,
+        macros: &Macros,
     ) -> Option<Outcome> {
         let title = if self.index.is_some() {
             "Edit session"
@@ -109,7 +116,7 @@ impl Editor {
                     connection_fields(left, &mut self.draft.config);
                     left.add_space(14.0);
                     theme::section_label(left, "Options");
-                    self.options(left);
+                    self.options(left, macros);
                     theme::section_label(right, "Auto sign-on (optional)");
                     self.sign_on(right);
                     if self.show_help {
@@ -212,18 +219,8 @@ impl Editor {
         }
     }
 
-    fn options(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            ui.add_enabled_ui(false, |ui| {
-                let label = theme::switch_row(ui, "Run macro", &mut false)
-                    .on_disabled_hover_text("Macros are not built yet.");
-                ComboBox::from_id_salt("macro")
-                    .selected_text("No macros yet")
-                    .show_ui(ui, |_| {})
-                    .response
-                    .labelled_by(label.id);
-            });
-        });
+    fn options(&mut self, ui: &mut Ui, macros: &Macros) {
+        self.run_macro(ui, macros);
         let profile = &mut self.draft;
         theme::switch_row(ui, "Exit when the session ends", &mut profile.exit_on_close);
         theme::switch_row(ui, "Confirm exit", &mut profile.confirm_exit);
@@ -233,6 +230,48 @@ impl Editor {
             "Connect to this session on program start",
             &mut profile.connect_on_start,
         );
+    }
+
+    /// "Run macro" after sign-on (R-KEY-4), and which one.
+    fn run_macro(&mut self, ui: &mut Ui, macros: &Macros) {
+        let names = macros.names_for(Some(self.draft.name.trim()));
+        let chosen = &mut self.draft.run_macro;
+        ui.horizontal(|ui| {
+            let mut on = !chosen.is_empty();
+            let label = ui
+                .add_enabled_ui(on || !names.is_empty(), |ui| {
+                    theme::switch_row(ui, "Run macro", &mut on)
+                        .on_disabled_hover_text("No macros yet: Record macro is in the Tools menu.")
+                })
+                .inner;
+            match (on, chosen.is_empty(), names.first()) {
+                (true, true, Some(first)) => chosen.clone_from(first),
+                (false, false, _) => chosen.clear(),
+                _ => {}
+            }
+            let shown = if chosen.is_empty() || names.contains(chosen) {
+                chosen.clone()
+            } else {
+                format!("{chosen} (missing)")
+            };
+            ui.add_enabled_ui(on, |ui| {
+                ComboBox::from_id_salt("macro")
+                    .selected_text(shown)
+                    .width(160.0)
+                    .show_ui(ui, |ui| {
+                        for name in &names {
+                            ui.selectable_value(chosen, name.clone(), name);
+                        }
+                    })
+                    .response
+                    .labelled_by(label.id);
+            });
+        });
+    }
+
+    /// A rename the dialog saved since the last call: (old name, new name).
+    pub fn take_renamed(&mut self) -> Option<(String, String)> {
+        self.renamed.take()
     }
 
     /// Delete and Help on the left; Connect (filled), Apply and Cancel on the right.
@@ -315,6 +354,9 @@ impl Editor {
             }
         }
         self.index = Some(index);
+        if let Some(old) = old_name.as_ref().filter(|old| **old != self.draft.name) {
+            self.renamed = Some((old.clone(), self.draft.name.clone()));
+        }
         self.save_password(old_name.as_deref(), keychain);
         Some(index)
     }

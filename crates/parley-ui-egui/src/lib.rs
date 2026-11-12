@@ -7,6 +7,7 @@ mod connect;
 mod dialog;
 mod fonts;
 mod keymap;
+mod macros;
 mod menu;
 mod profile;
 mod sessions;
@@ -20,6 +21,8 @@ use egui::{CentralPanel, Frame, Margin, Panel, Ui, ViewportCommand};
 use parley_core::net::{Connection, LinkState};
 
 use keymap::Keymap;
+use macros::Macros;
+pub use macros::{MacroStore, NoMacroStore, StoredMacro};
 use menu::Action;
 pub use profile::{Keychain, NoKeychain, Profile};
 use sessions::{Editor, Outcome};
@@ -61,6 +64,12 @@ pub struct ParleyUi {
     asking_to_exit: bool,
     /// Closing is decided: the next close request goes through.
     exit_confirmed: bool,
+    macros: Macros,
+    /// Naming a finished recording (R-KEY-3).
+    save_macro: Option<macros::SaveDialog>,
+    /// Asking for the password a running macro needs (R-KEY-4).
+    macro_password: Option<macros::PasswordDialog>,
+    macro_manager: Option<macros::Manager>,
 }
 
 impl Default for ParleyUi {
@@ -91,7 +100,16 @@ impl ParleyUi {
             show_shortcuts: false,
             asking_to_exit: false,
             exit_confirmed: false,
+            macros: Macros::new(Box::new(NoMacroStore)),
+            save_macro: None,
+            macro_password: None,
+            macro_manager: None,
         }
+    }
+
+    /// Where macros are kept (R-KEY-3). Without one, a recording cannot be saved.
+    pub fn set_macro_store(&mut self, store: Box<dyn MacroStore>) {
+        self.macros = Macros::new(store);
     }
 
     /// The app icon to show before the name in the menu bar (the launcher has it as a PNG).
@@ -154,7 +172,11 @@ impl ParleyUi {
             }
         }
         let ctx = ctx.clone();
-        self.connection = Some(Connection::open(config, move || ctx.request_repaint()));
+        let connection = Connection::open(config, move || ctx.request_repaint());
+        if !profile.run_macro.is_empty() {
+            self.play(&mut connection.session(), &profile.run_macro, true);
+        }
+        self.connection = Some(connection);
         self.current = Some(profile);
         self.online = false;
         self.closed = None;
@@ -207,16 +229,7 @@ impl ParleyUi {
         let menu_frame = theme::bar(ui, Margin::symmetric(8, 3));
         let tool_frame = theme::bar(ui, Margin::symmetric(10, 6));
         let status_frame = theme::bar(ui, Margin::symmetric(8, 5));
-        Panel::top("menu_bar").frame(menu_frame).show(ui, |ui| {
-            actions.extend(menu::menu_bar(
-                ui,
-                connected,
-                self.show_shortcuts,
-                &self.profiles,
-                self.logo.texture(ui.ctx()),
-                self.updates.available(),
-            ));
-        });
+        actions.extend(self.menu_panel(ui, menu_frame, session.as_deref()));
         Panel::top("toolbar").frame(tool_frame).show(ui, |ui| {
             let config = self
                 .current
@@ -267,9 +280,13 @@ impl ParleyUi {
         }
 
         let next = self.carry_out(ui.ctx(), actions, session.as_deref_mut());
+        if let Some(session) = session.as_deref_mut() {
+            self.macro_needs_password(session);
+        }
         drop(session);
         match connection {
             Some(connection) if next.disconnect => {
+                self.end_recording(&mut connection.session());
                 connection.close();
                 self.closed = Some("Disconnected.".to_owned());
             }
@@ -282,7 +299,36 @@ impl ParleyUi {
 
         self.show_editor(ui.ctx());
         self.show_settings(ui.ctx());
+        self.show_macro_dialogs(ui.ctx());
         self.show_exit_question(ui.ctx());
+    }
+
+    /// The menu bar; returns what was chosen from it.
+    fn menu_panel(
+        &mut self,
+        ui: &mut Ui,
+        frame: Frame,
+        session: Option<&parley_core::Session>,
+    ) -> Option<Action> {
+        let macro_names = self.macro_names();
+        let macro_menu = menu::MacroMenu {
+            state: session.map(parley_core::Session::macro_state),
+            names: &macro_names,
+        };
+        Panel::top("menu_bar")
+            .frame(frame)
+            .show(ui, |ui| {
+                menu::menu_bar(
+                    ui,
+                    session.is_some(),
+                    self.show_shortcuts,
+                    &self.profiles,
+                    self.logo.texture(ui.ctx()),
+                    self.updates.available(),
+                    &macro_menu,
+                )
+            })
+            .inner
     }
 
     /// Does what the menus, toolbar and start screen asked, except opening and closing the
@@ -334,6 +380,34 @@ impl ParleyUi {
                         ctx.request_repaint();
                     }
                 }
+                Action::RecordMacro => {
+                    if let Some(s) = session.as_deref_mut() {
+                        s.start_recording();
+                        self.focus_terminal = true;
+                    }
+                }
+                Action::StopRecording => {
+                    if let Some(s) = session.as_deref_mut() {
+                        self.end_recording(s);
+                    }
+                }
+                Action::RunMacro(i) => {
+                    let name = self.macro_names().get(i).cloned();
+                    if let (Some(s), Some(name)) = (session.as_deref_mut(), name) {
+                        self.play(s, &name, false);
+                        self.focus_terminal = true;
+                    }
+                }
+                // Reset stops a running macro, as from the keyboard.
+                Action::StopMacro => {
+                    if let Some(s) = session.as_deref_mut() {
+                        s.key(parley_core::Key::Reset);
+                    }
+                }
+                Action::Macros => {
+                    self.macros.reload();
+                    self.macro_manager = Some(macros::Manager::default());
+                }
             }
         }
         next
@@ -345,7 +419,9 @@ impl ParleyUi {
         match self.connection.as_ref().map(Connection::state) {
             Some(LinkState::Connected) => self.online = true,
             Some(LinkState::Closed(reason)) => {
-                self.connection = None;
+                if let Some(connection) = self.connection.take() {
+                    self.end_recording(&mut connection.session());
+                }
                 self.closed = Some(reason);
                 let exit = self.current.as_ref().is_some_and(|p| p.exit_on_close);
                 if std::mem::take(&mut self.online) && exit {
@@ -410,7 +486,18 @@ impl ParleyUi {
             return;
         };
         let connected = self.connection.is_some();
-        let outcome = editor.show(ctx, &mut self.profiles, self.keychain.as_ref(), connected);
+        let outcome = editor.show(
+            ctx,
+            &mut self.profiles,
+            self.keychain.as_ref(),
+            connected,
+            &self.macros,
+        );
+        if let Some((old, new)) = editor.take_renamed()
+            && let Err(e) = self.macros.rename_session(&old, &new)
+        {
+            self.warning = Some(format!("Could not move the macros of \"{old}\": {e}"));
+        }
         match outcome {
             Some(Outcome::Close) => self.editor = None,
             Some(Outcome::Connect(index)) => {
@@ -418,6 +505,82 @@ impl ParleyUi {
                 self.connect_saved(ctx, index);
             }
             None => {}
+        }
+    }
+}
+
+/// Macros (R-KEY-3, R-KEY-4).
+impl ParleyUi {
+    /// The macros the session in use can run, as the Tools menu lists them.
+    fn macro_names(&self) -> Vec<String> {
+        self.macros
+            .names_for(self.current.as_ref().map(|p| p.name.as_str()))
+    }
+
+    /// Starts the saved macro `name` on `session`, now or after sign-on.
+    fn play(&mut self, session: &mut parley_core::Session, name: &str, after_sign_on: bool) {
+        match self.macros.find(name).map(|m| &m.contents) {
+            Some(Ok(m)) => session.play(name, m.steps.clone(), after_sign_on),
+            Some(Err(e)) => self.warning = Some(format!("Macro \"{name}\" cannot be run: {e}")),
+            None => self.warning = Some(format!("There is no macro called \"{name}\".")),
+        }
+    }
+
+    /// Stops recording, if the session was, and asks for a name for the recording.
+    fn end_recording(&mut self, session: &mut parley_core::Session) {
+        if let Some(recorded) = session.stop_recording() {
+            let in_session = self
+                .current
+                .as_ref()
+                .filter(|c| self.profiles.iter().any(|p| p.name == c.name))
+                .map(|c| c.name.clone());
+            self.save_macro = Some(macros::SaveDialog::new(recorded, in_session));
+        }
+    }
+
+    /// A macro wants the password and the session has none: the keychain's, or ask.
+    fn macro_needs_password(&mut self, session: &mut parley_core::Session) {
+        if session.macro_state() != parley_core::MacroState::NeedsPassword
+            || self.macro_password.is_some()
+        {
+            return;
+        }
+        let saved = self
+            .current
+            .as_ref()
+            .and_then(|p| self.keychain.password(&p.name).ok().flatten());
+        if let Some(password) = saved {
+            session.give_macro_password(Some(&parley_core::signon::Password::new(password)));
+        } else {
+            let name = session.playing().unwrap_or_default();
+            self.macro_password = Some(macros::PasswordDialog::new(name));
+        }
+    }
+
+    fn show_macro_dialogs(&mut self, ctx: &egui::Context) {
+        if let Some(dialog) = &mut self.save_macro
+            && dialog.show(ctx, &mut self.macros)
+        {
+            self.save_macro = None;
+            self.focus_terminal = true;
+        }
+        if let Some(dialog) = &mut self.macro_manager
+            && dialog.show(ctx, &mut self.macros)
+        {
+            self.macro_manager = None;
+        }
+        if let Some(dialog) = &mut self.macro_password
+            && let Some(answer) = dialog.show(ctx)
+        {
+            self.macro_password = None;
+            self.focus_terminal = true;
+            if let Some(connection) = &self.connection {
+                let password = match answer {
+                    macros::PasswordAnswer::Typed(p) => Some(parley_core::signon::Password::new(p)),
+                    macros::PasswordAnswer::Cancelled => None,
+                };
+                connection.session().give_macro_password(password.as_ref());
+            }
         }
     }
 }
@@ -454,7 +617,9 @@ pub(crate) mod test_support {
     use std::collections::HashMap;
     use std::rc::Rc;
 
-    use crate::{Keychain, Profile};
+    use parley_core::macros::{Macro, Step};
+
+    use crate::{Keychain, MacroStore, Profile, StoredMacro};
 
     /// A session showing "Hello" and one input field at row 2, column 2, waiting for input.
     pub fn waiting_session() -> Session {
@@ -488,6 +653,59 @@ pub(crate) mod test_support {
             self.0.borrow_mut().remove(session);
             Ok(())
         }
+    }
+
+    /// Macros in memory, shared with the test so it can look inside.
+    #[derive(Debug, Clone, Default)]
+    pub struct MemoryMacros(pub Rc<RefCell<std::collections::BTreeMap<String, Macro>>>);
+
+    impl MacroStore for MemoryMacros {
+        fn list(&self) -> Result<Vec<StoredMacro>, String> {
+            Ok(self
+                .0
+                .borrow()
+                .iter()
+                .map(|(name, m)| StoredMacro {
+                    name: name.clone(),
+                    contents: Ok(m.clone()),
+                })
+                .collect())
+        }
+
+        fn save(&self, name: &str, contents: &Macro) -> Result<(), String> {
+            self.0
+                .borrow_mut()
+                .insert(name.to_owned(), contents.clone());
+            Ok(())
+        }
+
+        fn delete(&self, name: &str) -> Result<(), String> {
+            self.0.borrow_mut().remove(name);
+            Ok(())
+        }
+
+        fn rename(&self, old: &str, new: &str) -> Result<(), String> {
+            let m = self.0.borrow_mut().remove(old).ok_or("no such macro")?;
+            self.0.borrow_mut().insert(new.to_owned(), m);
+            Ok(())
+        }
+
+        fn folder(&self) -> Option<String> {
+            Some("/memory".to_owned())
+        }
+    }
+
+    /// A store holding one macro for every session, called `name`.
+    pub fn macros_with(name: &str) -> MemoryMacros {
+        let store = MemoryMacros::default();
+        store.0.borrow_mut().insert(
+            name.to_owned(),
+            Macro {
+                session: None,
+                steps: vec![Step::Text("wrkactjob".into()), Step::Wait],
+            },
+        );
+        store
     }
 
     pub fn profile(name: &str, host: &str) -> Profile {
@@ -1101,5 +1319,45 @@ mod tests {
         let config = &harness.state().profiles()[0].config;
         assert!(!config.tls);
         assert_eq!(config.port, 23);
+    }
+
+    #[test]
+    fn the_session_dialog_saves_the_macro_to_run_after_sign_on_r_key_4() {
+        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        harness
+            .state_mut()
+            .set_macro_store(Box::new(test_support::macros_with("Jobs")));
+        harness.get_by_label("New session…").click();
+        harness.run();
+        type_into(&mut harness, "Name", "Test");
+        type_into(&mut harness, "Host", "ibmi.example.com");
+        harness
+            .get_all_by_label("Run macro")
+            .next()
+            .expect("the switch")
+            .click();
+        harness.run();
+        harness.get_by_label("Apply").click();
+        harness.run();
+        assert_eq!(harness.state().profiles()[0].run_macro, "Jobs");
+    }
+
+    #[test]
+    fn renaming_a_session_moves_its_macros_along_r_key_3() {
+        let keychain = MemoryKeychain::default();
+        let mut harness = app_with(vec![profile("Old", "h")], &keychain);
+        let store = test_support::MemoryMacros::default();
+        let mine = parley_core::macros::Macro {
+            session: Some("Old".into()),
+            steps: Vec::new(),
+        };
+        store.0.borrow_mut().insert("m".into(), mine);
+        harness.state_mut().set_macro_store(Box::new(store.clone()));
+        harness.get_by_label("Edit…").click();
+        harness.run();
+        type_into(&mut harness, "Name", " 2");
+        harness.get_by_label("Apply").click();
+        harness.run();
+        assert_eq!(store.0.borrow()["m"].session.as_deref(), Some("Old 2"));
     }
 }

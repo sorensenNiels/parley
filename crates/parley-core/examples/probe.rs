@@ -4,8 +4,11 @@
 //!
 //! ```sh
 //! cargo run -p parley-core --example probe -- HOST [PORT] [--tls] [--ccsid 277] [--wide] \
-//!     [--keys help,reset,f12,enter,pageup,pagedown,f3,...]
+//!     [--keys help,reset,f12,enter,pageup,pagedown,f3,...] [--macro FILE]
 //! ```
+//!
+//! `--macro FILE` plays a macro file (R-KEY-4) on the first screen and prints the screen it
+//! ends on.
 
 #![expect(
     clippy::print_stdout,
@@ -16,12 +19,14 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
+use parley_core::macros::Macro;
 use parley_core::net::{Connection, LinkState};
-use parley_core::{Aid, CodePage, Key, KeyboardState, ScreenSize, SessionConfig};
+use parley_core::{Aid, CodePage, Key, KeyboardState, MacroState, ScreenSize, SessionConfig};
 
 fn main() {
     let mut config = SessionConfig::default();
     let mut keys = Vec::new();
+    let mut macro_file = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -32,6 +37,7 @@ fn main() {
                 }
             }
             "--wide" => config.screen_size = ScreenSize::Wide,
+            "--macro" => macro_file = args.next(),
             "--keys" => {
                 let list = args.next().unwrap_or_default();
                 for name in list.split(',') {
@@ -64,6 +70,31 @@ fn main() {
         connection.session().key(key);
         print_when_ready(&connection, &format!("after {name}"));
     }
+    if let Some(file) = macro_file {
+        play(&connection, &file);
+    }
+}
+
+/// Plays a macro file and prints the screen once it has ended (or after a minute).
+fn play(connection: &Connection, file: &str) {
+    let parsed = std::fs::read_to_string(file)
+        .map_err(|e| e.to_string())
+        .and_then(|text| Macro::parse(&text).map_err(|e| e.to_string()));
+    let steps = match parsed {
+        Ok(m) => m.steps,
+        Err(e) => {
+            eprintln!("probe: {file}: {e}");
+            std::process::exit(2);
+        }
+    };
+    connection.session().play(file, steps, false);
+    let start = Instant::now();
+    while connection.session().macro_state() != MacroState::Off
+        && start.elapsed() < Duration::from_secs(60)
+    {
+        thread::sleep(Duration::from_millis(50));
+    }
+    print_when_ready(connection, &format!("after macro {file}"));
 }
 
 fn key(name: &str) -> Option<Key> {

@@ -13,6 +13,7 @@
 
 mod desktop;
 mod keychain;
+mod macros;
 mod screenshot;
 
 use parley_ui_egui::{ParleyUi, Profile};

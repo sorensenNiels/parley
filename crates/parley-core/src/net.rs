@@ -134,6 +134,9 @@ impl Link {
                 if config.keep_alive && last_sent.elapsed() >= KEEP_ALIVE {
                     session.keep_alive();
                 }
+                if session.check_macro_time(Instant::now()) {
+                    (self.wake)();
+                }
                 session.take_outbound()
             };
             if !outbound.is_empty() {

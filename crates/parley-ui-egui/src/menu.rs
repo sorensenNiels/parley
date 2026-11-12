@@ -3,7 +3,7 @@
 //! grow as features arrive.
 
 use egui::{Button, MenuBar, RichText, Ui};
-use parley_core::{Aid, Key, SessionConfig};
+use parley_core::{Aid, Key, MacroState, SessionConfig};
 
 use crate::profile::Profile;
 use crate::theme;
@@ -25,6 +25,22 @@ pub enum Action {
     /// Help ▸ Check for updates…: Settings on the About page, checking (R-UI-11).
     CheckForUpdates,
     Key(Key),
+    /// Tools ▸ Record macro (R-KEY-3).
+    RecordMacro,
+    StopRecording,
+    /// Tools ▸ Run macro ▸: the macro at this index of the menu's list (R-KEY-4).
+    RunMacro(usize),
+    StopMacro,
+    /// Tools ▸ Macros…
+    Macros,
+}
+
+/// What the Tools menu shows about macros: the session's macro state (`None` when not
+/// connected) and the names of the macros it can run.
+#[derive(Debug)]
+pub struct MacroMenu<'a> {
+    pub state: Option<MacroState>,
+    pub names: &'a [String],
 }
 
 /// The app's icon and name, then the menus; Help on the right.
@@ -35,6 +51,7 @@ pub fn menu_bar(
     profiles: &[Profile],
     logo: Option<&egui::TextureHandle>,
     newer: Option<&parley_core::update::Release>,
+    macros: &MacroMenu<'_>,
 ) -> Option<Action> {
     let mut action = None;
     MenuBar::new().ui(ui, |ui| {
@@ -86,6 +103,10 @@ pub fn menu_bar(
             }
         });
         ui.menu_button("Tools", |ui| {
+            if let Some(chosen) = macro_items(ui, macros) {
+                action = Some(chosen);
+            }
+            ui.separator();
             if ui.button("Settings…").clicked() {
                 action = Some(Action::Settings);
             }
@@ -115,6 +136,42 @@ pub fn menu_bar(
             }
         });
     });
+    action
+}
+
+/// Record / Stop recording, Run macro ▸, Stop macro and Macros…
+fn macro_items(ui: &mut Ui, macros: &MacroMenu<'_>) -> Option<Action> {
+    let mut action = None;
+    let idle = macros.state == Some(MacroState::Off);
+    if macros.state == Some(MacroState::Recording) {
+        if ui.button("Stop recording").clicked() {
+            action = Some(Action::StopRecording);
+        }
+    } else if ui.add_enabled(idle, Button::new("Record macro")).clicked() {
+        action = Some(Action::RecordMacro);
+    }
+    ui.add_enabled_ui(idle && !macros.names.is_empty(), |ui| {
+        ui.menu_button("Run macro", |ui| {
+            for (i, name) in macros.names.iter().enumerate() {
+                if ui.button(name).clicked() {
+                    action = Some(Action::RunMacro(i));
+                }
+            }
+        });
+    });
+    let playing = matches!(
+        macros.state,
+        Some(MacroState::Playing | MacroState::NeedsPassword)
+    );
+    if playing {
+        let stop = Button::new("Stop macro").shortcut_text("Reset");
+        if ui.add(stop).clicked() {
+            action = Some(Action::StopMacro);
+        }
+    }
+    if ui.button("Macros…").clicked() {
+        action = Some(Action::Macros);
+    }
     action
 }
 

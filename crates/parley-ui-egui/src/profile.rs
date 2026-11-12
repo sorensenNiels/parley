@@ -19,6 +19,8 @@ pub struct Profile {
     pub confirm_exit: bool,
     /// Connect when Parley starts; at most one session has it.
     pub connect_on_start: bool,
+    /// The macro to run after sign-on (R-KEY-4); empty for none.
+    pub run_macro: String,
 }
 
 impl Default for Profile {
@@ -34,6 +36,7 @@ impl Default for Profile {
             exit_on_close: false,
             confirm_exit: true,
             connect_on_start: false,
+            run_macro: String::new(),
         }
     }
 }

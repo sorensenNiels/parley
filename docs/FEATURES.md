@@ -13,6 +13,18 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
+- **R-KEY-3, R-KEY-4** (2026-11-12): recording and running macros, built; D14 for the files. **Automated**
+  (`make test`): the file format (round trip, every key name, comments, errors naming the line); recording (text, keys,
+  `wait` after Enter, the password left out, refused keys and their Reset left out, clicks left out); playing (waiting
+  for the host, asking for the password, Reset stopping it, the 30 s time-out, stopping at an error, starting after
+  sign-on); the macro folder (save, list, rename, delete, a bad file listed with its line); in kittest the save,
+  password and Macros dialogs (each keeping its place), Run macro in the session dialog, and a renamed session taking
+  its macros along. **Against PUB400.COM** (`probe --macro`): a macro pressing Help waited for the host and stopped at
+  its "Function key not allowed" with the error on screen. **In the running app** (WSL2, the owner): a recorded
+  sign-on macro as the session's Run macro, without auto sign-on, signs on and asks for the password (after a fix: it
+  used to wait for a screen past sign-on that it brings itself). **Left:** the owner records and runs a macro after
+  signing on (Tools ▸ Record macro, Run macro, Run macro after auto sign-on, Macros…), then move R-KEY-3 and R-KEY-4
+  to REQUIREMENTS.md.
 - **R-NET-4 on Linux** (2026-11-12): auto sign-on is verified on Windows and macOS, but not yet on a Linux desktop.
   Under WSL2 it stops with "no keychain is available": WSL runs no Secret Service, so there is no saved password (D11).
   **Left:** the owner checks auto sign-on, by screen and bypassed, on a Linux desktop with GNOME Keyring or KDE Wallet.

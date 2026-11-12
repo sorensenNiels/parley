@@ -4,14 +4,17 @@
 
 mod datastream;
 mod input;
+mod playback;
 mod reply;
 
 use serde::{Deserialize, Serialize};
 
 pub use input::{Aid, Key};
+pub use playback::{MACRO_TIMEOUT, MacroState};
 
+use crate::macros::Step;
 use crate::record::{self, Opcode};
-use crate::screen::{Screen, ScreenSize, Style};
+use crate::screen::{Field, Screen, ScreenSize, Style};
 use crate::signon::{self, Credentials, Password, PasswordLevel, SignOn};
 use crate::telnet::{Received, Telnet};
 use crate::{CodePage, Result};
@@ -198,6 +201,12 @@ pub struct Session {
     /// Type the user and password into the first sign-on screen (R-NET-4).
     screen_sign_on: bool,
     outbound: Vec<u8>,
+    /// The steps recorded so far, while recording a macro (R-KEY-3).
+    recording: Option<Vec<Step>>,
+    /// The macro being played (R-KEY-4).
+    player: Option<playback::Player>,
+    /// How often the host has unlocked the keyboard: a macro's `wait` step watches it.
+    unlocks: u64,
 }
 
 impl Session {
@@ -226,6 +235,9 @@ impl Session {
             notice: None,
             screen_sign_on,
             outbound: Vec::new(),
+            recording: None,
+            player: None,
+            unlocks: 0,
         }
     }
 
@@ -278,6 +290,7 @@ impl Session {
             }
         }
         self.sign_on_screen();
+        self.advance_macro();
     }
 
     /// Queues a telnet No Operation, so an idle connection is not dropped (R-NET-5).
@@ -295,29 +308,37 @@ impl Session {
         {
             return;
         }
-        let mut inputs = self.screen.fields().iter().filter(|f| f.is_input());
-        let (Some(user), Some(password)) = (inputs.next().copied(), inputs.next().copied()) else {
+        let Some((user, password)) = self.sign_on_fields() else {
             return;
         };
-        let hidden =
-            |start| Style::from_attribute(self.screen.get(self.screen.previous(start))).hidden;
-        if hidden(user.start) || !hidden(password.start) {
-            return;
-        }
         self.screen_sign_on = false;
         let name = self.config.user.trim().to_owned();
         let secret = self.config.password.clone();
         self.type_at(user.start, &name);
         self.type_at(password.start, secret.expose());
         if self.error.is_none() {
-            self.key(Key::Aid(Aid::ENTER));
+            self.press(Key::Aid(Aid::ENTER));
         }
+    }
+
+    /// The user and password fields if this is a sign-on screen: its first two input fields,
+    /// the second non-display and the first not.
+    fn sign_on_fields(&self) -> Option<(Field, Field)> {
+        let mut inputs = self.screen.fields().iter().filter(|f| f.is_input());
+        let (user, password) = (*inputs.next()?, *inputs.next()?);
+        (!self.field_is_hidden(user.start) && self.field_is_hidden(password.start))
+            .then_some((user, password))
+    }
+
+    /// Whether the field starting at `start` is non-display (its attribute is just before it).
+    fn field_is_hidden(&self, start: usize) -> bool {
+        Style::from_attribute(self.screen.get(self.screen.previous(start))).hidden
     }
 
     fn type_at(&mut self, address: usize, text: &str) {
         self.screen.cursor = address;
         for c in text.chars() {
-            self.key(Key::Char(c));
+            self.press(Key::Char(c));
         }
     }
 
@@ -362,5 +383,6 @@ impl Session {
             self.screen.cursor = self.screen.home();
         }
         self.locked = false;
+        self.unlocks = self.unlocks.wrapping_add(1);
     }
 }

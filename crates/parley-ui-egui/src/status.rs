@@ -4,7 +4,7 @@
 
 use egui::{Align, Frame, Layout, Margin, RichText, Stroke, Ui};
 use parley_core::net::LinkState;
-use parley_core::{KeyboardState, Session};
+use parley_core::{KeyboardState, MacroState, Session};
 
 use crate::theme;
 
@@ -37,6 +37,7 @@ pub fn status_bar(
                 .strong(),
         )
         .on_hover_text("Message waiting");
+        macro_segment(ui, session);
         let insert = session.is_some_and(Session::insert_mode);
         segment(ui, 56.0, RichText::new(if insert { "Insert" } else { "" }));
         let secure = tls && link.is_some();
@@ -81,6 +82,26 @@ fn message(
             RichText::new(format!("Ready  ·  {notice}")).color(p.warning_text)
         }
         _ => text,
+    }
+}
+
+/// "REC" while recording a macro, "⏵ Macro" while one runs (R-KEY-3, R-KEY-4).
+fn macro_segment(ui: &mut Ui, session: Option<&Session>) {
+    let p = theme::palette(ui);
+    let (text, hover) = match session.map(|s| (s.macro_state(), s.playing())) {
+        Some((MacroState::Recording, _)) => (
+            RichText::new("REC").color(p.fail).strong(),
+            "Recording a macro: Stop recording is in the Tools menu".to_owned(),
+        ),
+        Some((MacroState::Playing | MacroState::NeedsPassword, name)) => (
+            RichText::new("⏵ Macro").color(p.ok),
+            format!("Running \"{}\": Reset stops it", name.unwrap_or_default()),
+        ),
+        Some((MacroState::Off, _)) | None => (RichText::new(""), String::new()),
+    };
+    let response = segment(ui, 64.0, text);
+    if !hover.is_empty() {
+        response.on_hover_text(hover);
     }
 }
 

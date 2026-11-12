@@ -6,6 +6,7 @@
 
 pub mod ebcdic;
 pub mod error;
+pub mod macros;
 pub mod net;
 pub mod record;
 pub mod screen;
@@ -17,4 +18,4 @@ pub mod update;
 pub use ebcdic::CodePage;
 pub use error::{Error, Result};
 pub use screen::{Color, Screen, ScreenSize, Style};
-pub use session::{Aid, Key, KeyboardState, OperatorError, Session, SessionConfig};
+pub use session::{Aid, Key, KeyboardState, MacroState, OperatorError, Session, SessionConfig};

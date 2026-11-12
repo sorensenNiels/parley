@@ -5,7 +5,13 @@ use parley_core::record::{self, Opcode};
 use parley_core::screen::ScreenSize;
 use parley_core::signon::{Password, SignOn};
 use parley_core::telnet::Telnet;
-use parley_core::{Aid, CodePage, Key, KeyboardState, OperatorError, Session, SessionConfig};
+use std::time::{Duration, Instant};
+
+use parley_core::macros::Step;
+use parley_core::session::MACRO_TIMEOUT;
+use parley_core::{
+    Aid, CodePage, Key, KeyboardState, MacroState, OperatorError, Session, SessionConfig,
+};
 
 const ESC: u8 = 0x04;
 const IAC: u8 = 255;
@@ -668,4 +674,171 @@ fn random_host_data_never_panics() {
             s.take_outbound();
         }
     }
+}
+
+// Macros (R-KEY-3, R-KEY-4).
+
+/// A screen after sign-on: one input field on row 5, waiting for Enter.
+fn menu_screen() -> Vec<u8> {
+    let mut o = vec![SBA, 5, 9];
+    o.extend(field([0x40, 0x00], 0x24, 10));
+    o.extend([0x13, 5, 10]);
+    screen_with(&o)
+}
+
+fn enter() -> Step {
+    Step::Key(Key::Aid(Aid::ENTER))
+}
+
+#[test]
+fn recording_keeps_text_keys_and_a_wait_after_enter_but_not_the_password_r_key_3() {
+    let mut s = signed_on();
+    s.start_recording();
+    assert_eq!(s.macro_state(), MacroState::Recording);
+    keys(&mut s, "quser");
+    s.key(Key::Tab);
+    keys(&mut s, "secret");
+    s.key(Key::Backspace);
+    s.key(Key::MoveTo { row: 0, column: 0 }); // a click: not recorded
+    s.key(Key::Aid(Aid::ENTER));
+    let recorded = s.stop_recording().expect("was recording");
+    assert_eq!(
+        recorded.steps,
+        [
+            Step::Text("quser".into()),
+            Step::Key(Key::Tab),
+            Step::Password,
+            enter(),
+            Step::Wait
+        ]
+    );
+    assert!(!recorded.to_text().contains("secret"));
+    assert_eq!(s.macro_state(), MacroState::Off);
+}
+
+#[test]
+fn recording_leaves_out_refused_keys_and_the_reset_after_them_r_key_3() {
+    let mut s = numeric_screen();
+    s.start_recording();
+    s.key(Key::Char('a')); // digits only: refused
+    s.key(Key::Reset);
+    s.key(Key::Char('1'));
+    s.key(Key::Aid(Aid::ENTER));
+    s.key(Key::Char('2')); // the keyboard is locked until the host answers
+    assert_eq!(
+        s.stop_recording().expect("was recording").steps,
+        [Step::Text("1".into()), enter(), Step::Wait]
+    );
+}
+
+#[test]
+fn a_macro_plays_waits_for_the_host_and_asks_for_a_password_r_key_4() {
+    let mut s = signed_on();
+    let steps = vec![
+        Step::Text("quser".into()),
+        Step::Key(Key::Tab),
+        Step::Password,
+        enter(),
+        Step::Wait,
+        Step::Text("wrkactjob".into()),
+    ];
+    s.play("start", steps, false);
+    assert_eq!(s.macro_state(), MacroState::NeedsPassword);
+    assert!(row_text(&s, 6).ends_with("QUSER"), "monocase user field");
+    s.give_macro_password(Some(&Password::new("æøå".into())));
+    assert_eq!(sent(&mut s).len(), 1, "Enter was sent");
+    assert_eq!(s.macro_state(), MacroState::Playing);
+    assert_eq!(s.playing(), Some("start"));
+    s.receive(&host(&menu_screen()));
+    assert_eq!(row_text(&s, 5), "         wrkactjob");
+    assert_eq!(s.macro_state(), MacroState::Off, "the macro ended");
+}
+
+#[test]
+fn reset_stops_a_running_macro_and_other_keys_are_ignored_r_key_4() {
+    let mut s = session();
+    s.receive(&host(&menu_screen()));
+    s.play(
+        "m",
+        vec![enter(), Step::Wait, Step::Text("x".into())],
+        false,
+    );
+    s.key(Key::Char('y'));
+    s.key(Key::Reset);
+    assert_eq!(s.macro_state(), MacroState::Off);
+    assert!(s.notice().is_some_and(|n| n.contains("\"m\" stopped")));
+    s.receive(&host(&menu_screen()));
+    assert_eq!(row_text(&s, 5), "", "nothing typed after the stop");
+}
+
+#[test]
+fn a_macro_gives_up_after_30_seconds_without_an_answer_r_key_4() {
+    let mut s = session();
+    s.receive(&host(&menu_screen()));
+    s.play(
+        "m",
+        vec![enter(), Step::Wait, Step::Text("x".into())],
+        false,
+    );
+    let start = Instant::now();
+    assert!(!s.check_macro_time(start));
+    assert!(!s.check_macro_time(start + Duration::from_secs(29)));
+    assert!(s.check_macro_time(start + MACRO_TIMEOUT));
+    assert_eq!(s.macro_state(), MacroState::Off);
+    assert!(s.notice().is_some_and(|n| n.contains("within 30 s")));
+}
+
+#[test]
+fn a_macro_stops_at_an_operator_error_r_key_4() {
+    let mut s = numeric_screen();
+    s.play("m", vec![Step::Text("1a2".into())], false);
+    assert_eq!(s.macro_state(), MacroState::Off);
+    assert_eq!(
+        s.keyboard(),
+        KeyboardState::Error(OperatorError::DigitsOnly),
+        "the error stays on screen"
+    );
+    assert!(s.notice().is_some_and(|n| n.contains("error")));
+}
+
+#[test]
+fn a_macro_after_sign_on_waits_for_the_first_screen_past_auto_sign_on_r_key_4() {
+    let mut s = signing_on_by_screen();
+    s.play("m", vec![Step::Text("go".into())], true);
+    s.receive(&host(&sign_on()));
+    let start = Instant::now();
+    s.check_macro_time(start);
+    assert!(
+        !s.check_macro_time(start + MACRO_TIMEOUT * 10),
+        "no time-out while signing on"
+    );
+    assert_eq!(s.macro_state(), MacroState::Playing);
+    s.receive(&host(&menu_screen()));
+    assert_eq!(row_text(&s, 5), "         go");
+    assert_eq!(s.macro_state(), MacroState::Off);
+}
+
+#[test]
+fn without_auto_sign_on_a_macro_at_connect_starts_on_the_sign_on_screen_r_key_4() {
+    // The macro is the sign-on: it must not wait for a screen past sign-on that it brings.
+    let mut s = session();
+    s.play(
+        "sign on",
+        vec![
+            Step::Text("qsecofr".into()),
+            Step::Key(Key::FieldExit),
+            Step::Text("secret".into()),
+            Step::Key(Key::Aid(Aid::ENTER)),
+            Step::Wait,
+        ],
+        true,
+    );
+    s.receive(&host(&sign_on()));
+    assert_eq!(
+        row_text(&s, 6),
+        "                User . . .                          QSECOFR"
+    );
+    assert_eq!(s.keyboard(), KeyboardState::Locked, "Enter was pressed");
+    s.receive(&host(&menu_screen()));
+    assert_eq!(s.macro_state(), MacroState::Off);
 }

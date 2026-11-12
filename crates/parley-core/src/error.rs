@@ -29,6 +29,10 @@ pub enum Error {
     #[error("could not check for a new version: {0}")]
     UpdateCheck(String),
 
+    /// A macro file that cannot be read (R-KEY-4); the text names the line.
+    #[error("{0}")]
+    Macro(String),
+
     #[error("the connection failed: {0}")]
     Io(#[from] io::Error),
 }
