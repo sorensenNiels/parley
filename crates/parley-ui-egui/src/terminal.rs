@@ -2,12 +2,12 @@
 //! window, with the cursor; it takes the keyboard while a session is open.
 
 use egui::{
-    Align2, Color32, CornerRadius, Event, EventFilter, FontId, Pos2, Rect, Response, Sense, Stroke,
-    Ui, Vec2, WidgetInfo,
+    Align2, Color32, CornerRadius, EventFilter, FontId, Pos2, Rect, Sense, Stroke, Ui, Vec2,
+    WidgetInfo,
 };
 use parley_core::{Color, Key, Session};
 
-use crate::keymap::Keymap;
+use crate::keymap::{Function, KeyInput, KeyMap};
 
 pub const BACKGROUND: Color32 = Color32::BLACK;
 
@@ -24,9 +24,17 @@ pub fn color(c: Color) -> Color32 {
     }
 }
 
-/// Draws the session's screen in all the space there is and passes the keyboard to it.
-/// `grab_focus` takes the keyboard focus (after a toolbar button, for example).
-pub fn show(ui: &mut Ui, session: &mut Session, keymap: &mut Keymap, grab_focus: bool) -> Response {
+/// Draws the session's screen in all the space there is and passes the keyboard to it, read
+/// with `map` (R-KEY-2). `grab_focus` takes the keyboard focus (after a toolbar button, for
+/// example). Returns what the keys asked of Parley beside the session: macros.
+pub fn show(
+    ui: &mut Ui,
+    session: &mut Session,
+    input: &mut KeyInput,
+    map: &KeyMap,
+    grab_focus: bool,
+) -> Vec<Function> {
+    let mut asked = Vec::new();
     let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click());
     let size = session.screen().size();
     let (rows, columns) = (usize::from(size.rows()), usize::from(size.columns()));
@@ -57,12 +65,18 @@ pub fn show(ui: &mut Ui, session: &mut Session, keymap: &mut Keymap, grab_focus:
             );
         });
         let (events, modifiers) = ui.input(|i| (i.events.clone(), i.modifiers));
-        if events.iter().any(|e| matches!(e, Event::Copy)) {
-            ui.ctx()
-                .copy_text(session.screen().text(session.code_page()));
-        }
-        for key in keymap.keys(&events, modifiers) {
-            session.key(key);
+        for function in input.read(&events, modifiers, map) {
+            match function {
+                Function::Key(key) => session.key(key),
+                Function::CopyScreen => ui
+                    .ctx()
+                    .copy_text(session.screen().text(session.code_page())),
+                // The text comes back as a paste event, read above next frame.
+                Function::Paste => ui
+                    .ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+                other @ (Function::RecordMacro | Function::RunMacro(_)) => asked.push(other),
+            }
         }
     }
 
@@ -103,7 +117,7 @@ pub fn show(ui: &mut Ui, session: &mut Session, keymap: &mut Keymap, grab_focus:
 
     let text = session.screen().text(session.code_page());
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Terminal, true, &text));
-    response
+    asked
 }
 
 fn draw_cursor(
@@ -214,18 +228,19 @@ impl Grid {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui::Event;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
     use parley_core::{CodePage, KeyboardState};
 
-    fn harness() -> Harness<'static, (Session, Keymap)> {
+    fn harness() -> Harness<'static, (Session, KeyInput)> {
         Harness::builder()
             .with_size(egui::vec2(900.0, 500.0))
             .build_ui_state(
-                |ui, (session, keymap)| {
-                    show(ui, session, keymap, false);
+                |ui, (session, input)| {
+                    show(ui, session, input, KeyMap::built_in(), false);
                 },
-                (crate::test_support::waiting_session(), Keymap::default()),
+                (crate::test_support::waiting_session(), KeyInput::default()),
             )
     }
 

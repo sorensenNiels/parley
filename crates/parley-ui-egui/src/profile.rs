@@ -20,6 +20,8 @@ pub struct Profile {
     pub connect_on_start: bool,
     /// The macro to run on connecting (R-KEY-4); empty for none.
     pub run_macro: String,
+    /// The keyboard map's name (R-KEY-2); empty, or a map since deleted, for Default.
+    pub keyboard_map: String,
 }
 
 impl Default for Profile {
@@ -36,6 +38,7 @@ impl Default for Profile {
             confirm_exit: true,
             connect_on_start: false,
             run_macro: String::new(),
+            keyboard_map: String::new(),
         }
     }
 }

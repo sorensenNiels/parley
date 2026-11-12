@@ -127,23 +127,27 @@ fn key_name(key: Key) -> String {
     match key {
         Key::MoveTo { row, column } => format!("move {} {}", row + 1, column + 1),
         Key::Char(c) => format!("text {}", quote(&c.to_string())),
-        Key::Aid(aid) => (1..=24)
-            .find(|&n| Aid::function(n) == Some(aid))
-            .map(|n| format!("f{n}"))
-            .or_else(|| named(key))
-            .unwrap_or_else(|| format!("aid-{:02x}", aid.code())),
-        _ => named(key).unwrap_or_default(),
+        Key::Aid(aid) => key_name_of(key).unwrap_or_else(|| format!("aid-{:02x}", aid.code())),
+        _ => key_name_of(key).unwrap_or_default(),
     }
 }
 
-fn named(key: Key) -> Option<String> {
+/// The name of a key in a macro file and in a keyboard map (R-KEY-2): `f1` to `f24` or one
+/// of [`KEY_NAMES`]; `None` for typed characters, cursor moves and other AIDs.
+pub fn key_name_of(key: Key) -> Option<String> {
+    if let Key::Aid(aid) = key
+        && let Some(n) = (1..=24).find(|&n| Aid::function(n) == Some(aid))
+    {
+        return Some(format!("f{n}"));
+    }
     KEY_NAMES
         .iter()
         .find(|(_, k)| *k == key)
         .map(|(name, _)| (*name).to_owned())
 }
 
-fn key_named(word: &str) -> Option<Key> {
+/// The key a name from [`key_name_of`] stands for, in any case.
+pub fn key_named(word: &str) -> Option<Key> {
     let lower = word.to_ascii_lowercase();
     if let Some(n) = lower.strip_prefix('f').and_then(|n| n.parse().ok()) {
         return Aid::function(n).map(Key::Aid);

@@ -70,15 +70,15 @@ tested against recorded host traffic.
 | Area | Capability | IDs | State |
 |---|---|---|---|
 | Connection | TN5250 over telnet (RFC 1205/2877) and TLS, company CA file, device name | R-NET-1..3 | Done |
-| | No auto sign-on and no saved passwords; passwords saved by 0.2 are deleted | R-NET-7 | Built, waiting for a check in the app (replaces R-NET-4) |
+| | No auto sign-on and no saved passwords; passwords saved by 0.2 are deleted | R-NET-7 | Done (replaces R-NET-4) |
 | | Keep-alive for idle connections | R-NET-5 | Done |
 | 5250 data stream | Commands and orders for sign-on, menus and normal use; Save/Restore Screen, 27×132 | R-DS-1..4 | Done |
 | | Checked point by point against IBM's Functions Reference | R-DS-5 | Done |
 | Character sets | EBCDIC CCSID 37, 277, 1140, 1142 | R-EBC-1 | Done |
 | Keyboard | Default map, field rules (numeric only, auto enter, field exit required, …) | R-KEY-1 | Done |
-| | Keyboard maps of the user's own, chosen per session | R-KEY-2 | Planned (Phase 3) |
-| | Record and run macros, saved as text files | R-KEY-3, R-KEY-4 | Built, waiting for a check in the app |
-| Add-ons | Settings ▸ Add-ons turns optional parts on or off; Macros is the first, on by default | R-ADD-1, R-ADD-2 | Built, waiting for a check in the app |
+| | Keyboard maps of the user's own, chosen per session | R-KEY-2 | Done |
+| | Record and run macros, saved as text files | R-KEY-3, R-KEY-4 | Done |
+| Add-ons | Settings ▸ Add-ons turns optional parts on or off; Macros is the first, on by default | R-ADD-1, R-ADD-2 | Done |
 | Screen and window | Scalable 5250 screen, colours, cursor, copy and paste; status bar; menu and toolbar | R-UI-1, R-UI-2, R-UI-4 | Done |
 | | Saved sessions and the session dialog | R-UI-3, R-UI-5 | Done |
 | | Settings (theme, size, terminal font, density) in pages; Tortuga's look | R-UI-6..10 | Done |
@@ -125,10 +125,12 @@ More on the design: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## 9. Release plan
 
-![Phase 0 to 2 done, Phase 3 in progress, more ideas later](images/phases.svg)
+![Phases 0 to 3 done, more ideas later](images/phases.svg)
 
-- **Phase 3 — keyboard maps and macros (now):** R-DS-5 done; macros (R-KEY-3, R-KEY-4) built and in review; then
-  R-KEY-2. Auto sign-on was removed as a security risk (R-NET-7, D16).
+- **Phase 3 — keyboard maps and macros (done 2026-11-12):** R-DS-5, keyboard maps (R-KEY-2), macros (R-KEY-3,
+  R-KEY-4) and add-ons (R-ADD-1, R-ADD-2), verified on Windows, macOS and Linux. Auto sign-on was removed as a
+  security risk (R-NET-7, D16).
+- **Next:** not planned yet; the next phase is picked from the ideas below.
 - **Later, to be planned:** printer sessions (IDEA-18), SQL against the session's host (IDEA-13) and what builds on
   it (IDEA-25, IDEA-26), tabs (IDEA-15), reconnect (IDEA-16), importing sessions from other emulators (IDEA-17),
   hotspots and better copy (IDEA-19, IDEA-20). See [IDEAS.md](IDEAS.md).

@@ -1,14 +1,17 @@
-//! Settings (R-UI-6, R-UI-8, R-UI-11, R-ADD-1): theme, text size, density, the terminal font,
-//! add-ons and looking for new versions, with what this build is on the About page, in a dialog
+//! Settings (R-UI-6, R-UI-8, R-UI-11, R-KEY-2, R-ADD-1): theme, text size, density, the
+//! terminal font, keyboard maps, add-ons and looking for new versions, with what this build is on the About page, in a dialog
 //! from Tools ▸ Settings… laid out as Tortuga's (D12): pages listed on the left, and on the
 //! right groups of rows, each a name with a short line about it and the control beside it.
 //! Changes show at once; Cancel puts the old ones back.
+
+mod keyboard;
 
 use egui::{Align, ComboBox, CornerRadius, Frame, Id, Layout, Margin, RichText, Stroke, Ui, vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::addons::{AddOn, AddOnSettings};
 use crate::fonts::{self, Installed};
+use crate::keymap::KeyMap;
 use crate::theme::{self, Density};
 use crate::updates::UpdateStatus;
 use crate::{dialog, terminal};
@@ -40,6 +43,8 @@ pub struct Settings {
     pub check_for_updates: bool,
     /// Which add-ons are on (R-ADD-1).
     pub addons: AddOnSettings,
+    /// The operator's keyboard maps; the Default map is built in, not kept (R-KEY-2).
+    pub keyboard_maps: Vec<KeyMap>,
 }
 
 impl Default for Settings {
@@ -51,6 +56,7 @@ impl Default for Settings {
             terminal_font: fonts::DEFAULT_TERMINAL_FONT.to_owned(),
             check_for_updates: true,
             addons: AddOnSettings::default(),
+            keyboard_maps: Vec::new(),
         }
     }
 }
@@ -86,6 +92,7 @@ pub fn apply(ctx: &egui::Context, old: Option<&Settings>, new: &Settings) -> Opt
 pub enum Page {
     Appearance,
     Terminal,
+    Keyboard,
     AddOns,
     About,
 }
@@ -95,6 +102,7 @@ impl Page {
         match self {
             Self::Appearance => "Appearance",
             Self::Terminal => "Terminal",
+            Self::Keyboard => "Keyboard",
             Self::AddOns => "Add-ons",
             Self::About => "About",
         }
@@ -110,6 +118,8 @@ impl Page {
                 settings.density = defaults.density;
             }
             Self::Terminal => settings.terminal_font = defaults.terminal_font,
+            // The map shown gets the Default map's keys: see `keyboard::Page::restore`.
+            Self::Keyboard => {}
             Self::AddOns => settings.addons = defaults.addons,
             Self::About => settings.check_for_updates = defaults.check_for_updates,
         }
@@ -118,7 +128,10 @@ impl Page {
 
 /// The pages under their headings, in the order the list shows them.
 const SECTIONS: [(&str, &[Page]); 2] = [
-    ("General", &[Page::Appearance, Page::Terminal]),
+    (
+        "General",
+        &[Page::Appearance, Page::Terminal, Page::Keyboard],
+    ),
     ("App", &[Page::AddOns, Page::About]),
 ];
 
@@ -139,6 +152,7 @@ pub struct Dialog {
     check_requested: bool,
     /// What was last copied, to say so.
     copied: Option<String>,
+    keyboard: keyboard::Page,
 }
 
 /// How the dialog closed.
@@ -158,7 +172,21 @@ impl Dialog {
             page: Page::Appearance,
             check_requested: false,
             copied: None,
+            keyboard: keyboard::Page::new(crate::keymap::DEFAULT_MAP, None),
         }
+    }
+
+    /// Shows the keyboard map `map` on the Keyboard page, with a key for each of `macros`
+    /// (`None` while the Macros add-on is off).
+    pub fn with_keyboard(mut self, map: &str, macros: Option<Vec<String>>) -> Self {
+        self.keyboard = keyboard::Page::new(map, macros);
+        self
+    }
+
+    /// Keyboard maps renamed while the dialog was open, in order: (old name, new name). Only
+    /// for a dialog closed with Save.
+    pub fn take_map_renames(&mut self) -> Vec<(String, String)> {
+        self.keyboard.take_renames()
     }
 
     /// Opens on the About page (Help ▸ Check for updates…).
@@ -210,7 +238,11 @@ impl Dialog {
                     .on_hover_text("Puts this page's settings back to their defaults.")
                     .clicked()
                 {
-                    self.page.restore_defaults(settings);
+                    if self.page == Page::Keyboard {
+                        self.keyboard.restore(settings);
+                    } else {
+                        self.page.restore_defaults(settings);
+                    }
                 }
                 let save = theme::primary_button(ui, "Save");
                 let (cancel, save) = theme::button_row(ui, |ui| {
@@ -232,6 +264,7 @@ impl Dialog {
         match self.page {
             Page::Appearance => appearance_page(ui, settings),
             Page::Terminal => self.terminal_page(ui, settings),
+            Page::Keyboard => self.keyboard.show(ui, settings),
             Page::AddOns => addons_page(ui, &mut settings.addons),
             Page::About => self.about_page(ui, settings, updates),
         }

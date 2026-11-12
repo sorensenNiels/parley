@@ -40,7 +40,8 @@
 
 ## Keys to host
 
-1. **keymap** (UI) turns a PC key into a 5250 key (R-KEY-1; per-session maps are R-KEY-2).
+1. **keymap** (UI) turns a PC key into a 5250 key or a Parley action, with the keyboard map of the session (the
+   built-in Default map is R-KEY-1; the operator's own maps, kept with the settings, are R-KEY-2).
 2. **input** applies the field rules: input-capable, numeric only, monocase, field exit required, auto enter.
 3. **reply** builds the answer for an AID key: cursor address, AID code and the modified fields.
 4. **telnet** escapes IAC bytes and adds EOR; the bytes wait in the outbound queue for the net thread.

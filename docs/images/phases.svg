@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 230" width="960" height="230" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif">
-  <title>Parley phases: 0 to 2 done, 3 in progress, more later</title>
+  <title>Parley phases: 0 to 3 done, more later</title>
   <defs>
     <style>
       .card { fill: #ffffff; stroke: #d0d7de; }
@@ -46,15 +46,15 @@
   <text x="410" y="190" class="detail">Tortuga look, updates</text>
 
   <!-- Phase 3 -->
-  <rect x="578" y="64" width="166" height="140" rx="10" fill="#ffffff" stroke="#d4a72c" stroke-width="1.5"/>
+  <rect x="578" y="64" width="166" height="140" rx="10" class="card"/>
   <text x="592" y="88" class="phase">PHASE 3</text>
-  <rect x="656" y="75" width="78" height="20" rx="10" fill="#fff8c5"/>
-  <text x="695" y="89" class="pill-text" fill="#9a6700" text-anchor="middle">In progress</text>
+  <rect x="682" y="75" width="50" height="20" rx="10" fill="#dafbe1"/>
+  <text x="707" y="89" class="pill-text" fill="#1a7f37" text-anchor="middle">Done</text>
   <text x="592" y="114" class="name">Keyboard maps</text>
   <text x="592" y="132" class="name">and macros</text>
-  <text x="592" y="158" class="detail">Macros, add-ons built</text>
-  <text x="592" y="174" class="detail">Auto sign-on removed</text>
-  <text x="592" y="190" class="detail">Next: R-KEY-2</text>
+  <text x="592" y="158" class="detail">Keyboard maps, macros,</text>
+  <text x="592" y="174" class="detail">add-ons, data stream</text>
+  <text x="592" y="190" class="detail">checked; no auto sign-on</text>
 
   <!-- Later -->
   <rect x="760" y="64" width="168" height="140" rx="10" fill="#f6f8fa" stroke="#d0d7de" stroke-dasharray="5 4"/>

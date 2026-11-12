@@ -329,6 +329,8 @@ pub struct Manager {
     /// The macro being renamed, and the new name typed so far.
     renaming: Option<(String, String)>,
     message: Option<String>,
+    /// A macro renamed since the last call to `take_renamed`: (old name, new name).
+    renamed: Option<(String, String)>,
 }
 
 /// The list's height: fixed, so the dialog keeps its size (CLAUDE.md "Layout traps").
@@ -433,6 +435,11 @@ impl Manager {
         }
     }
 
+    /// A macro renamed since the last call, so keys that run it can follow (R-KEY-2).
+    pub fn take_renamed(&mut self) -> Option<(String, String)> {
+        self.renamed.take()
+    }
+
     fn rename(&mut self, macros: &mut Macros, old: &str, new: &str) {
         let new = match check_name(new) {
             Ok(new) => new,
@@ -445,6 +452,7 @@ impl Manager {
         self.message = match macros.store.rename(old, &new) {
             Ok(()) => {
                 self.renaming = None;
+                self.renamed = Some((old.to_owned(), new));
                 None
             }
             Err(e) => Some(format!("Could not rename \"{old}\": {e}")),

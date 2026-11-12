@@ -22,7 +22,7 @@ use egui::{CentralPanel, Frame, Margin, Panel, Ui, ViewportCommand};
 use parley_core::net::{Connection, LinkState};
 
 pub use addons::{AddOn, AddOnSettings};
-use keymap::Keymap;
+use keymap::{Function, KeyInput, KeyMap};
 use macros::Macros;
 pub use macros::{MacroStore, NoMacroStore, StoredMacro};
 use menu::Action;
@@ -57,7 +57,7 @@ pub struct ParleyUi {
     settings_dialog: Option<settings::Dialog>,
     /// The add-ons in effect: the settings' add-ons as last saved (R-ADD-1).
     addons: AddOnSettings,
-    keymap: Keymap,
+    key_input: KeyInput,
     logo: menu::Logo,
     updates: updates::Updates,
     /// Give the terminal the keyboard focus on the next frame.
@@ -96,7 +96,7 @@ impl ParleyUi {
             applied: None,
             settings_dialog: None,
             addons: AddOnSettings::default(),
-            keymap: Keymap::default(),
+            key_input: KeyInput::default(),
             logo: menu::Logo::default(),
             updates: updates::Updates::default(),
             focus_terminal: false,
@@ -205,6 +205,41 @@ impl ParleyUi {
         }
     }
 
+    /// View ▸ Keyboard shortcuts: the keys of the map in use, in a side panel; true when its
+    /// close button was clicked.
+    fn shortcuts_panel(&self, ui: &mut Ui) -> bool {
+        let macro_names = self.addon_on(AddOn::Macros).then(|| self.macro_names());
+        let list = self
+            .keyboard_map()
+            .shortcuts(macro_names.as_deref(), is_mac(ui.ctx()));
+        Panel::right("shortcuts")
+            .show(ui, |ui| shortcuts(ui, &list))
+            .inner
+    }
+
+    /// The keyboard map of the session in use (R-KEY-2).
+    fn keyboard_map(&self) -> &KeyMap {
+        let name = self
+            .current
+            .as_ref()
+            .map_or("", |p| p.keyboard_map.as_str());
+        KeyMap::find(&self.settings.keyboard_maps, name)
+    }
+
+    /// The settings dialog, showing the session's keyboard map and the macros it can bind.
+    fn open_settings(&self, ctx: &egui::Context) -> settings::Dialog {
+        let macros = self.addon_on(AddOn::Macros).then(|| self.macro_names());
+        settings::Dialog::open(ctx, &self.settings).with_keyboard(&self.keyboard_map().name, macros)
+    }
+
+    /// Sessions that used the map `old` use it under its new name.
+    fn rename_keyboard_map(&mut self, old: &str, new: &str) {
+        let profiles = self.profiles.iter_mut().chain(self.current.as_mut());
+        for profile in profiles.filter(|p| p.keyboard_map == old) {
+            new.clone_into(&mut profile.keyboard_map);
+        }
+    }
+
     fn open_editor(&mut self, index: Option<usize>) {
         self.editor = Some(Editor::open(&self.profiles, index));
     }
@@ -266,13 +301,10 @@ impl ParleyUi {
                     self.addon_on(AddOn::Macros),
                 );
             });
-        if self.show_shortcuts {
-            Panel::right("shortcuts").show(ui, |ui| {
-                if shortcuts(ui) {
-                    actions.push(Action::ToggleShortcuts);
-                }
-            });
+        if self.show_shortcuts && self.shortcuts_panel(ui) {
+            actions.push(Action::ToggleShortcuts);
         }
+        let mut asked = Vec::new();
         if let Some(session) = session.as_deref_mut() {
             CentralPanel::default()
                 .frame(
@@ -283,7 +315,13 @@ impl ParleyUi {
                 .show(ui, |ui| {
                     // The dialog has the keyboard while it is open.
                     let grab = self.editor.is_none() && std::mem::take(&mut self.focus_terminal);
-                    terminal::show(ui, session, &mut self.keymap, grab);
+                    let map = KeyMap::find(
+                        &self.settings.keyboard_maps,
+                        self.current
+                            .as_ref()
+                            .map_or("", |p| p.keyboard_map.as_str()),
+                    );
+                    asked = terminal::show(ui, session, &mut self.key_input, map, grab);
                 });
         } else {
             CentralPanel::default().show(ui, |ui| {
@@ -297,6 +335,9 @@ impl ParleyUi {
         }
 
         let next = self.carry_out(ui.ctx(), actions, session.as_deref_mut());
+        if let Some(session) = session.as_deref_mut() {
+            self.carry_out_keys(asked, session);
+        }
         if let Some(session) = session.as_deref_mut() {
             self.macro_needs_password(session);
         }
@@ -382,11 +423,9 @@ impl ParleyUi {
                     ctx.send_viewport_cmd(ViewportCommand::RequestPaste);
                     self.focus_terminal = true;
                 }
-                Action::Settings => {
-                    self.settings_dialog = Some(settings::Dialog::open(ctx, &self.settings));
-                }
+                Action::Settings => self.settings_dialog = Some(self.open_settings(ctx)),
                 Action::CheckForUpdates => {
-                    let dialog = settings::Dialog::open(ctx, &self.settings).on_about_page();
+                    let dialog = self.open_settings(ctx).on_about_page();
                     self.settings_dialog = Some(dialog);
                     self.updates.start(ctx, updates::Check::Now);
                 }
@@ -491,6 +530,9 @@ impl ParleyUi {
         }
         match closed {
             Some(settings::Closed::Keep) => {
+                for (old, new) in dialog.take_map_renames() {
+                    self.rename_keyboard_map(&old, &new);
+                }
                 self.settings_dialog = None;
                 self.set_addons(self.settings.addons.clone());
             }
@@ -513,6 +555,7 @@ impl ParleyUi {
             &mut self.profiles,
             connected,
             macros_on.then_some(&self.macros),
+            &self.settings.keyboard_maps,
         );
         if let Some((old, new)) = editor.take_renamed()
             && let Err(e) = self.macros.rename_session(&old, &new)
@@ -532,6 +575,27 @@ impl ParleyUi {
 
 /// Macros (R-KEY-3, R-KEY-4).
 impl ParleyUi {
+    /// The keys of a map that do something with macros (R-KEY-2): Record macro starts or
+    /// stops a recording, a macro's key runs it. Nothing while the add-on is off (R-ADD-2).
+    fn carry_out_keys(&mut self, asked: Vec<Function>, session: &mut parley_core::Session) {
+        if !self.addon_on(AddOn::Macros) {
+            return;
+        }
+        for function in asked {
+            match function {
+                Function::RecordMacro => {
+                    if session.macro_state() == parley_core::MacroState::Recording {
+                        self.end_recording(session);
+                    } else {
+                        session.start_recording();
+                    }
+                }
+                Function::RunMacro(name) => self.play(session, &name),
+                Function::Key(_) | Function::CopyScreen | Function::Paste => {}
+            }
+        }
+    }
+
     /// The macros the session in use can run, as the Tools menu lists them.
     fn macro_names(&self) -> Vec<String> {
         self.macros
@@ -596,10 +660,16 @@ impl ParleyUi {
             self.save_macro = None;
             self.focus_terminal = true;
         }
-        if let Some(dialog) = &mut self.macro_manager
-            && dialog.show(ctx, &mut self.macros)
-        {
-            self.macro_manager = None;
+        if let Some(dialog) = &mut self.macro_manager {
+            let closed = dialog.show(ctx, &mut self.macros);
+            if let Some((old, new)) = dialog.take_renamed() {
+                for map in &mut self.settings.keyboard_maps {
+                    map.rename_macro(&old, &new);
+                }
+            }
+            if closed {
+                self.macro_manager = None;
+            }
         }
         if let Some(dialog) = &mut self.macro_password
             && let Some(answer) = dialog.show(ctx)
@@ -627,18 +697,26 @@ struct Next {
     connect: Option<usize>,
 }
 
-/// The keyboard shortcuts, in a side panel; returns true when its close button was clicked.
-fn shortcuts(ui: &mut Ui) -> bool {
+/// The keys of the map in use, in a side panel; returns true when its close button was
+/// clicked. `list` is (keys, what they do).
+fn shortcuts(ui: &mut Ui, list: &[(String, String)]) -> bool {
     let close = dialog::title_bar(ui, "Keyboard shortcuts");
     ui.add_space(4.0);
-    egui::Grid::new("shortcuts").striped(true).show(ui, |ui| {
-        for (pc, function) in keymap::SHORTCUTS {
-            ui.label(*pc);
-            ui.label(*function);
-            ui.end_row();
-        }
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        egui::Grid::new("shortcuts").striped(true).show(ui, |ui| {
+            for (keys, function) in list {
+                ui.label(keys);
+                ui.label(function);
+                ui.end_row();
+            }
+        });
     });
     close
+}
+
+/// Whether to name keys as macOS does (Cmd+C).
+fn is_mac(ctx: &egui::Context) -> bool {
+    ctx.os() == egui::os::OperatingSystem::Mac
 }
 
 /// Sessions for the UI tests.
@@ -1489,5 +1567,163 @@ mod tests {
         harness.state_mut().set_settings(macros_off());
         assert_eq!(playing(harness.state()), None);
         assert!(harness.state().macro_manager.is_none());
+    }
+
+    /// Tools ▸ Settings…, then the Keyboard page.
+    fn open_keyboard_settings(harness: &mut Harness<'static, ParleyUi>) {
+        harness.get_by_label("Tools").click();
+        harness.run();
+        harness.get_by_label("Settings…").click();
+        harness.run();
+        harness.get_by_label("Keyboard").click();
+        harness.run();
+    }
+
+    fn with_map(name: &str) -> Settings {
+        Settings {
+            keyboard_maps: vec![KeyMap {
+                name: name.to_owned(),
+                ..KeyMap::default()
+            }],
+            ..Settings::default()
+        }
+    }
+
+    fn enter() -> Function {
+        Function::Key(parley_core::Key::Aid(parley_core::Aid::ENTER))
+    }
+
+    #[test]
+    fn the_default_map_cannot_be_changed_r_key_2() {
+        let mut harness = app_with(Vec::new());
+        open_keyboard_settings(&mut harness);
+        assert!(harness.query_by_label("+").is_none(), "no key to add");
+        assert!(harness.query_by_label("Remove this key").is_none());
+        harness.get_by_label("Ctrl+R");
+    }
+
+    #[test]
+    fn a_copy_of_the_default_map_gets_a_new_key_r_key_2() {
+        let mut harness = app_with(Vec::new());
+        open_keyboard_settings(&mut harness);
+        harness.get_by_label("Copy…").click();
+        harness.run();
+        // The name offered is "Default copy".
+        harness.get_by_label("Create").click();
+        harness.run();
+        // The first + is Enter's.
+        harness
+            .get_all_by_label("+")
+            .next()
+            .expect("a + button")
+            .click();
+        harness.run();
+        harness.get_by_label("Press a key…");
+        harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::J);
+        harness.run();
+        harness.get_by_label("Save").click();
+        harness.run();
+        let maps = &harness.state().settings().keyboard_maps;
+        assert_eq!(maps.len(), 1);
+        assert_eq!(maps[0].name, "Default copy");
+        let ctrl_j = keymap::Chord::parse("Ctrl+J").expect("a key");
+        assert_eq!(maps[0].function_for(ctrl_j), Some(enter()));
+    }
+
+    #[test]
+    fn a_key_another_function_has_moves_only_when_confirmed_r_key_2() {
+        let mut harness = app_with(Vec::new());
+        harness.state_mut().set_settings(with_map("Mine"));
+        harness.state_mut().current = Some(Profile {
+            keyboard_map: "Mine".to_owned(),
+            ..profile("Prod", "prod")
+        });
+        open_keyboard_settings(&mut harness);
+        harness
+            .get_all_by_label("+")
+            .next()
+            .expect("a + button")
+            .click();
+        harness.run();
+        harness.key_press(egui::Key::F3);
+        harness.run();
+        harness.get_by_label("F3 is F3 now.");
+        let f3 = keymap::Chord::parse("F3").expect("a key");
+        let map = |h: &Harness<'static, ParleyUi>| h.state().settings().keyboard_maps[0].clone();
+        assert_ne!(map(&harness).function_for(f3), Some(enter()), "not yet");
+        harness.get_by_label("Use it for Enter").click();
+        harness.run();
+        assert_eq!(map(&harness).function_for(f3), Some(enter()));
+    }
+
+    #[test]
+    fn renaming_a_map_keeps_the_sessions_that_use_it_r_key_2() {
+        let prod = Profile {
+            keyboard_map: "Mine".to_owned(),
+            ..profile("Prod", "prod")
+        };
+        let mut harness = app_with(vec![prod.clone()]);
+        harness.state_mut().set_settings(with_map("Mine"));
+        harness.state_mut().current = Some(prod);
+        open_keyboard_settings(&mut harness);
+        harness.get_by_label("Rename…").click();
+        harness.run();
+        type_into(&mut harness, "Name", " 2");
+        harness.get_by_label("Rename").click();
+        harness.run();
+        harness.get_by_label("Save").click();
+        harness.run();
+        assert_eq!(harness.state().settings().keyboard_maps[0].name, "Mine 2");
+        assert_eq!(harness.state().profiles()[0].keyboard_map, "Mine 2");
+        assert_eq!(harness.state().keyboard_map().name, "Mine 2");
+    }
+
+    #[test]
+    fn a_session_whose_map_was_deleted_uses_default_r_key_2() {
+        let mut harness = app_with(Vec::new());
+        harness.state_mut().set_settings(with_map("Mine"));
+        harness.state_mut().current = Some(Profile {
+            keyboard_map: "Mine".to_owned(),
+            ..profile("Prod", "prod")
+        });
+        assert_eq!(harness.state().keyboard_map().name, "Mine");
+        open_keyboard_settings(&mut harness);
+        harness.get_by_label("Delete map").click();
+        harness.run();
+        harness.get_by_label("Save").click();
+        harness.run();
+        assert_eq!(harness.state().settings().keyboard_maps, []);
+        assert!(harness.state().keyboard_map().is_built_in());
+    }
+
+    #[test]
+    fn the_keyboard_page_keeps_the_dialog_in_place_r_key_2() {
+        let mut harness = app_with(Vec::new());
+        harness.state_mut().set_settings(with_map("Mine"));
+        harness.state_mut().current = Some(Profile {
+            keyboard_map: "Mine".to_owned(),
+            ..profile("Prod", "prod")
+        });
+        open_keyboard_settings(&mut harness);
+        let before = harness.get_by_label("Save").rect();
+        harness.run_steps(5);
+        assert_eq!(harness.get_by_label("Save").rect(), before);
+    }
+
+    #[test]
+    fn the_session_dialog_chooses_the_keyboard_map_r_key_2() {
+        let mut harness = app_with(Vec::new());
+        harness.state_mut().set_settings(with_map("Mine"));
+        harness.get_by_label("New session…").click();
+        harness.run();
+        type_into(&mut harness, "Name", "Prod");
+        type_into(&mut harness, "Host", "prod");
+        harness.get_by_label("Keyboard map").click();
+        harness.run();
+        harness.get_by_label("Mine").click();
+        harness.run();
+        harness.get_by_label("Apply").click();
+        harness.run();
+        assert_eq!(harness.state().profiles()[0].keyboard_map, "Mine");
     }
 }

@@ -13,33 +13,7 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
-- **R-KEY-3, R-KEY-4** (2026-11-12): recording and running macros, built; D14 for the files. **Automated**
-  (`make test`): the file format (round trip, every key name, comments, errors naming the line); recording (text, keys,
-  `wait` after Enter, the password left out, refused keys and their Reset left out, clicks left out); playing (waiting
-  for the host, asking for the password, Reset stopping it, the 30 s time-out, stopping at an error, starting on
-  the first screen); the macro folder (save, list, rename, delete, a bad file listed with its line); in kittest the save,
-  password and Macros dialogs (each keeping its place), Run macro in the session dialog, and a renamed session taking
-  its macros along. **Against PUB400.COM** (`probe --macro`): a macro pressing Help waited for the host and stopped at
-  its "Function key not allowed" with the error on screen. **In the running app** (WSL2, the owner): a recorded
-  sign-on macro as the session's Run macro, without auto sign-on, signs on and asks for the password (after a fix: it
-  used to wait for a screen past sign-on that it brings itself). **Left:** the owner records and runs a macro after
-  signing on (Tools ▸ Record macro, Run macro, Run macro on connect, Macros…), then move R-KEY-3 and R-KEY-4
-  to REQUIREMENTS.md.
-- **R-ADD-1, R-ADD-2** (2026-11-12): Settings ▸ Add-ons, with Macros as the first add-on (on by default), built;
-  D15. **Automated** (`make test`): each add-on starts with its default, only a change from it is kept, unknown ids
-  still load (`addons.rs`); in kittest the Add-ons page turning Macros off on Save, Cancel leaving it as it was, the
-  dialog keeping its place; while off no macro items in Tools, no Run macro in the session dialog, the macro folder not
-  read (and read again when turned on), a session's Run macro kept but not run on connect; turned off while connected,
-  a recording asks for its name and a running macro stops (against a local port that never answers). **Left:** the
-  owner checks the page and turning Macros off and on in the running app, then move R-ADD-1 and R-ADD-2 to
-  REQUIREMENTS.md.
-- **R-NET-7** (2026-11-12): auto sign-on and saved passwords removed (D16; R-NET-4 and the planned R-NET-6 go).
-  **Automated** (`make test`): telnet's answer to RFC 4777's request with a host seed holds only the device name; a
-  session on a sign-on screen sends nothing until a key; a macro's `password` step always asks; the session dialog
-  asks for no user or password; `Password`'s `Debug` hides it. The RFC 4777 code and the `des`, `sha1` and
-  `getrandom` dependencies are gone. **Left:** the owner checks in the running app that the session dialog has no
-  sign-on fields and that a password Parley 0.2 saved is gone from the keychain after the first start (Windows
-  Credential Manager, macOS Keychain Access, a Linux desktop), then move R-NET-7 to REQUIREMENTS.md.
+Nothing at the moment.
 
 ## Implemented
 
@@ -91,7 +65,7 @@ How it was checked:
   preview, and PUB400's sign-on screen in IBM Plex Mono with the roomier bars; `make package` puts the OFL files in
   the .deb (66 ms to list this machine's installed monospace fonts).
 
-### Phase 3: keyboard maps and macros (in progress) — R-DS-5
+### Phase 3: keyboard maps and macros (2026-11-12) — R-DS-5, R-KEY-2..4, R-ADD-1..2, R-NET-7
 
 **R-DS-5** (2026-11-12): verified by the owner on their IBM i in the running app on Windows, macOS, Linux and WSL2
 (signed on; a spooled file shown at 27×132 in a wide session).
@@ -105,3 +79,36 @@ How it was checked:
 - **Automated** (`make test`): a test per fix in `tests/session.rs` (`*_r_ds_5`), each failing without its fix.
 - **Against PUB400.COM**: the same sign-on screen at 24×80 and 27×132 before and after (it sends no Query before
   sign-on).
+
+**R-KEY-3, R-KEY-4** (2026-11-12): recording and running macros; D14 for the files. **Automated**
+(`make test`): the file format (round trip, every key name, comments, errors naming the line); recording (text, keys,
+`wait` after Enter, the password left out, refused keys and their Reset left out, clicks left out); playing (waiting
+for the host, asking for the password, Reset stopping it, the 30 s time-out, stopping at an error, starting on
+the first screen); the macro folder (save, list, rename, delete, a bad file listed with its line); in kittest the save,
+password and Macros dialogs (each keeping its place), Run macro in the session dialog, and a renamed session taking
+its macros along. **Against PUB400.COM** (`probe --macro`): a macro pressing Help waited for the host and stopped at
+its "Function key not allowed" with the error on screen. **In the running app** (WSL2, the owner): a recorded
+sign-on macro as the session's Run macro, without auto sign-on, signs on and asks for the password (after a fix: it
+used to wait for a screen past sign-on that it brings itself). **Verified** by the owner in the running app on Windows, macOS and Linux (2026-11-12).
+
+**R-ADD-1, R-ADD-2** (2026-11-12): Settings ▸ Add-ons, with Macros as the first add-on (on by default);
+D15. **Automated** (`make test`): each add-on starts with its default, only a change from it is kept, unknown ids
+still load (`addons.rs`); in kittest the Add-ons page turning Macros off on Save, Cancel leaving it as it was, the
+dialog keeping its place; while off no macro items in Tools, no Run macro in the session dialog, the macro folder not
+read (and read again when turned on), a session's Run macro kept but not run on connect; turned off while connected,
+a recording asks for its name and a running macro stops (against a local port that never answers). **Verified** by the owner in the running app on Windows, macOS and Linux (2026-11-12).
+
+**R-KEY-2** (2026-11-12): keyboard maps. **Automated** (`make test`): the Default map gives R-KEY-1's keys
+(Ctrl alone and Ctrl+R Reset, Ctrl+Plus with or without Shift); a map of one's own changes them, runs a macro, and
+can drop Ctrl alone; keys read back as written, unknown bindings are kept and ignored; keys that type a character
+without Ctrl, or with Ctrl+Alt (AltGr), are refused; a deleted map falls back to Default; renaming a macro moves its
+keys. In kittest: the Default map has nothing to change; a copy gets a new key by clicking + and pressing it; a key
+another function has moves only after "Use it for …"; renaming a map moves the sessions that use it; deleting it
+gives them Default; the session dialog chooses the map; the Keyboard page keeps the dialog in place. **Seen** in a
+`--screenshot` of the page (WSL2, dark). **Verified** by the owner in the running app on Windows, macOS and Linux (2026-11-12).
+
+**R-NET-7** (2026-11-12): auto sign-on and saved passwords removed (D16; R-NET-4 and the planned R-NET-6 go).
+**Automated** (`make test`): telnet's answer to RFC 4777's request with a host seed holds only the device name; a
+session on a sign-on screen sends nothing until a key; a macro's `password` step always asks; the session dialog
+asks for no user or password; `Password`'s `Debug` hides it. The RFC 4777 code and the `des`, `sha1` and
+`getrandom` dependencies are gone. **Verified** by the owner in the running app on Windows, macOS and Linux (2026-11-12).

@@ -4,6 +4,7 @@
 use egui::{Button, ComboBox, DragValue, Grid, TextEdit, Ui};
 use parley_core::{CodePage, ScreenSize, SessionConfig};
 
+use crate::keymap::{DEFAULT_MAP, KeyMap};
 use crate::macros::Macros;
 use crate::profile::Profile;
 use crate::{dialog, theme};
@@ -15,6 +16,8 @@ const HELP: &str = "\
 Name: what the session is called in the File menu and on the start screen.
 Host: the IBM i's name or IP address. TLS encrypts the connection (port 992).
 Device name: the display device to use; empty lets the IBM i make one up (QPADEVxxxx).
+
+Keyboard map: which PC keys do what; make your own in Settings, Keyboard.
 
 Exit when the session ends: close Parley when the IBM i ends the session (sign-off).
 Confirm exit: ask before closing Parley while connected.
@@ -75,6 +78,7 @@ impl Editor {
         profiles: &mut Vec<Profile>,
         connected: bool,
         macros: Option<&Macros>,
+        maps: &[KeyMap],
     ) -> Option<Outcome> {
         let title = if self.index.is_some() {
             "Edit session"
@@ -93,7 +97,7 @@ impl Editor {
                     theme::section_label(left, "Connection");
                     connection_fields(left, &mut self.draft.config);
                     theme::section_label(right, "Options");
-                    self.options(right, macros);
+                    self.options(right, macros, maps);
                     if self.show_help {
                         right.add_space(10.0);
                         theme::hint(right, HELP);
@@ -143,7 +147,8 @@ impl Editor {
     }
 
     /// `macros` is `None` while the Macros add-on is off: no Run macro then (R-ADD-2).
-    fn options(&mut self, ui: &mut Ui, macros: Option<&Macros>) {
+    fn options(&mut self, ui: &mut Ui, macros: Option<&Macros>, maps: &[KeyMap]) {
+        keyboard_map(ui, &mut self.draft.keyboard_map, maps);
         if let Some(macros) = macros {
             self.run_macro(ui, macros);
         }
@@ -373,4 +378,29 @@ fn connection_fields(ui: &mut Ui, config: &mut SessionConfig) {
             .labelled_by(label.id);
             ui.end_row();
         });
+}
+
+/// The keyboard map the session uses (R-KEY-2): Default or one of the operator's. A map
+/// since deleted shows as Default, which is what the session gets.
+fn keyboard_map(ui: &mut Ui, chosen: &mut String, maps: &[KeyMap]) {
+    ui.horizontal(|ui| {
+        let label = ui.label("Keyboard map");
+        let shown = KeyMap::find(maps, chosen).name.clone();
+        ComboBox::from_id_salt("keyboard_map")
+            .selected_text(shown)
+            .width(180.0)
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(!maps.iter().any(|m| m.name == *chosen), DEFAULT_MAP)
+                    .clicked()
+                {
+                    chosen.clear();
+                }
+                for map in maps {
+                    ui.selectable_value(chosen, map.name.clone(), &map.name);
+                }
+            })
+            .response
+            .labelled_by(label.id);
+    });
 }

@@ -29,7 +29,7 @@
 
 | ID | Idea |
 |---|---|
-| IDEA-9 | Session profiles: several saved connections, each with its own settings and keyboard map. *Saved sessions are R-UI-5 (2026-11-12); the keyboard map per session is still open.* *→ R-KEY-2 (Phase 3).* |
+| IDEA-9 | Session profiles: several saved connections, each with its own settings and keyboard map. *Saved sessions are R-UI-5 (2026-11-12); the keyboard map per session is R-KEY-2 (2026-11-12).* *→ R-KEY-2 (Phase 3).* |
 | IDEA-15 | Several sessions in one window, as tabs (Ctrl+Tab between them), each with its own connection thread; a tab shows the session name and a dot for message waiting or a lost connection. Today it is one session per window (R-UI-5). |
 | IDEA-16 | Reconnect: when the connection drops (not when the host ends the job), offer "Reconnect" in the status bar, and optionally reconnect on its own with back-off; the session's Run macro runs again. |
 | IDEA-17 | Import sessions from IBM i Access Client Solutions (`.hod`) and Personal Communications (`.ws`) files: host, port, TLS, device name, code page, screen size. Lowers the cost of trying Parley. |
