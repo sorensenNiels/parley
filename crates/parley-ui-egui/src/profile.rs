@@ -1,6 +1,5 @@
 //! Saved sessions (R-UI-5): each one a name, the connection settings and what the window does
-//! around the session. Passwords are not part of them: they live in the operating system's
-//! keychain (R-P-3), behind [`Keychain`].
+//! around the session. No user or password: Parley never signs on by itself (R-NET-7).
 
 use parley_core::SessionConfig;
 use serde::{Deserialize, Serialize};
@@ -19,7 +18,7 @@ pub struct Profile {
     pub confirm_exit: bool,
     /// Connect when Parley starts; at most one session has it.
     pub connect_on_start: bool,
-    /// The macro to run after sign-on (R-KEY-4); empty for none.
+    /// The macro to run on connecting (R-KEY-4); empty for none.
     pub run_macro: String,
 }
 
@@ -49,33 +48,5 @@ impl Profile {
             config,
             ..Self::default()
         }
-    }
-}
-
-/// Where passwords are kept: the operating system's keychain in the app, memory in tests.
-/// Errors are display text: the UI only shows them.
-pub trait Keychain: std::fmt::Debug {
-    /// The password saved for `session`, `None` if there is none.
-    fn password(&self, session: &str) -> Result<Option<String>, String>;
-    fn set_password(&self, session: &str, password: &str) -> Result<(), String>;
-    /// Removes the password; removing one that is not there is not an error.
-    fn delete_password(&self, session: &str) -> Result<(), String>;
-}
-
-/// A keychain that holds nothing, for a UI built without one.
-#[derive(Debug)]
-pub struct NoKeychain;
-
-impl Keychain for NoKeychain {
-    fn password(&self, _: &str) -> Result<Option<String>, String> {
-        Ok(None)
-    }
-
-    fn set_password(&self, _: &str, _: &str) -> Result<(), String> {
-        Err("No keychain is available to keep the password.".to_owned())
-    }
-
-    fn delete_password(&self, _: &str) -> Result<(), String> {
-        Ok(())
     }
 }

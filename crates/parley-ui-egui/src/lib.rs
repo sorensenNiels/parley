@@ -26,7 +26,7 @@ use keymap::Keymap;
 use macros::Macros;
 pub use macros::{MacroStore, NoMacroStore, StoredMacro};
 use menu::Action;
-pub use profile::{Keychain, NoKeychain, Profile};
+pub use profile::Profile;
 use sessions::{Editor, Outcome};
 pub use settings::{Settings, Theme};
 pub use theme::Density;
@@ -41,7 +41,6 @@ pub use updates::Checker;
 )]
 pub struct ParleyUi {
     profiles: Vec<Profile>,
-    keychain: Box<dyn Keychain>,
     /// The session in use, or the last one used.
     current: Option<Profile>,
     connection: Option<Connection>,
@@ -49,7 +48,7 @@ pub struct ParleyUi {
     online: bool,
     /// Why the last connection ended, shown on the start screen and in the status bar.
     closed: Option<String>,
-    /// A problem to show next to the keyboard state, such as an unreadable keychain.
+    /// A problem to show next to the keyboard state, such as a macro that cannot be run.
     warning: Option<String>,
     editor: Option<Editor>,
     settings: Settings,
@@ -78,16 +77,15 @@ pub struct ParleyUi {
 
 impl Default for ParleyUi {
     fn default() -> Self {
-        Self::new(Vec::new(), Box::new(NoKeychain))
+        Self::new(Vec::new())
     }
 }
 
 impl ParleyUi {
-    /// Starts on the start screen with the saved sessions; passwords come from `keychain`.
-    pub fn new(profiles: Vec<Profile>, keychain: Box<dyn Keychain>) -> Self {
+    /// Starts on the start screen with the saved sessions.
+    pub fn new(profiles: Vec<Profile>) -> Self {
         Self {
             profiles,
-            keychain,
             current: None,
             connection: None,
             online: false,
@@ -186,23 +184,13 @@ impl ParleyUi {
         }
     }
 
-    /// Connects to `profile`, with its password from the keychain if it signs on by itself.
+    /// Connects to `profile`. The operator signs on: Parley never does (R-NET-7).
     pub fn connect(&mut self, ctx: &egui::Context, profile: Profile) {
-        let mut config = profile.config.clone();
         self.warning = None;
-        if config.sign_on != parley_core::signon::SignOn::Off {
-            match self.keychain.password(&profile.name) {
-                Ok(Some(password)) => {
-                    config.password = parley_core::signon::Password::new(password);
-                }
-                Ok(None) => self.warning = Some("Auto sign-on: no password saved.".to_owned()),
-                Err(e) => self.warning = Some(format!("Auto sign-on: {e}")),
-            }
-        }
         let ctx = ctx.clone();
-        let connection = Connection::open(config, move || ctx.request_repaint());
+        let connection = Connection::open(profile.config.clone(), move || ctx.request_repaint());
         if self.addon_on(AddOn::Macros) && !profile.run_macro.is_empty() {
-            self.play(&mut connection.session(), &profile.run_macro, true);
+            self.play(&mut connection.session(), &profile.run_macro);
         }
         self.connection = Some(connection);
         self.current = Some(profile);
@@ -218,7 +206,7 @@ impl ParleyUi {
     }
 
     fn open_editor(&mut self, index: Option<usize>) {
-        self.editor = Some(Editor::open(&self.profiles, index, self.keychain.as_ref()));
+        self.editor = Some(Editor::open(&self.profiles, index));
     }
 
     /// The index of the session in use among the saved ones.
@@ -424,7 +412,7 @@ impl ParleyUi {
                 Action::RunMacro(i) => {
                     let name = self.macro_names().get(i).cloned();
                     if let (Some(s), Some(name)) = (session.as_deref_mut(), name) {
-                        self.play(s, &name, false);
+                        self.play(s, &name);
                         self.focus_terminal = true;
                     }
                 }
@@ -523,7 +511,6 @@ impl ParleyUi {
         let outcome = editor.show(
             ctx,
             &mut self.profiles,
-            self.keychain.as_ref(),
             connected,
             macros_on.then_some(&self.macros),
         );
@@ -551,10 +538,10 @@ impl ParleyUi {
             .names_for(self.current.as_ref().map(|p| p.name.as_str()))
     }
 
-    /// Starts the saved macro `name` on `session`, now or after sign-on.
-    fn play(&mut self, session: &mut parley_core::Session, name: &str, after_sign_on: bool) {
+    /// Starts the saved macro `name` on `session`.
+    fn play(&mut self, session: &mut parley_core::Session, name: &str) {
         match self.macros.find(name).map(|m| &m.contents) {
-            Some(Ok(m)) => session.play(name, m.steps.clone(), after_sign_on),
+            Some(Ok(m)) => session.play(name, m.steps.clone()),
             Some(Err(e)) => self.warning = Some(format!("Macro \"{name}\" cannot be run: {e}")),
             None => self.warning = Some(format!("There is no macro called \"{name}\".")),
         }
@@ -591,23 +578,15 @@ impl ParleyUi {
         }
     }
 
-    /// A macro wants the password and the session has none: the keychain's, or ask.
-    fn macro_needs_password(&mut self, session: &mut parley_core::Session) {
+    /// A macro is at a `password` step: ask for it, as Parley keeps none (R-NET-7).
+    fn macro_needs_password(&mut self, session: &parley_core::Session) {
         if session.macro_state() != parley_core::MacroState::NeedsPassword
             || self.macro_password.is_some()
         {
             return;
         }
-        let saved = self
-            .current
-            .as_ref()
-            .and_then(|p| self.keychain.password(&p.name).ok().flatten());
-        if let Some(password) = saved {
-            session.give_macro_password(Some(&parley_core::signon::Password::new(password)));
-        } else {
-            let name = session.playing().unwrap_or_default();
-            self.macro_password = Some(macros::PasswordDialog::new(name));
-        }
+        let name = session.playing().unwrap_or_default();
+        self.macro_password = Some(macros::PasswordDialog::new(name));
     }
 
     fn show_macro_dialogs(&mut self, ctx: &egui::Context) {
@@ -629,7 +608,9 @@ impl ParleyUi {
             self.focus_terminal = true;
             if let Some(connection) = &self.connection {
                 let password = match answer {
-                    macros::PasswordAnswer::Typed(p) => Some(parley_core::signon::Password::new(p)),
+                    macros::PasswordAnswer::Typed(p) => {
+                        Some(parley_core::password::Password::new(p))
+                    }
                     macros::PasswordAnswer::Cancelled => None,
                 };
                 connection.session().give_macro_password(password.as_ref());
@@ -667,12 +648,11 @@ pub(crate) mod test_support {
     use parley_core::telnet::Telnet;
     use parley_core::{CodePage, Session, SessionConfig};
     use std::cell::RefCell;
-    use std::collections::HashMap;
     use std::rc::Rc;
 
     use parley_core::macros::{Macro, Step};
 
-    use crate::{Keychain, MacroStore, Profile, StoredMacro};
+    use crate::{MacroStore, Profile, StoredMacro};
 
     /// A session showing "Hello" and one input field at row 2, column 2, waiting for input.
     pub fn waiting_session() -> Session {
@@ -684,28 +664,6 @@ pub(crate) mod test_support {
         let mut session = Session::new(SessionConfig::default());
         session.receive(&Telnet::frame(&record::build(0, Opcode::PutGet, &data)));
         session
-    }
-
-    /// A keychain in memory, shared with the test so it can look inside.
-    #[derive(Debug, Clone, Default)]
-    pub struct MemoryKeychain(pub Rc<RefCell<HashMap<String, String>>>);
-
-    impl Keychain for MemoryKeychain {
-        fn password(&self, session: &str) -> Result<Option<String>, String> {
-            Ok(self.0.borrow().get(session).cloned())
-        }
-
-        fn set_password(&self, session: &str, password: &str) -> Result<(), String> {
-            self.0
-                .borrow_mut()
-                .insert(session.to_owned(), password.to_owned());
-            Ok(())
-        }
-
-        fn delete_password(&self, session: &str) -> Result<(), String> {
-            self.0.borrow_mut().remove(session);
-            Ok(())
-        }
     }
 
     /// Macros in memory, shared with the test so it can look inside.
@@ -779,10 +737,10 @@ mod tests {
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
 
-    use test_support::{MemoryKeychain, profile};
+    use test_support::profile;
 
-    fn app_with(profiles: Vec<Profile>, keychain: &MemoryKeychain) -> Harness<'static, ParleyUi> {
-        let app = ParleyUi::new(profiles, Box::new(keychain.clone()));
+    fn app_with(profiles: Vec<Profile>) -> Harness<'static, ParleyUi> {
+        let app = ParleyUi::new(profiles);
         Harness::builder()
             .with_size(egui::vec2(1000.0, 800.0))
             .build_ui_state(|ui, app: &mut ParleyUi| app.ui(ui), app)
@@ -816,7 +774,7 @@ mod tests {
     #[test]
     fn the_terminal_font_is_chosen_in_the_settings_and_save_keeps_it() {
         // R-UI-6
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         choose_terminal_font(&mut harness, "JetBrains Mono");
         assert_eq!(harness.state().settings().terminal_font, "JetBrains Mono");
         harness.get_by_label("Save").click();
@@ -828,7 +786,7 @@ mod tests {
     #[test]
     fn the_close_button_of_the_settings_works_like_cancel() {
         // R-UI-7
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         choose_terminal_font(&mut harness, "Hack");
         harness.get_by_label("Close").click();
         harness.run();
@@ -839,7 +797,7 @@ mod tests {
     #[test]
     fn the_close_button_of_the_session_dialog_closes_it_unsaved() {
         // R-UI-7
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         harness.get_by_label("New session…").click();
         harness.run();
         type_into(&mut harness, "Name", "Unsaved");
@@ -852,7 +810,7 @@ mod tests {
     #[test]
     fn the_shortcuts_panel_closes_with_its_close_button() {
         // R-UI-7
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         harness.state_mut().show_shortcuts = true;
         harness.run();
         harness.get_by_label("Close").click();
@@ -863,7 +821,7 @@ mod tests {
     #[test]
     fn restore_defaults_resets_only_the_page_shown() {
         // R-UI-8: the theme (Appearance) survives restoring the Terminal page.
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         harness.get_by_label("Tools").click();
         harness.run();
         harness.get_by_label("Settings…").click();
@@ -881,7 +839,7 @@ mod tests {
     #[test]
     fn the_settings_dialog_keeps_its_place_from_frame_to_frame() {
         // R-UI-8: a dialog that grows each frame moves its buttons away from the pointer.
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         harness.get_by_label("Tools").click();
         harness.run();
         harness.get_by_label("Settings…").click();
@@ -894,7 +852,7 @@ mod tests {
     #[test]
     fn the_session_dialog_keeps_its_place_from_frame_to_frame() {
         // D12: a dialog that grows over frames moves its buttons away from the pointer.
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         harness.get_by_label("New session…").click();
         harness.run();
         let before = harness.get_by_label("Apply").rect();
@@ -905,7 +863,7 @@ mod tests {
     #[test]
     fn cancel_puts_the_old_settings_back() {
         // R-UI-6
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         choose_terminal_font(&mut harness, "Hack");
         harness.get_by_label("Appearance").click();
         harness.run();
@@ -1112,7 +1070,7 @@ mod tests {
     #[test]
     fn without_a_checker_the_about_page_says_so() {
         // R-UI-11: tests and builds without a checker never contact GitHub.
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         check_for_updates(&mut harness);
         harness.run_steps(3);
         harness.get_by_label("This build doesn't look for new versions.");
@@ -1121,13 +1079,10 @@ mod tests {
     #[test]
     fn the_start_screen_lists_the_saved_sessions() {
         // R-UI-5
-        let harness = app_with(
-            vec![
-                profile("Production", "prod.example.com"),
-                profile("Test", "test.example.com"),
-            ],
-            &MemoryKeychain::default(),
-        );
+        let harness = app_with(vec![
+            profile("Production", "prod.example.com"),
+            profile("Test", "test.example.com"),
+        ]);
         harness.get_by_label("Connect to IBM i");
         harness.get_by_label("Production");
         harness.get_by_label("Test");
@@ -1138,13 +1093,10 @@ mod tests {
     #[test]
     fn connect_on_a_session_card_opens_that_session() {
         // R-UI-5: the start screen's Connect button.
-        let mut harness = app_with(
-            vec![
-                profile("Production", "127.0.0.1"),
-                profile("Test", "127.0.0.1"),
-            ],
-            &MemoryKeychain::default(),
-        );
+        let mut harness = app_with(vec![
+            profile("Production", "127.0.0.1"),
+            profile("Test", "127.0.0.1"),
+        ]);
         harness
             .get_all_by_label("Connect")
             .nth(1)
@@ -1166,10 +1118,7 @@ mod tests {
     #[test]
     fn connect_in_the_session_dialog_opens_that_session() {
         // R-UI-5
-        let mut harness = app_with(
-            vec![profile("Test", "127.0.0.1")],
-            &MemoryKeychain::default(),
-        );
+        let mut harness = app_with(vec![profile("Test", "127.0.0.1")]);
         harness.get_by_label("Edit…").click();
         harness.run();
         harness
@@ -1192,18 +1141,16 @@ mod tests {
     }
 
     #[test]
-    fn a_new_session_is_saved_with_its_password_in_the_keychain_only() {
-        // R-UI-5, R-P-3
-        let keychain = MemoryKeychain::default();
-        let mut harness = app_with(Vec::new(), &keychain);
+    fn a_new_session_is_saved_without_asking_for_a_user_or_password() {
+        // R-UI-5, R-P-3, R-NET-7
+        let mut harness = app_with(Vec::new());
         harness.get_by_label("New session…").click();
         harness.run();
+        for gone in ["User", "Password", "Enable auto sign-on"] {
+            assert!(harness.query_by_label(gone).is_none(), "{gone} is asked");
+        }
         type_into(&mut harness, "Name", "Production");
         type_into(&mut harness, "Host", "prod.example.com");
-        type_into(&mut harness, "User", "qsecofr");
-        type_into(&mut harness, "Password", "secret");
-        harness.get_by_label("Enable auto sign-on").click();
-        harness.run();
         harness.get_by_label("Apply").click();
         harness.run();
 
@@ -1211,20 +1158,14 @@ mod tests {
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].name, "Production");
         assert_eq!(saved[0].config.host, "prod.example.com");
-        assert_eq!(saved[0].config.sign_on, parley_core::signon::SignOn::Screen);
         assert!(saved[0].config.tls, "new sessions use TLS (R-P-3)");
         assert_eq!(saved[0].config.port, 992);
-        assert!(saved[0].config.password.is_empty());
-        assert_eq!(
-            keychain.0.borrow().get("Production").map(String::as_str),
-            Some("secret")
-        );
     }
 
     #[test]
     fn a_session_needs_a_name_and_a_host() {
         // R-UI-5
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         harness.get_by_label("New session…").click();
         harness.run();
         harness.get_by_label("Apply").click();
@@ -1234,19 +1175,12 @@ mod tests {
     }
 
     #[test]
-    fn deleting_a_session_removes_its_password() {
+    fn delete_removes_the_session() {
         // R-UI-5
-        let keychain = MemoryKeychain::default();
-        keychain
-            .set_password("Test", "pw")
-            .expect("memory keychain");
-        let mut harness = app_with(
-            vec![
-                profile("Production", "prod.example.com"),
-                profile("Test", "test.example.com"),
-            ],
-            &keychain,
-        );
+        let mut harness = app_with(vec![
+            profile("Production", "prod.example.com"),
+            profile("Test", "test.example.com"),
+        ]);
         harness
             .get_all_by_label("Edit…")
             .nth(1)
@@ -1262,25 +1196,6 @@ mod tests {
             .map(|p| p.name.as_str())
             .collect();
         assert_eq!(names, ["Production"]);
-        assert!(keychain.0.borrow().is_empty());
-    }
-
-    #[test]
-    fn renaming_a_session_moves_its_password() {
-        // R-UI-5
-        let keychain = MemoryKeychain::default();
-        keychain
-            .set_password("Test", "pw")
-            .expect("memory keychain");
-        let mut harness = app_with(vec![profile("Test", "test.example.com")], &keychain);
-        harness.get_by_label("Edit…").click();
-        harness.run();
-        type_into(&mut harness, "Name", " 2");
-        harness.get_by_label("Apply").click();
-        harness.run();
-        assert_eq!(harness.state().profiles()[0].name, "Test 2");
-        let stored: Vec<_> = keychain.0.borrow().keys().cloned().collect();
-        assert_eq!(stored, ["Test 2"]);
     }
 
     #[test]
@@ -1288,10 +1203,7 @@ mod tests {
         // R-UI-5
         let mut first = profile("Production", "prod.example.com");
         first.connect_on_start = true;
-        let mut harness = app_with(
-            vec![first, profile("Test", "test.example.com")],
-            &MemoryKeychain::default(),
-        );
+        let mut harness = app_with(vec![first, profile("Test", "test.example.com")]);
         harness
             .get_all_by_label("Edit…")
             .nth(1)
@@ -1367,7 +1279,7 @@ mod tests {
 
     #[test]
     fn turning_tls_off_moves_the_port_back_to_23() {
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         harness.get_by_label("New session…").click();
         harness.run();
         harness.get_by_label("TLS").click();
@@ -1382,8 +1294,8 @@ mod tests {
     }
 
     #[test]
-    fn the_session_dialog_saves_the_macro_to_run_after_sign_on_r_key_4() {
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+    fn the_session_dialog_saves_the_macro_to_run_on_connect_r_key_4() {
+        let mut harness = app_with(Vec::new());
         harness
             .state_mut()
             .set_macro_store(Box::new(test_support::macros_with("Jobs")));
@@ -1404,8 +1316,7 @@ mod tests {
 
     #[test]
     fn renaming_a_session_moves_its_macros_along_r_key_3() {
-        let keychain = MemoryKeychain::default();
-        let mut harness = app_with(vec![profile("Old", "h")], &keychain);
+        let mut harness = app_with(vec![profile("Old", "h")]);
         let store = test_support::MemoryMacros::default();
         let mine = parley_core::macros::Macro {
             session: Some("Old".into()),
@@ -1460,7 +1371,7 @@ mod tests {
 
     #[test]
     fn the_add_ons_page_turns_macros_off_when_saved_r_add_1() {
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         assert!(harness.state().addon_on(AddOn::Macros), "on by default");
         switch_macros_in_settings(&mut harness);
         harness.get_by_label(AddOn::Macros.about());
@@ -1483,7 +1394,7 @@ mod tests {
 
     #[test]
     fn cancel_leaves_the_add_ons_as_they_were_r_add_1() {
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         switch_macros_in_settings(&mut harness);
         harness.get_by_label("Cancel").click();
         harness.run();
@@ -1493,7 +1404,7 @@ mod tests {
 
     #[test]
     fn the_add_ons_page_keeps_the_dialog_in_place_r_add_1() {
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         switch_macros_in_settings(&mut harness);
         let before = harness.get_by_label("Save").rect();
         harness.run_steps(5);
@@ -1502,7 +1413,7 @@ mod tests {
 
     #[test]
     fn while_macros_are_off_nothing_of_them_is_in_the_app_r_add_2() {
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         harness.state_mut().set_settings(macros_off());
         harness
             .state_mut()
@@ -1528,7 +1439,7 @@ mod tests {
 
     #[test]
     fn while_macros_are_off_a_session_s_run_macro_is_kept_but_not_run_r_add_2() {
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         harness.state_mut().set_settings(macros_off());
         harness
             .state_mut()
@@ -1545,7 +1456,7 @@ mod tests {
 
     #[test]
     fn turning_macros_off_asks_for_the_name_of_a_recording_r_add_2() {
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         let _host = connect_locally(&mut harness, "");
         let app = harness.state();
         app.connection
@@ -1564,7 +1475,7 @@ mod tests {
 
     #[test]
     fn turning_macros_off_stops_a_running_macro_r_add_2() {
-        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        let mut harness = app_with(Vec::new());
         harness
             .state_mut()
             .set_macro_store(Box::new(test_support::macros_with("Jobs")));

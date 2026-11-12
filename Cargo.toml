@@ -37,9 +37,6 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # The operating system's certificate store, so certificates from a company CA installed there are trusted.
 rustls-platform-verifier = "0.7"
 # Automatic sign-on (RFC 4777 section 5): the DES and SHA-1 password substitutes, and the client seed.
-des = "0.8"
-sha1 = "0.10"
-getrandom = "0.3"
 
 # Windows icon and version information in parley.exe (build script).
 winresource = { version = "0.1", default-features = false }

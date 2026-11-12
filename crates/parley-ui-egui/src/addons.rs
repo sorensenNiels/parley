@@ -34,7 +34,7 @@ impl AddOn {
     /// One line on what it does.
     pub const fn about(self) -> &'static str {
         match self {
-            Self::Macros => "Record keystrokes and play them back, also right after sign-on.",
+            Self::Macros => "Record keystrokes and play them back, also when a session connects.",
         }
     }
 

@@ -1,9 +1,9 @@
 //! Whole-session tests: host records in, screen and reply bytes out. The records are built by
 //! hand from the 5250 Functions Reference; requirement IDs are in the test names' comments.
 
+use parley_core::password::Password;
 use parley_core::record::{self, Opcode};
 use parley_core::screen::ScreenSize;
-use parley_core::signon::{Password, SignOn};
 use parley_core::telnet::Telnet;
 use std::time::{Duration, Instant};
 
@@ -168,49 +168,12 @@ fn enter_sends_the_cursor_aid_and_modified_fields_then_locks() {
     assert_eq!(s.keyboard(), KeyboardState::Locked);
 }
 
-fn signing_on_by_screen() -> Session {
-    Session::new(SessionConfig {
-        host: "test".into(),
-        sign_on: SignOn::Screen,
-        user: "qsecofr".into(),
-        password: Password::new("secret".into()),
-        ..SessionConfig::default()
-    })
-}
-
 #[test]
-fn screen_sign_on_types_the_user_and_password_and_presses_enter_once() {
-    // R-NET-4: the same record as an operator typing them.
-    let mut s = signing_on_by_screen();
-    s.receive(&host(&sign_on()));
-    let (opcode, _, data) = sent_one(&mut s);
-    assert_eq!(opcode, Opcode::PutGet);
-    let mut expected = vec![7, 59, 0xF1, SBA, 6, 53];
-    expected.extend(ebcdic("QSECOFR   "));
-    expected.extend([SBA, 7, 53]);
-    expected.extend(ebcdic("secret    "));
-    assert_eq!(data, expected);
-
-    // The host shows the sign-on screen again (a wrong password): the operator takes over.
-    s.receive(&host(&sign_on()));
+fn a_session_never_signs_on_by_itself_r_net_7() {
+    // The sign-on screen is left to the operator: nothing goes to the host until a key does.
+    let mut s = signed_on();
     assert_eq!(sent(&mut s), Vec::<Vec<u8>>::new());
     assert_eq!(s.keyboard(), KeyboardState::Unlocked);
-}
-
-#[test]
-fn screen_sign_on_leaves_a_screen_without_a_hidden_second_field_alone() {
-    // R-NET-4
-    let mut s = signing_on_by_screen();
-    let mut o = field([0x40, 0x00], 0x24, 10);
-    o.extend(field([0x40, 0x00], 0x24, 10));
-    s.receive(&host(&screen_with(&o)));
-    assert_eq!(sent(&mut s), Vec::<Vec<u8>>::new());
-    s.receive(&host(&sign_on()));
-    assert_eq!(
-        sent(&mut s).len(),
-        1,
-        "the real sign-on screen still gets it"
-    );
 }
 
 #[test]
@@ -742,7 +705,7 @@ fn a_macro_plays_waits_for_the_host_and_asks_for_a_password_r_key_4() {
         Step::Wait,
         Step::Text("wrkactjob".into()),
     ];
-    s.play("start", steps, false);
+    s.play("start", steps);
     assert_eq!(s.macro_state(), MacroState::NeedsPassword);
     assert!(row_text(&s, 6).ends_with("QUSER"), "monocase user field");
     s.give_macro_password(Some(&Password::new("æøå".into())));
@@ -758,11 +721,7 @@ fn a_macro_plays_waits_for_the_host_and_asks_for_a_password_r_key_4() {
 fn reset_stops_a_running_macro_and_other_keys_are_ignored_r_key_4() {
     let mut s = session();
     s.receive(&host(&menu_screen()));
-    s.play(
-        "m",
-        vec![enter(), Step::Wait, Step::Text("x".into())],
-        false,
-    );
+    s.play("m", vec![enter(), Step::Wait, Step::Text("x".into())]);
     s.key(Key::Char('y'));
     s.key(Key::Reset);
     assert_eq!(s.macro_state(), MacroState::Off);
@@ -775,11 +734,7 @@ fn reset_stops_a_running_macro_and_other_keys_are_ignored_r_key_4() {
 fn a_macro_gives_up_after_30_seconds_without_an_answer_r_key_4() {
     let mut s = session();
     s.receive(&host(&menu_screen()));
-    s.play(
-        "m",
-        vec![enter(), Step::Wait, Step::Text("x".into())],
-        false,
-    );
+    s.play("m", vec![enter(), Step::Wait, Step::Text("x".into())]);
     let start = Instant::now();
     assert!(!s.check_macro_time(start));
     assert!(!s.check_macro_time(start + Duration::from_secs(29)));
@@ -791,7 +746,7 @@ fn a_macro_gives_up_after_30_seconds_without_an_answer_r_key_4() {
 #[test]
 fn a_macro_stops_at_an_operator_error_r_key_4() {
     let mut s = numeric_screen();
-    s.play("m", vec![Step::Text("1a2".into())], false);
+    s.play("m", vec![Step::Text("1a2".into())]);
     assert_eq!(s.macro_state(), MacroState::Off);
     assert_eq!(
         s.keyboard(),
@@ -802,25 +757,8 @@ fn a_macro_stops_at_an_operator_error_r_key_4() {
 }
 
 #[test]
-fn a_macro_after_sign_on_waits_for_the_first_screen_past_auto_sign_on_r_key_4() {
-    let mut s = signing_on_by_screen();
-    s.play("m", vec![Step::Text("go".into())], true);
-    s.receive(&host(&sign_on()));
-    let start = Instant::now();
-    s.check_macro_time(start);
-    assert!(
-        !s.check_macro_time(start + MACRO_TIMEOUT * 10),
-        "no time-out while signing on"
-    );
-    assert_eq!(s.macro_state(), MacroState::Playing);
-    s.receive(&host(&menu_screen()));
-    assert_eq!(row_text(&s, 5), "         go");
-    assert_eq!(s.macro_state(), MacroState::Off);
-}
-
-#[test]
-fn without_auto_sign_on_a_macro_at_connect_starts_on_the_sign_on_screen_r_key_4() {
-    // The macro is the sign-on: it must not wait for a screen past sign-on that it brings.
+fn a_macro_at_connect_starts_on_the_sign_on_screen_r_key_4() {
+    // The macro may be the sign-on: it starts on the first screen that waits for input.
     let mut s = session();
     s.play(
         "sign on",
@@ -831,7 +769,6 @@ fn without_auto_sign_on_a_macro_at_connect_starts_on_the_sign_on_screen_r_key_4(
             Step::Key(Key::Aid(Aid::ENTER)),
             Step::Wait,
         ],
-        true,
     );
     s.receive(&host(&sign_on()));
     assert_eq!(

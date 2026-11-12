@@ -281,7 +281,7 @@ pub fn button_row<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
         .inner
 }
 
-/// Small upper-case label above a group (e.g. "AUTO SIGN-ON").
+/// Small upper-case label above a group (e.g. "CONNECTION").
 pub fn section_label(ui: &mut Ui, text: &str) {
     let color = palette(ui).muted;
     ui.label(semibold(text.to_uppercase()).size(10.5).color(color));

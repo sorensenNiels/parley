@@ -24,6 +24,8 @@ const SESSIONS_KEY: &str = "sessions";
 const SETTINGS_KEY: &str = "settings";
 /// Where Parley 0.1 kept its one connection's settings, read once to make the first session.
 const OLD_CONFIG_KEY: &str = "connection";
+/// Set once the passwords Parley 0.2 saved are deleted from the keychain (R-NET-7).
+const PASSWORDS_REMOVED_KEY: &str = "passwords_removed";
 
 /// Runs the UI inside eframe.
 struct App {
@@ -31,6 +33,8 @@ struct App {
     title: String,
     connect_on_start: Option<Profile>,
     screenshot: Option<screenshot::Pending>,
+    /// The saved passwords are gone from the keychain: don't look again (R-NET-7).
+    passwords_removed: bool,
 }
 
 impl eframe::App for App {
@@ -57,6 +61,9 @@ impl eframe::App for App {
         }
         eframe::set_value(storage, SESSIONS_KEY, &self.ui.profiles());
         eframe::set_value(storage, SETTINGS_KEY, self.ui.settings());
+        if self.passwords_removed {
+            eframe::set_value(storage, PASSWORDS_REMOVED_KEY, &true);
+        }
     }
 }
 

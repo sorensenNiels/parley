@@ -31,7 +31,7 @@
     <text x="60" y="152" class="chip-sub">window, command line</text>
     <rect x="194" y="112" width="138" height="52" rx="8" class="chip"/>
     <text x="206" y="133" class="chip-title">keychain</text>
-    <text x="206" y="152" class="chip-sub">passwords (keyring)</text>
+    <text x="206" y="152" class="chip-sub">deletes old passwords</text>
     <rect x="340" y="112" width="138" height="52" rx="8" class="chip"/>
     <text x="352" y="133" class="chip-title">macros</text>
     <text x="352" y="152" class="chip-sub">macro files on disk</text>
@@ -98,8 +98,8 @@
     <text x="60" y="504" class="chip-title">ebcdic</text>
     <text x="60" y="521" class="chip-sub">CCSID 37, 277, 1140…</text>
     <rect x="194" y="484" width="138" height="48" rx="8" class="chip"/>
-    <text x="206" y="504" class="chip-title">signon</text>
-    <text x="206" y="521" class="chip-sub">RFC 4777 substitutes</text>
+    <text x="206" y="504" class="chip-title">password</text>
+    <text x="206" y="521" class="chip-sub">hidden Debug, not kept</text>
     <rect x="340" y="484" width="138" height="48" rx="8" class="chip"/>
     <text x="352" y="504" class="chip-title">macros</text>
     <text x="352" y="521" class="chip-sub">steps, text format</text>
@@ -115,7 +115,7 @@
   <!-- external systems -->
   <rect x="700" y="72" width="228" height="48" rx="8" class="ext"/>
   <text x="714" y="92" class="ext-title">OS keychain</text>
-  <text x="714" y="109" class="ext-sub">Keychain, Credential Mgr, Secret Svc</text>
+  <text x="714" y="109" class="ext-sub">0.2's passwords deleted, once</text>
 
   <rect x="700" y="128" width="228" height="48" rx="8" class="ext"/>
   <text x="714" y="148" class="ext-title">Macro folder</text>

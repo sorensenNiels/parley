@@ -1,44 +1,23 @@
-//! Passwords in the operating system's keychain (R-P-3): Keychain Services on macOS, the
-//! Credential Manager on Windows, the Secret Service (GNOME Keyring, KDE Wallet) on Linux.
+//! Removes the passwords Parley 0.2 saved in the operating system's keychain (R-NET-7):
+//! Parley no longer signs on by itself, so it keeps no password. Keychain Services on macOS,
+//! the Credential Manager on Windows, the Secret Service (GNOME Keyring, KDE Wallet) on Linux.
 
 use keyring::Entry;
-use parley_ui_egui::Keychain;
 
-/// The keychain service name; each session's password is filed under its name.
+/// The keychain service name Parley 0.2 filed each session's password under.
 const SERVICE: &str = "Parley";
 
-#[derive(Debug)]
-pub struct SystemKeychain;
-
-fn entry(session: &str) -> Result<Entry, String> {
-    Entry::new(SERVICE, session).map_err(|e| match e {
-        keyring::Error::NoDefaultStore => {
-            "no keychain is available (on Linux, a Secret Service such as GNOME Keyring must be running)"
-                .to_owned()
-        }
-        e => e.to_string(),
-    })
-}
-
-impl Keychain for SystemKeychain {
-    fn password(&self, session: &str) -> Result<Option<String>, String> {
-        match entry(session)?.get_password() {
-            Ok(password) => Ok(Some(password)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(e.to_string()),
-        }
-    }
-
-    fn set_password(&self, session: &str, password: &str) -> Result<(), String> {
-        entry(session)?
-            .set_password(password)
-            .map_err(|e| e.to_string())
-    }
-
-    fn delete_password(&self, session: &str) -> Result<(), String> {
-        match entry(session)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
-    }
+/// Deletes the password saved for each of `sessions`; returns what could not be deleted, by
+/// session. A session without one, or a system without a keychain, has nothing to delete.
+pub fn remove_saved_passwords<'a>(sessions: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    sessions
+        .into_iter()
+        .filter_map(|session| {
+            let deleted = Entry::new(SERVICE, session).and_then(|e| e.delete_credential());
+            match deleted {
+                Ok(()) | Err(keyring::Error::NoEntry | keyring::Error::NoDefaultStore) => None,
+                Err(e) => Some(format!("{session}: {e}")),
+            }
+        })
+        .collect()
 }

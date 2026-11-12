@@ -4,8 +4,7 @@ use eframe::egui;
 use parley_core::SessionConfig;
 use parley_ui_egui::{ParleyUi, Profile};
 
-use crate::keychain::SystemKeychain;
-use crate::{App, OLD_CONFIG_KEY, SESSIONS_KEY, SETTINGS_KEY};
+use crate::{App, OLD_CONFIG_KEY, PASSWORDS_REMOVED_KEY, SESSIONS_KEY, SETTINGS_KEY};
 
 const USAGE: &str = "\
 Usage: parley [OPTION] [HOST[:PORT]]
@@ -70,7 +69,8 @@ pub fn run() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let profiles = cc.storage.map(saved_profiles).unwrap_or_default();
-            let mut ui = ParleyUi::new(profiles, Box::new(SystemKeychain));
+            let passwords_removed = remove_saved_passwords(cc.storage, &profiles);
+            let mut ui = ParleyUi::new(profiles);
             // The settings first: they say whether the Macros add-on reads its folder (R-ADD-2).
             if let Some(settings) = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)) {
                 ui.set_settings(settings);
@@ -102,9 +102,24 @@ pub fn run() -> eframe::Result {
                 title: String::new(),
                 connect_on_start,
                 screenshot: args.screenshot.map(crate::screenshot::Pending::new),
+                passwords_removed,
             }))
         }),
     )
+}
+
+/// Deletes the passwords Parley 0.2 saved for `profiles` from the keychain, once (R-NET-7);
+/// true when none is left. One that could not be deleted is tried again at the next start.
+fn remove_saved_passwords(storage: Option<&dyn eframe::Storage>, profiles: &[Profile]) -> bool {
+    let done = storage.and_then(|s| eframe::get_value::<bool>(s, PASSWORDS_REMOVED_KEY));
+    if done == Some(true) {
+        return true;
+    }
+    let failed = crate::keychain::remove_saved_passwords(profiles.iter().map(|p| p.name.as_str()));
+    for failure in &failed {
+        eprintln!("parley: could not delete a saved password from the keychain: {failure}");
+    }
+    failed.is_empty()
 }
 
 /// The saved sessions, or one made from Parley 0.1's single remembered connection.

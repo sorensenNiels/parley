@@ -9,9 +9,9 @@
 
 | Crate | Holds | Never holds |
 |---|---|---|
-| `parley-core` | The TN5250 engine: telnet negotiation, 5250 records, the data stream, the screen model, EBCDIC, RFC 4777 sign-on, the macro format, the TCP/TLS connection thread, the version check. | UI code; printing. |
-| `parley-ui-egui` | Everything the user sees, in egui: the 5250 screen widget, keyboard map, menus, status bar, session, settings and macro dialogs. Reaches the keychain and macro folder through traits (`Keychain`, `MacroStore`), so tests use memory. | Platform code. |
-| `parley-app` | The `parley` binary: window, command line, the real keychain (`keyring`) and macro files, `--screenshot`. | Protocol logic. |
+| `parley-core` | The TN5250 engine: telnet negotiation, 5250 records, the data stream, the screen model, EBCDIC, the macro format, the TCP/TLS connection thread, the version check. | UI code; printing. |
+| `parley-ui-egui` | Everything the user sees, in egui: the 5250 screen widget, keyboard map, menus, status bar, session, settings and macro dialogs. Reaches the macro folder through a trait (`MacroStore`), so tests use memory. | Platform code. |
+| `parley-app` | The `parley` binary: window, command line, the macro files, `--screenshot`, and deleting the passwords Parley 0.2 kept in the keychain. | Protocol logic. |
 
 ## One connection at run time
 
@@ -30,8 +30,8 @@
 
 ## Host to screen
 
-1. **telnet** — option negotiation (terminal type, binary, end-of-record, NEW-ENVIRON for device name, code page
-   and sign-on) and splitting the stream into records at IAC EOR (RFC 1205, RFC 2877, RFC 4777).
+1. **telnet** — option negotiation (terminal type, binary, end-of-record, NEW-ENVIRON for device name and code
+   page) and splitting the stream into records at IAC EOR (RFC 1205, RFC 2877, RFC 4777).
 2. **record** — the 5250 record header: opcode and flags.
 3. **datastream** — commands (Write To Display, Read MDT Fields, Save/Restore Screen, Write Error Code, Query, …)
    and orders (Set Buffer Address, Start of Field, Repeat to Address, …), cited against IBM's 5250 Functions
@@ -47,17 +47,18 @@
 
 ## Sign-on and secrets
 
-- Passwords live only in the OS keychain (D11), under service "Parley" and the session's name; `Password` has a
-  `Debug` that hides it.
-- **Screen sign-on** types user and password into the first screen with a user field and a non-display field.
-- **Bypass sign-on** answers the host's NEW-ENVIRON request with the user and an RFC 4777 password substitute (DES or
-  SHA-1) computed from the host's seed, so the password never crosses the network (R-NET-4).
+- **Parley never signs on by itself and keeps no password** (R-NET-7, D16): the operator signs on on the host's
+  screen. NEW-ENVIRON carries the device name and code page, never a user or password, even when the host offers a
+  seed for an RFC 4777 password substitute.
+- A macro's `password` step asks for the password each time; `Password` has a `Debug` that hides it, and it lives
+  only until it is typed.
+- Passwords Parley 0.2 saved in the OS keychain are deleted at the first start (`parley-app/src/keychain.rs`).
 
 ## Macros
 
 A macro is a text file, one step per line (`text "…"`, key names such as `enter` or `f3`, `wait`, `password`,
 `move ROW COLUMN`), in the `macros` folder beside the settings (D14). Recording leaves out passwords (a `password`
-step plays the keychain's) and refused keys; playing waits for the host to unlock the keyboard after each AID key
+step asks for it when played) and refused keys; playing waits for the host to unlock the keyboard after each AID key
 and stops at an operator error, Reset or Esc (R-KEY-3, R-KEY-4).
 
 ## Testing

@@ -74,7 +74,7 @@ const BLANK: u8 = 0x40;
 const ZERO: u8 = 0xF0;
 
 impl Session {
-    /// Carries out a key, from the operator ([`Session::key`]), a macro or auto sign-on.
+    /// Carries out a key, from the operator ([`Session::key`]) or a macro.
     pub(super) fn press(&mut self, key: Key) {
         match key {
             Key::Attention => return self.send_record(flags::ATTENTION, Opcode::NoOperation, &[]),

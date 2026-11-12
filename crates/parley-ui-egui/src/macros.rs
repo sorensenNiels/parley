@@ -268,7 +268,7 @@ pub enum PasswordAnswer {
     Cancelled,
 }
 
-/// Asks for the password a macro's `password` step needs when none is saved (R-KEY-4).
+/// Asks for the password a macro's `password` step types: Parley keeps none (R-KEY-4, R-NET-7).
 #[derive(Debug)]
 pub struct PasswordDialog {
     macro_name: String,
@@ -290,8 +290,7 @@ impl PasswordDialog {
                 theme::hint(
                     ui,
                     format!(
-                        "The macro \"{}\" types the password here, and none is saved for \
-                     this session.",
+                        "The macro \"{}\" types the password here. Parley does not keep it.",
                         self.macro_name
                     ),
                 );

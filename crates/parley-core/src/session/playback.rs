@@ -1,13 +1,13 @@
 //! Recording and playing keyboard macros (R-KEY-3, R-KEY-4). The operator's keys come in
 //! through [`Session::key`], which records them and keeps them out of a running macro; the
-//! macro, and auto sign-on, press keys through [`Session::press`].
+//! macro presses keys through [`Session::press`].
 
 use std::time::{Duration, Instant};
 
 use super::Session;
 use crate::macros::{Macro, Step};
+use crate::password::Password;
 use crate::session::Key;
-use crate::signon::Password;
 
 /// How long a macro waits for the host before it gives up.
 pub const MACRO_TIMEOUT: Duration = Duration::from_secs(30);
@@ -18,8 +18,8 @@ pub enum MacroState {
     Off,
     Recording,
     Playing,
-    /// A `password` step and no password to type: the UI asks for one
-    /// ([`Session::give_macro_password`]).
+    /// At a `password` step: the UI asks the operator for it ([`Session::give_macro_password`]);
+    /// Parley keeps none (R-NET-7).
     NeedsPassword,
 }
 
@@ -29,8 +29,6 @@ pub(super) struct Player {
     name: String,
     steps: Vec<Step>,
     next: usize,
-    /// Wait for the first screen after sign-on before starting.
-    after_sign_on: bool,
     /// The unlock count after the last step that was not `wait`: a `wait` step ends when the
     /// host has unlocked the keyboard since.
     mark: u64,
@@ -98,16 +96,14 @@ impl Session {
         })
     }
 
-    /// Plays a macro: now, or with `after_sign_on` from the first screen after sign-on. Without
-    /// auto sign-on on the sign-on screen (R-NET-4) the macro may be the sign-on itself, so it
-    /// starts on the first screen instead.
-    pub fn play(&mut self, name: &str, steps: Vec<Step>, after_sign_on: bool) {
+    /// Plays a macro from the first screen that waits for input: at once if the screen
+    /// shown does, else when the host sends one (a macro run at connect may sign on itself).
+    pub fn play(&mut self, name: &str, steps: Vec<Step>) {
         self.recording = None;
         self.player = Some(Player {
             name: name.to_owned(),
             steps,
             next: 0,
-            after_sign_on: after_sign_on && self.screen_sign_on,
             mark: self.unlocks,
             waiting_since: None,
             needs_password: false,
@@ -137,11 +133,7 @@ impl Session {
     /// Gives up on a macro that has waited for the host longer than [`MACRO_TIMEOUT`]; true if
     /// it did, so the screen shows why.
     pub fn check_macro_time(&mut self, now: Instant) -> bool {
-        let Some(player) = self
-            .player
-            .as_mut()
-            .filter(|p| !p.needs_password && !p.after_sign_on)
-        else {
+        let Some(player) = self.player.as_mut().filter(|p| !p.needs_password) else {
             return false;
         };
         let since = *player.waiting_since.get_or_insert(now);
@@ -166,8 +158,7 @@ impl Session {
         loop {
             let free = !self.locked && self.pending_read.is_some();
             let error = self.error.is_some();
-            let on_sign_on_screen = self.sign_on_fields().is_some();
-            let (unlocks, no_password) = (self.unlocks, self.config.password.is_empty());
+            let unlocks = self.unlocks;
             let Some(player) = self.player.as_mut() else {
                 return;
             };
@@ -177,10 +168,9 @@ impl Session {
                     "Macro \"{name}\" stopped at an error: see the screen."
                 ));
             }
-            if player.needs_password || !free || player.after_sign_on && on_sign_on_screen {
+            if player.needs_password || !free {
                 return;
             }
-            player.after_sign_on = false;
             player.waiting_since = None;
             let Some(step) = player.steps.get(player.next).cloned() else {
                 self.player = None;
@@ -188,18 +178,15 @@ impl Session {
             };
             match &step {
                 Step::Wait if unlocks == player.mark => return,
-                Step::Password if no_password => {
+                // Parley keeps no password (R-NET-7): the UI asks for it every time.
+                Step::Password => {
                     player.needs_password = true;
                     return;
                 }
-                Step::Wait | Step::Password | Step::Text(_) | Step::Key(_) => player.next += 1,
+                Step::Wait | Step::Text(_) | Step::Key(_) => player.next += 1,
             }
             match step {
-                Step::Wait => continue,
-                Step::Password => {
-                    let password = self.config.password.clone();
-                    self.type_text(password.expose());
-                }
+                Step::Wait | Step::Password => continue,
                 Step::Text(text) => self.type_text(&text),
                 Step::Key(key) => self.press(key),
             }

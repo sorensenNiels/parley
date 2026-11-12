@@ -14,8 +14,7 @@ pub use playback::{MACRO_TIMEOUT, MacroState};
 
 use crate::macros::Step;
 use crate::record::{self, Opcode};
-use crate::screen::{Field, Screen, ScreenSize, Style};
-use crate::signon::{self, Credentials, Password, PasswordLevel, SignOn};
+use crate::screen::{Screen, ScreenSize, Style};
 use crate::telnet::{Received, Telnet};
 use crate::{CodePage, Result};
 
@@ -34,13 +33,6 @@ pub struct SessionConfig {
     pub screen_size: ScreenSize,
     /// The IBM i device name to ask for (R-NET-3). Empty: the host makes one up (`QPADEVxxxx`).
     pub device_name: String,
-    /// Whether and how Parley signs on by itself (R-NET-4).
-    pub sign_on: SignOn,
-    pub user: String,
-    /// Never saved with the rest: the UI keeps it in the operating system's keychain.
-    #[serde(skip)]
-    pub password: Password,
-    pub password_level: PasswordLevel,
     /// Send a telnet No Operation after a minute without traffic (R-NET-5).
     pub keep_alive: bool,
 }
@@ -55,10 +47,6 @@ impl Default for SessionConfig {
             code_page: CodePage::default(),
             screen_size: ScreenSize::default(),
             device_name: String::new(),
-            sign_on: SignOn::Off,
-            user: String::new(),
-            password: Password::default(),
-            password_level: PasswordLevel::Des,
             keep_alive: false,
         }
     }
@@ -71,22 +59,6 @@ impl SessionConfig {
             ScreenSize::Standard => "IBM-3179-2",
             ScreenSize::Wide => "IBM-3477-FC",
         }
-    }
-
-    /// Whether automatic sign-on is set up and has a user and password to use.
-    fn signs_on(&self, how: SignOn) -> bool {
-        self.sign_on == how && !self.user.trim().is_empty() && !self.password.is_empty()
-    }
-
-    /// What telnet needs to bypass the sign-on screen, if this session should.
-    fn credentials(&self) -> Option<Credentials> {
-        self.signs_on(SignOn::Bypass).then(|| Credentials {
-            user: self.user.clone(),
-            password: self.password.clone(),
-            level: self.password_level,
-            code_page: self.code_page,
-            client_seed: signon::random_seed(),
-        })
     }
 
     /// The user variables sent in NEW-ENVIRON (RFC 4777 section 5): the device name, and the
@@ -198,8 +170,6 @@ pub struct Session {
     message_waiting: bool,
     alarm: bool,
     notice: Option<String>,
-    /// Type the user and password into the first sign-on screen (R-NET-4).
-    screen_sign_on: bool,
     outbound: Vec<u8>,
     /// The steps recorded so far, while recording a macro (R-KEY-3).
     recording: Option<Vec<Step>>,
@@ -211,12 +181,7 @@ pub struct Session {
 
 impl Session {
     pub fn new(config: SessionConfig) -> Self {
-        let telnet = Telnet::new(
-            config.terminal_type(),
-            config.environment(),
-            config.credentials(),
-        );
-        let screen_sign_on = config.signs_on(SignOn::Screen);
+        let telnet = Telnet::new(config.terminal_type(), config.environment());
         Self {
             config,
             telnet,
@@ -233,7 +198,6 @@ impl Session {
             message_waiting: false,
             alarm: false,
             notice: None,
-            screen_sign_on,
             outbound: Vec::new(),
             recording: None,
             player: None,
@@ -289,7 +253,6 @@ impl Session {
                 self.notice = Some(e.to_string());
             }
         }
-        self.sign_on_screen();
         self.advance_macro();
     }
 
@@ -298,48 +261,9 @@ impl Session {
         self.outbound.extend(Telnet::KEEP_ALIVE);
     }
 
-    /// R-NET-4: on the first screen that waits for a user and a hidden password (the first two
-    /// input fields, the second non-display), types both and presses Enter. Only once: a
-    /// rejected password leaves the next sign-on screen to the operator.
-    fn sign_on_screen(&mut self) {
-        if !self.screen_sign_on
-            || self.pending_read.is_none()
-            || self.keyboard() != KeyboardState::Unlocked
-        {
-            return;
-        }
-        let Some((user, password)) = self.sign_on_fields() else {
-            return;
-        };
-        self.screen_sign_on = false;
-        let name = self.config.user.trim().to_owned();
-        let secret = self.config.password.clone();
-        self.type_at(user.start, &name);
-        self.type_at(password.start, secret.expose());
-        if self.error.is_none() {
-            self.press(Key::Aid(Aid::ENTER));
-        }
-    }
-
-    /// The user and password fields if this is a sign-on screen: its first two input fields,
-    /// the second non-display and the first not.
-    fn sign_on_fields(&self) -> Option<(Field, Field)> {
-        let mut inputs = self.screen.fields().iter().filter(|f| f.is_input());
-        let (user, password) = (*inputs.next()?, *inputs.next()?);
-        (!self.field_is_hidden(user.start) && self.field_is_hidden(password.start))
-            .then_some((user, password))
-    }
-
     /// Whether the field starting at `start` is non-display (its attribute is just before it).
     fn field_is_hidden(&self, start: usize) -> bool {
         Style::from_attribute(self.screen.get(self.screen.previous(start))).hidden
-    }
-
-    fn type_at(&mut self, address: usize, text: &str) {
-        self.screen.cursor = address;
-        for c in text.chars() {
-            self.press(Key::Char(c));
-        }
     }
 
     /// The bytes to send to the host, telnet-framed.

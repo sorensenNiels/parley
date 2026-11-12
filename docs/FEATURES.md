@@ -16,14 +16,14 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 - **R-KEY-3, R-KEY-4** (2026-11-12): recording and running macros, built; D14 for the files. **Automated**
   (`make test`): the file format (round trip, every key name, comments, errors naming the line); recording (text, keys,
   `wait` after Enter, the password left out, refused keys and their Reset left out, clicks left out); playing (waiting
-  for the host, asking for the password, Reset stopping it, the 30 s time-out, stopping at an error, starting after
-  sign-on); the macro folder (save, list, rename, delete, a bad file listed with its line); in kittest the save,
+  for the host, asking for the password, Reset stopping it, the 30 s time-out, stopping at an error, starting on
+  the first screen); the macro folder (save, list, rename, delete, a bad file listed with its line); in kittest the save,
   password and Macros dialogs (each keeping its place), Run macro in the session dialog, and a renamed session taking
   its macros along. **Against PUB400.COM** (`probe --macro`): a macro pressing Help waited for the host and stopped at
   its "Function key not allowed" with the error on screen. **In the running app** (WSL2, the owner): a recorded
   sign-on macro as the session's Run macro, without auto sign-on, signs on and asks for the password (after a fix: it
   used to wait for a screen past sign-on that it brings itself). **Left:** the owner records and runs a macro after
-  signing on (Tools ▸ Record macro, Run macro, Run macro after auto sign-on, Macros…), then move R-KEY-3 and R-KEY-4
+  signing on (Tools ▸ Record macro, Run macro, Run macro on connect, Macros…), then move R-KEY-3 and R-KEY-4
   to REQUIREMENTS.md.
 - **R-ADD-1, R-ADD-2** (2026-11-12): Settings ▸ Add-ons, with Macros as the first add-on (on by default), built;
   D15. **Automated** (`make test`): each add-on starts with its default, only a change from it is kept, unknown ids
@@ -33,10 +33,13 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
   a recording asks for its name and a running macro stops (against a local port that never answers). **Left:** the
   owner checks the page and turning Macros off and on in the running app, then move R-ADD-1 and R-ADD-2 to
   REQUIREMENTS.md.
-- **R-NET-4 on Linux** (2026-11-12): auto sign-on is verified on Windows and macOS, but not yet on a Linux desktop.
-  Under WSL2 it stops with "no keychain is available": WSL runs no Secret Service, so there is no saved password (D11).
-  **Left:** the owner checks auto sign-on, by screen and bypassed, on a Linux desktop with GNOME Keyring or KDE Wallet.
-  Until then the Phase 2 "verified on" list does not cover R-NET-4 on Linux.
+- **R-NET-7** (2026-11-12): auto sign-on and saved passwords removed (D16; R-NET-4 and the planned R-NET-6 go).
+  **Automated** (`make test`): telnet's answer to RFC 4777's request with a host seed holds only the device name; a
+  session on a sign-on screen sends nothing until a key; a macro's `password` step always asks; the session dialog
+  asks for no user or password; `Password`'s `Debug` hides it. The RFC 4777 code and the `des`, `sha1` and
+  `getrandom` dependencies are gone. **Left:** the owner checks in the running app that the session dialog has no
+  sign-on fields and that a password Parley 0.2 saved is gone from the keychain after the first start (Windows
+  Credential Manager, macOS Keychain Access, a Linux desktop), then move R-NET-7 to REQUIREMENTS.md.
 
 ## Implemented
 
@@ -61,8 +64,8 @@ How it was checked:
 
 ### Phase 2: saved sessions, auto sign-on and the look (2026-11-12) — R-NET-4, R-NET-5, R-UI-5..12
 
-Verified by the owner in the running app on Windows, macOS, Linux and WSL2 (2026-11-12). Auto sign-on (R-NET-4) on Linux is still
-to be checked (see "In progress").
+Verified by the owner in the running app on Windows, macOS, Linux and WSL2 (2026-11-12), except auto sign-on (R-NET-4) on
+Linux. *R-NET-4 was removed afterwards with the saved passwords (R-NET-7, D16); its checks below are history.*
 
 How it was checked:
 - **Automated**: the DES and SHA-1 password substitutes against RFC 4777's test vectors (sections 5.1 and 5.2) and

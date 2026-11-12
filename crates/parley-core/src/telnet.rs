@@ -1,8 +1,7 @@
 //! Telnet for TN5250: option negotiation (RFC 854, RFC 1205), the terminal type, the
-//! NEW-ENVIRON variables (RFC 1572, RFC 4777), and splitting the byte stream into 5250
+//! NEW-ENVIRON variables (RFC 1572, RFC 4777: device name and code page; never a user or
+//! password, R-NET-7), and splitting the byte stream into 5250
 //! records, each ended by IAC EOR.
-
-use crate::signon::Credentials;
 
 const IAC: u8 = 255;
 const DONT: u8 = 254;
@@ -23,7 +22,6 @@ const NEW_ENVIRON: u8 = 39;
 // Sub-negotiation codes (RFC 1091, RFC 1572).
 const IS: u8 = 0;
 const SEND: u8 = 1;
-const VAR: u8 = 0;
 const VALUE: u8 = 1;
 const ESC: u8 = 2;
 const USERVAR: u8 = 3;
@@ -38,8 +36,6 @@ const REMOTE_OPTIONS: [u8; 2] = [BINARY, END_OF_RECORD];
 pub struct Telnet {
     terminal_type: String,
     environment: Vec<(String, String)>,
-    /// For bypassing the sign-on screen, when the host sends its seed (RFC 4777 section 5).
-    credentials: Option<Credentials>,
     state: State,
     local: [bool; 256],
     remote: [bool; 256],
@@ -68,17 +64,11 @@ pub struct Received {
 
 impl Telnet {
     /// `environment` holds the user variables (`USERVAR`) sent when the host asks, such as
-    /// `DEVNAME` and `CODEPAGE` (RFC 4777). With `credentials`, the user and a password
-    /// substitute go with them when the host offers a seed.
-    pub fn new(
-        terminal_type: &str,
-        environment: Vec<(String, String)>,
-        credentials: Option<Credentials>,
-    ) -> Self {
+    /// `DEVNAME` and `CODEPAGE` (RFC 4777).
+    pub fn new(terminal_type: &str, environment: Vec<(String, String)>) -> Self {
         Self {
             terminal_type: terminal_type.to_owned(),
             environment,
-            credentials,
             state: State::Data,
             local: [false; 256],
             remote: [false; 256],
@@ -186,9 +176,8 @@ impl Telnet {
                 reply.extend([IAC, SE]);
             }
             // The host may name the variables it wants; sending all of ours is allowed (RFC 1572).
-            [NEW_ENVIRON, SEND, request @ ..] => {
+            [NEW_ENVIRON, SEND, ..] => {
                 reply.extend([IAC, SB, NEW_ENVIRON, IS]);
-                self.sign_on_variables(request, reply);
                 for (name, value) in &self.environment {
                     reply.push(USERVAR);
                     escape_into(name.as_bytes(), reply);
@@ -202,47 +191,7 @@ impl Telnet {
     }
 }
 
-impl Telnet {
-    /// RFC 4777 section 5: the user, Parley's seed and the password substitute, when the host
-    /// sent its own seed. Without one, nothing: the password is never sent in clear text.
-    fn sign_on_variables(&self, request: &[u8], reply: &mut Vec<u8>) {
-        let Some(credentials) = &self.credentials else {
-            return;
-        };
-        let Some(substitute) = server_seed(request).and_then(|seed| credentials.substitute(seed))
-        else {
-            return;
-        };
-        let mut variable = |kind: u8, name: &[u8], value: &[u8]| {
-            reply.push(kind);
-            escape_into(name, reply);
-            reply.push(VALUE);
-            escape_into(value, reply);
-        };
-        variable(VAR, b"USER", credentials.user_name().as_bytes());
-        variable(USERVAR, b"IBMRSEED", &credentials.client_seed);
-        variable(USERVAR, b"IBMSUBSPW", &substitute);
-    }
-}
-
-/// The 8-byte seed after `IBMRSEED` in the host's NEW-ENVIRON SEND (RFC 4777 section 5), its
-/// escapes removed; `None` if there is none or it is short.
-fn server_seed(request: &[u8]) -> Option<[u8; 8]> {
-    const NAME: &[u8] = b"IBMRSEED";
-    let at = request.windows(NAME.len()).position(|w| w == NAME)?;
-    let mut bytes = request.get(at + NAME.len()..)?.iter();
-    let mut seed = [0; 8];
-    for byte in &mut seed {
-        let mut b = *bytes.next()?;
-        if b == ESC {
-            b = *bytes.next()?;
-        }
-        *byte = b;
-    }
-    Some(seed)
-}
-
-/// NEW-ENVIRON text: the codes VAR, VALUE, ESC and USERVAR are escaped with ESC, IAC is doubled.
+/// NEW-ENVIRON text: the codes VAR (0), VALUE, ESC and USERVAR are escaped with ESC, IAC is doubled.
 fn escape_into(text: &[u8], out: &mut Vec<u8>) {
     for &b in text {
         match b {
@@ -258,23 +207,7 @@ mod tests {
     use super::*;
 
     fn telnet() -> Telnet {
-        Telnet::new(
-            "IBM-3179-2",
-            vec![("DEVNAME".into(), "PARLEY01".into())],
-            None,
-        )
-    }
-
-    fn signing_on() -> Telnet {
-        use crate::signon::{Password, PasswordLevel};
-        let credentials = Credentials {
-            user: "dummyusr".into(),
-            password: Password::new("DUMMYPW".into()),
-            level: PasswordLevel::Des,
-            code_page: crate::CodePage::Ccsid37,
-            client_seed: *b"NAB3NAB3",
-        };
-        Telnet::new("IBM-3179-2", Vec::new(), Some(credentials))
+        Telnet::new("IBM-3179-2", vec![("DEVNAME".into(), "PARLEY01".into())])
     }
 
     /// The host's request from RFC 4777 section 5, with its seed X'7D3E488F18080404'.
@@ -311,46 +244,21 @@ mod tests {
         b'P',
         b'W',
         USERVAR,
-        VAR,
+        0, // VAR
         IAC,
         SE,
     ];
 
     #[test]
-    fn the_sign_on_reply_matches_the_rfc_4777_example() {
-        // R-NET-4, RFC 4777 section 5: the client's IS, byte for byte.
-        let out = receive(&mut signing_on(), SEND_WITH_SEED);
-        let mut expected = vec![IAC, SB, NEW_ENVIRON, IS, VAR];
-        expected.extend(b"USER");
+    fn no_user_or_password_goes_to_the_host_even_when_it_offers_a_seed_r_net_7() {
+        // RFC 4777 section 5's request for USER and a password substitute: only DEVNAME goes.
+        let out = receive(&mut telnet(), SEND_WITH_SEED);
+        let mut expected = vec![IAC, SB, NEW_ENVIRON, IS, USERVAR];
+        expected.extend(b"DEVNAME");
         expected.push(VALUE);
-        expected.extend(b"DUMMYUSR");
-        expected.push(USERVAR);
-        expected.extend(b"IBMRSEED");
-        expected.push(VALUE);
-        expected.extend(b"NAB3NAB3");
-        expected.push(USERVAR);
-        expected.extend(b"IBMSUBSPW");
-        expected.push(VALUE);
-        expected.extend([0xDF, 0xB0, 0x40, 0x2F, 0x22, 0xAB, 0xA3, 0xBA]);
+        expected.extend(b"PARLEY01");
         expected.extend([IAC, SE]);
         assert_eq!(out.reply, expected);
-    }
-
-    #[test]
-    fn without_a_host_seed_no_credentials_are_sent() {
-        // R-NET-4: never the password in clear text.
-        let out = receive(&mut signing_on(), &[IAC, SB, NEW_ENVIRON, SEND, IAC, SE]);
-        assert_eq!(out.reply, [IAC, SB, NEW_ENVIRON, IS, IAC, SE]);
-    }
-
-    #[test]
-    fn a_truncated_or_escaped_seed_is_read_safely() {
-        assert_eq!(server_seed(b"IBMRSEED\x01\x02"), None);
-        assert_eq!(server_seed(b"IBMRSEED"), None);
-        assert_eq!(server_seed(&[]), None);
-        let mut escaped = b"IBMRSEED".to_vec();
-        escaped.extend([ESC, VALUE, ESC, ESC, 4, 5, 6, 7, 8, 9]);
-        assert_eq!(server_seed(&escaped), Some([1, 2, 4, 5, 6, 7, 8, 9]));
     }
 
     fn receive(t: &mut Telnet, bytes: &[u8]) -> Received {

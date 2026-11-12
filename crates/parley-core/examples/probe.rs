@@ -87,7 +87,7 @@ fn play(connection: &Connection, file: &str) {
             std::process::exit(2);
         }
     };
-    connection.session().play(file, steps, false);
+    connection.session().play(file, steps);
     let start = Instant::now();
     while connection.session().macro_state() != MacroState::Off
         && start.elapsed() < Duration::from_secs(60)
