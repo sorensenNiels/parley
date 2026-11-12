@@ -1,0 +1,53 @@
+[package]
+name = "parley-app"
+description = "Parley desktop application: launches the egui UI from parley-ui-egui."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[[bin]]
+name = "parley"
+path = "src/main.rs"
+
+[dependencies]
+parley-ui-egui.workspace = true
+eframe.workspace = true
+parley-core.workspace = true
+keyring = "4.2"
+
+[build-dependencies]
+winresource.workspace = true
+
+[lints]
+workspace = true
+
+# Installers (R-NF-1), built with cargo-packager: `make package` (see docs/RELEASING.md).
+[package.metadata.packager]
+product-name = "Parley"
+identifier = "dk.softdesign.parley"
+description = "A TN5250 terminal for IBM i"
+long-description = "Parley is a fast, modern TN5250 terminal emulator for IBM i: green screens over telnet or TLS, in colour, with familiar keys."
+homepage = "https://github.com/sorensenNiels/parley"
+category = "Utility"
+license-file = "../../LICENSE-MIT"
+icons = ["icons/32.png", "icons/64.png", "icons/128.png", "icons/256.png", "icons/512.png", "icons/parley.ico"]
+out-dir = "../../target/packages"
+binaries = [{ path = "parley", main = true }]
+# The bundled fonts' licence (SIL OFL 1.1) must travel with them.
+resources = ["../parley-ui-egui/assets/fonts/Inter-LICENSE.txt", "../parley-ui-egui/assets/fonts/JetBrainsMono-LICENSE.txt", "../parley-ui-egui/assets/fonts/IBMPlexMono-LICENSE.txt"]
+
+[package.metadata.packager.deb]
+# X11 keyboard and OpenGL/EGL are loaded at run time by the window library; fontconfig by
+# the settings, to list the installed fonts.
+depends = ["libxkbcommon-x11-0", "libegl1", "libgl1", "libfontconfig1"]
+section = "net"
+
+[package.metadata.packager.appimage]
+# Loaded at run time by the window library on X11, and missing on some minimal systems.
+libs = ["libxkbcommon-x11.so.0"]
+
+[package.metadata.packager.macos]
+minimum-system-version = "11.0"

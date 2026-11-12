@@ -1,0 +1,5 @@
+# Project shortcuts: `cargo lint`, `cargo fmt-check`, ...
+[alias]
+lint = "clippy --workspace --all-targets --all-features -- -D warnings"
+fmt-check = "fmt --all -- --check"
+test-core = "test -p parley-core"

@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug Parley (desktop)",
+      "cargo": { "args": ["build", "-p", "parley-app", "--bin", "parley"] },
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug parley-core tests",
+      "cargo": { "args": ["test", "--no-run", "-p", "parley-core"] },
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

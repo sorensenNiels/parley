@@ -1,0 +1,445 @@
+//! The 5250 data stream from the host (R-DS-1): commands, each after an ESC byte, and the
+//! orders inside Write To Display. References are to IBM's "5250 Functions Reference"
+//! (SA21-9247), chapter 15 "5494 data stream", and RFC 1205.
+
+use super::{MAX_SAVED_SCREENS, ReadKind, SavedScreen, Session};
+use crate::error::{Error, Result};
+use crate::record::Opcode;
+use crate::screen::{Field, FieldFormat, ScreenSize, is_attribute};
+
+pub(super) const ESC: u8 = 0x04;
+
+// Commands.
+const CLEAR_UNIT: u8 = 0x40;
+const CLEAR_UNIT_ALTERNATE: u8 = 0x20;
+const CLEAR_FORMAT_TABLE: u8 = 0x50;
+const WRITE_TO_DISPLAY: u8 = 0x11;
+const WRITE_ERROR_CODE: u8 = 0x21;
+const WRITE_ERROR_CODE_TO_WINDOW: u8 = 0x22;
+const READ_INPUT_FIELDS: u8 = 0x42;
+const READ_MDT_FIELDS: u8 = 0x52;
+const READ_MDT_FIELDS_ALTERNATE: u8 = 0x82;
+const READ_SCREEN_IMMEDIATE: u8 = 0x62;
+const READ_IMMEDIATE: u8 = 0x72;
+const SAVE_SCREEN: u8 = 0x02;
+pub(super) const RESTORE_SCREEN: u8 = 0x12;
+const ROLL: u8 = 0x23;
+const WRITE_STRUCTURED_FIELD: u8 = 0xF3;
+
+// Orders in Write To Display.
+const SOH: u8 = 0x01;
+const RA: u8 = 0x02;
+const EA: u8 = 0x03;
+const TD: u8 = 0x10;
+pub(super) const SBA: u8 = 0x11;
+const WEA: u8 = 0x12;
+const IC: u8 = 0x13;
+const MC: u8 = 0x14;
+const WDSF: u8 = 0x15;
+const SF: u8 = 0x1D;
+
+/// Marks restore data Parley made in reply to Save Screen ("PY" in EBCDIC).
+pub(super) const RESTORE_MAGIC: [u8; 2] = [0xD7, 0xE8];
+
+/// Reads a record's data, naming what is missing when it ends too soon.
+struct Reader<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Reader<'a> {
+    const fn new(data: &'a [u8]) -> Self {
+        Self { data, pos: 0 }
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.data.get(self.pos).copied()
+    }
+
+    fn take(&mut self, n: usize, what: &str) -> Result<&'a [u8]> {
+        let bytes = self
+            .data
+            .get(self.pos..self.pos + n)
+            .ok_or_else(|| Error::data(format!("the data stream ends inside {what}")))?;
+        self.pos += n;
+        Ok(bytes)
+    }
+
+    fn byte(&mut self, what: &str) -> Result<u8> {
+        Ok(self.take(1, what)?[0])
+    }
+
+    fn u16(&mut self, what: &str) -> Result<u16> {
+        let b = self.take(2, what)?;
+        Ok(u16::from_be_bytes([b[0], b[1]]))
+    }
+
+    /// The next byte, unless it starts the next command.
+    fn next_order(&mut self) -> Option<u8> {
+        let b = self.peek().filter(|&b| b != ESC)?;
+        self.pos += 1;
+        Some(b)
+    }
+}
+
+/// What CC1 of Write To Display or a read command does to the fields' MDT and contents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fields {
+    None,
+    NonBypass,
+    NonBypassModified,
+    All,
+}
+
+impl Session {
+    pub(super) fn process_stream(&mut self, data: &[u8]) -> Result<()> {
+        let mut r = Reader::new(data);
+        while let Some(b) = r.peek() {
+            r.pos += 1;
+            if b != ESC {
+                return Err(Error::data(format!(
+                    "expected a command (ESC), found X'{b:02X}'"
+                )));
+            }
+            match r.byte("a command")? {
+                CLEAR_UNIT => self.clear_unit(ScreenSize::Standard),
+                CLEAR_UNIT_ALTERNATE => {
+                    if r.byte("Clear Unit Alternate")? == 0x00 {
+                        if self.config.screen_size != ScreenSize::Wide {
+                            return Err(Error::unsupported("a 27×132 screen to a 24×80 session"));
+                        }
+                        self.clear_unit(ScreenSize::Wide);
+                    } else {
+                        self.clear_unit(self.screen.size());
+                    }
+                }
+                CLEAR_FORMAT_TABLE => {
+                    self.screen.clear_fields();
+                    self.lock();
+                }
+                WRITE_TO_DISPLAY => self.write_to_display(&mut r)?,
+                WRITE_ERROR_CODE => self.write_error_code(&mut r)?,
+                WRITE_ERROR_CODE_TO_WINDOW => {
+                    r.take(2, "Write Error Code to Window")?;
+                    self.write_error_code(&mut r)?;
+                }
+                READ_INPUT_FIELDS => self.read_command(&mut r, ReadKind::InputFields)?,
+                READ_MDT_FIELDS => self.read_command(&mut r, ReadKind::MdtFields)?,
+                READ_MDT_FIELDS_ALTERNATE => {
+                    self.read_command(&mut r, ReadKind::MdtFieldsAlternate)?;
+                }
+                READ_IMMEDIATE => self.send_fields(ReadKind::Immediate, None),
+                READ_SCREEN_IMMEDIATE => {
+                    let buffer = self.screen.buffer().to_vec();
+                    self.send_record(0, Opcode::NoOperation, &buffer);
+                }
+                SAVE_SCREEN => self.save_screen(),
+                RESTORE_SCREEN => self.restore_screen(&mut r)?,
+                ROLL => self.roll(&mut r)?,
+                WRITE_STRUCTURED_FIELD => self.write_structured_field(&mut r)?,
+                other => return Err(Error::unsupported(format!("command X'{other:02X}'"))),
+            }
+        }
+        Ok(())
+    }
+
+    fn clear_unit(&mut self, size: ScreenSize) {
+        self.screen.clear(size);
+        self.lock();
+        self.error = None;
+        self.pending_read = None;
+        self.insert_cursor = None;
+        self.error_row = None;
+        self.saved_error_line = None;
+    }
+
+    fn read_address(&self, r: &mut Reader<'_>, order: &str) -> Result<usize> {
+        let row = r.byte(order)?;
+        let column = r.byte(order)?;
+        self.screen.address(row, column).ok_or_else(|| {
+            Error::data(format!(
+                "{order} to row {row} column {column}, outside the screen"
+            ))
+        })
+    }
+
+    fn write_to_display(&mut self, r: &mut Reader<'_>) -> Result<()> {
+        let cc1 = r.byte("the Write To Display control characters")?;
+        let cc2 = r.byte("the Write To Display control characters")?;
+        self.apply_cc1(cc1);
+        let mut address = self.screen.cursor;
+        while let Some(b) = r.next_order() {
+            match b {
+                SOH => self.start_of_header(r)?,
+                RA => {
+                    let to = self.read_address(r, "Repeat to Address")?;
+                    let byte = r.byte("Repeat to Address")?;
+                    if to < address {
+                        return Err(Error::data("Repeat to Address goes backwards"));
+                    }
+                    self.screen.fill(address, to, byte);
+                    address = self.screen.next(to);
+                }
+                EA => {
+                    let to = self.read_address(r, "Erase to Address")?;
+                    let len = r.byte("Erase to Address")?;
+                    if !(2..=5).contains(&len) {
+                        return Err(Error::data(format!("Erase to Address with length {len}")));
+                    }
+                    r.take(usize::from(len) - 1, "Erase to Address")?;
+                    if to < address {
+                        return Err(Error::data("Erase to Address goes backwards"));
+                    }
+                    self.screen.fill(address, to, 0);
+                    address = self.screen.next(to);
+                }
+                TD => {
+                    let len = usize::from(r.u16("Transparent Data")?);
+                    for &byte in r.take(len, "Transparent Data")? {
+                        self.screen.put(address, byte);
+                        address = self.screen.next(address);
+                    }
+                }
+                SBA => address = self.read_address(r, "Set Buffer Address")?,
+                // Extended attributes (colours, ideographic text): not shown yet.
+                WEA => {
+                    r.take(2, "Write Extended Attribute")?;
+                }
+                IC => self.insert_cursor = Some(self.read_address(r, "Insert Cursor")?),
+                MC => self.screen.cursor = self.read_address(r, "Move Cursor")?,
+                // Windows, menus and scroll bars: only sent to displays that report GUI support
+                // in the query reply, which Parley does not.
+                WDSF => {
+                    let len = usize::from(r.u16("Write to Display Structured Field")?);
+                    r.take(len.saturating_sub(2), "Write to Display Structured Field")?;
+                }
+                SF => self.start_of_field(r, &mut address)?,
+                _ => {
+                    self.screen.put(address, b);
+                    address = self.screen.next(address);
+                }
+            }
+        }
+        self.apply_cc2(cc2);
+        Ok(())
+    }
+
+    /// Start of Header: begins a new format table and may move the error line.
+    fn start_of_header(&mut self, r: &mut Reader<'_>) -> Result<()> {
+        let len = r.byte("Start of Header")?;
+        if len > 7 {
+            return Err(Error::data(format!("Start of Header with length {len}")));
+        }
+        let header = r.take(usize::from(len), "Start of Header")?;
+        self.screen.clear_fields();
+        let rows = self.screen.size().rows();
+        self.error_row = header
+            .get(3)
+            .filter(|&&row| row != 0 && u16::from(row) <= rows)
+            .map(|&row| usize::from(row - 1));
+        Ok(())
+    }
+
+    /// Start of Field: `[FFW [FCW...]] attribute length`. Without a field format word the field
+    /// is output only: its attribute is written but it does not go in the format table.
+    fn start_of_field(&mut self, r: &mut Reader<'_>, address: &mut usize) -> Result<()> {
+        let first = r.byte("Start of Field")?;
+        let (format, attribute) = if is_attribute(first) {
+            (None, first)
+        } else {
+            if first & 0xC0 != 0x40 {
+                return Err(Error::data(format!(
+                    "a field format word starting X'{first:02X}'"
+                )));
+            }
+            let second = r.byte("Start of Field")?;
+            while r.peek().is_some_and(|b| !is_attribute(b)) {
+                r.take(2, "a field control word")?;
+            }
+            let attribute = r.byte("Start of Field")?;
+            (
+                Some(FieldFormat(u16::from_be_bytes([first, second]))),
+                attribute,
+            )
+        };
+        let len = usize::from(r.u16("Start of Field")?);
+        self.screen.put(*address, attribute);
+        let start = self.screen.next(*address);
+        if let Some(format) = format {
+            self.screen.add_field(Field {
+                start,
+                len,
+                format,
+                modified: format.modified(),
+            });
+        }
+        *address = start;
+        Ok(())
+    }
+
+    /// Control character 1: lock the keyboard, and reset MDT flags or null fields.
+    fn apply_cc1(&mut self, cc1: u8) {
+        let (reset, null) = match cc1 >> 5 {
+            0 => return,
+            1 => (Fields::None, Fields::None),
+            2 => (Fields::NonBypass, Fields::None),
+            3 => (Fields::All, Fields::None),
+            4 => (Fields::None, Fields::NonBypassModified),
+            5 => (Fields::NonBypass, Fields::NonBypass),
+            6 => (Fields::NonBypass, Fields::NonBypassModified),
+            _ => (Fields::All, Fields::NonBypass),
+        };
+        self.lock();
+        let selected = |f: &Field, which| match which {
+            Fields::None => false,
+            Fields::NonBypass => f.is_input(),
+            Fields::NonBypassModified => f.is_input() && f.modified,
+            Fields::All => true,
+        };
+        for i in 0..self.screen.fields().len() {
+            let Some(field) = self.screen.field(i).copied() else {
+                continue;
+            };
+            if selected(&field, null) {
+                self.screen.field_bytes_mut(&field).fill(0);
+            }
+            if selected(&field, reset)
+                && let Some(f) = self.screen.field_mut(i)
+            {
+                f.modified = false;
+            }
+        }
+    }
+
+    /// Control character 2: message light, alarm, unlock.
+    fn apply_cc2(&mut self, cc2: u8) {
+        if cc2 & 0x02 != 0 {
+            self.message_waiting = false;
+        }
+        if cc2 & 0x01 != 0 {
+            self.message_waiting = true;
+        }
+        if cc2 & 0x04 != 0 {
+            self.alarm = true;
+        }
+        if cc2 & 0x08 != 0 {
+            self.unlock();
+        }
+    }
+
+    fn read_command(&mut self, r: &mut Reader<'_>, kind: ReadKind) -> Result<()> {
+        let cc1 = r.byte("the read command's control characters")?;
+        let cc2 = r.byte("the read command's control characters")?;
+        self.apply_cc1(cc1);
+        self.apply_cc2(cc2);
+        self.pending_read = Some(kind);
+        self.unlock();
+        Ok(())
+    }
+
+    /// Writes a message on the error line and inhibits the keyboard until Reset.
+    fn write_error_code(&mut self, r: &mut Reader<'_>) -> Result<()> {
+        let row = self
+            .error_row
+            .unwrap_or(usize::from(self.screen.size().rows()) - 1);
+        if self.saved_error_line.is_none() {
+            self.saved_error_line = Some((row, self.screen.row_bytes(row).to_vec()));
+        }
+        let columns = usize::from(self.screen.size().columns());
+        let mut address = row * columns;
+        let end = address + columns;
+        while let Some(b) = r.next_order() {
+            if b == IC {
+                self.screen.cursor = self.read_address(r, "Insert Cursor")?;
+            } else if address < end {
+                self.screen.put(address, b);
+                address += 1;
+            }
+        }
+        self.error = Some(super::OperatorError::Host);
+        Ok(())
+    }
+
+    /// Roll: `control top bottom`; control bit 0 set rolls down, bits 3-7 are the line count.
+    fn roll(&mut self, r: &mut Reader<'_>) -> Result<()> {
+        let control = r.byte("Roll")?;
+        let top = r.byte("Roll")?;
+        let bottom = r.byte("Roll")?;
+        if top == 0 || top > bottom || u16::from(bottom) > self.screen.size().rows() {
+            return Err(Error::data(format!("Roll of rows {top} to {bottom}")));
+        }
+        let (top, bottom) = (usize::from(top - 1), usize::from(bottom - 1));
+        let height = bottom - top + 1;
+        let count = usize::from(control & 0x1F).min(height);
+        let mut rows: Vec<Vec<u8>> = (top..=bottom)
+            .map(|row| self.screen.row_bytes(row).to_vec())
+            .collect();
+        if control & 0x80 != 0 {
+            rows.rotate_right(count);
+            rows[..count].iter_mut().for_each(|row| row.fill(0));
+        } else {
+            rows.rotate_left(count);
+            rows[height - count..]
+                .iter_mut()
+                .for_each(|row| row.fill(0));
+        }
+        for (i, bytes) in rows.iter().enumerate() {
+            self.screen.set_row_bytes(top + i, bytes);
+        }
+        Ok(())
+    }
+
+    /// Save Screen: the reply is restore data, which the host sends back later after a Restore
+    /// Screen command. Parley keeps the screen itself and sends an id for it.
+    pub(super) fn save_screen(&mut self) {
+        let id = self.next_save_id;
+        self.next_save_id = self.next_save_id.wrapping_add(1);
+        self.saved_screens.push(SavedScreen {
+            id,
+            screen: self.screen.clone(),
+            pending_read: self.pending_read,
+            locked: self.locked,
+            error_row: self.error_row,
+        });
+        if self.saved_screens.len() > MAX_SAVED_SCREENS {
+            self.saved_screens.remove(0);
+        }
+        let mut data = vec![ESC, RESTORE_SCREEN];
+        data.extend(RESTORE_MAGIC);
+        data.extend(id.to_be_bytes());
+        self.send_record(0, Opcode::SaveScreen, &data);
+    }
+
+    fn restore_screen(&mut self, r: &mut Reader<'_>) -> Result<()> {
+        let data = r.take(4, "Restore Screen")?;
+        if data[..2] != RESTORE_MAGIC {
+            return Err(Error::data("restore data that this session did not save"));
+        }
+        let id = u16::from_be_bytes([data[2], data[3]]);
+        let saved = self
+            .saved_screens
+            .iter()
+            .find(|s| s.id == id)
+            .cloned()
+            .ok_or_else(|| Error::data(format!("a restore of saved screen {id}, which is gone")))?;
+        self.screen = saved.screen;
+        self.pending_read = saved.pending_read;
+        self.locked = saved.locked;
+        self.error_row = saved.error_row;
+        self.error = None;
+        self.insert_cursor = None;
+        self.saved_error_line = None;
+        Ok(())
+    }
+
+    /// Write Structured Field: only the 5250 Query is answered; the others are for features
+    /// Parley does not report in its query reply.
+    fn write_structured_field(&mut self, r: &mut Reader<'_>) -> Result<()> {
+        let len = usize::from(r.u16("Write Structured Field")?);
+        let body = r.take(len.saturating_sub(2), "Write Structured Field")?;
+        if let [0xD9, 0x70, ..] = body {
+            self.send_query_reply();
+        }
+        Ok(())
+    }
+}

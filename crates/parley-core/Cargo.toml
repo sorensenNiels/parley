@@ -1,0 +1,21 @@
+[package]
+name = "parley-core"
+description = "UI-agnostic TN5250 engine for Parley: telnet negotiation, the 5250 data stream, EBCDIC, the screen model."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
+des.workspace = true
+sha1.workspace = true
+getrandom.workspace = true
+
+[lints]
+workspace = true

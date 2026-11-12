@@ -1,0 +1,22 @@
+[package]
+name = "parley-ui-egui"
+description = "Parley's user interface: egui components and UI state, independent of how the app is launched."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+parley-core.workspace = true
+egui.workspace = true
+serde.workspace = true
+fontique.workspace = true
+skrifa.workspace = true
+
+[dev-dependencies]
+egui_kittest.workspace = true
+
+[lints]
+workspace = true
