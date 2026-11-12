@@ -28,7 +28,7 @@ modern take on what surrounds the screen: sessions, keyboard mapping, copy and p
 |---|---|
 | Phase 0: development environment | Done (2026-11-12): workspace, Makefile, setup scripts, CI, lints, Claude Code setup. |
 | Phase 1: connect and show a screen | Done (2026-11-12): verified on Windows, macOS, Linux and WSL2 (FEATURES.md). |
-| Phase 2: saved sessions and auto sign-on | Done (2026-11-12): verified on Windows, macOS, Linux and WSL2 (FEATURES.md). |
+| Phase 2: saved sessions and auto sign-on | Done (2026-11-12): verified on Windows, macOS, Linux and WSL2 (FEATURES.md), except auto sign-on on Linux, which waits for a check on a Linux desktop. |
 | Phase 3: keyboard maps and macros | In progress: R-DS-5 done (2026-11-12); next R-NET-6, then R-KEY-2..4. |
 
 ## 4. Phases

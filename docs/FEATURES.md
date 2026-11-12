@@ -13,7 +13,10 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
-(nothing)
+- **R-NET-4 on Linux** (2026-11-12): auto sign-on is verified on Windows and macOS, but not yet on a Linux desktop.
+  Under WSL2 it stops with "no keychain is available": WSL runs no Secret Service, so there is no saved password (D11).
+  **Left:** the owner checks auto sign-on, by screen and bypassed, on a Linux desktop with GNOME Keyring or KDE Wallet.
+  Until then the Phase 2 "verified on" list does not cover R-NET-4 on Linux.
 
 ## Implemented
 
@@ -38,7 +41,8 @@ How it was checked:
 
 ### Phase 2: saved sessions, auto sign-on and the look (2026-11-12) — R-NET-4, R-NET-5, R-UI-5..12
 
-Verified by the owner in the running app on Windows, macOS, Linux and WSL2 (2026-11-12).
+Verified by the owner in the running app on Windows, macOS, Linux and WSL2 (2026-11-12). Auto sign-on (R-NET-4) on Linux is still
+to be checked (see "In progress").
 
 How it was checked:
 - **Automated**: the DES and SHA-1 password substitutes against RFC 4777's test vectors (sections 5.1 and 5.2) and
