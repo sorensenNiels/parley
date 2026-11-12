@@ -25,6 +25,11 @@ eframe = { version = "0.37", default-features = false, features = ["accesskit", 
 fontique = { version = "0.11", default-features = false, features = ["system", "fontconfig-dlopen"] }
 skrifa = { version = "0.44", default-features = false, features = ["std"] }
 
+# Asking GitHub for the latest release (R-UI-11, D13): a blocking client on a thread, with
+# rustls (ring) and the operating system's trust store, as for TN5250 over TLS (D6).
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
+serde_json = "1"
+
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 # TLS for TN5250 over port 992 (R-NET-2): pure Rust with the ring backend; TLS 1.2 is still common on IBM i.

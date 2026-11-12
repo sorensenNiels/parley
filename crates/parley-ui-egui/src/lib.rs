@@ -14,6 +14,7 @@ mod settings;
 mod status;
 mod terminal;
 mod theme;
+mod updates;
 
 use egui::{CentralPanel, Frame, Margin, Panel, Ui, ViewportCommand};
 use parley_core::net::{Connection, LinkState};
@@ -24,6 +25,7 @@ pub use profile::{Keychain, NoKeychain, Profile};
 use sessions::{Editor, Outcome};
 pub use settings::{Settings, Theme};
 pub use theme::Density;
+pub use updates::Checker;
 
 /// The whole application UI: menu bar, toolbar and status bar around the start screen or the
 /// open session's screen.
@@ -51,6 +53,7 @@ pub struct ParleyUi {
     settings_dialog: Option<settings::Dialog>,
     keymap: Keymap,
     logo: menu::Logo,
+    updates: updates::Updates,
     /// Give the terminal the keyboard focus on the next frame.
     focus_terminal: bool,
     show_shortcuts: bool,
@@ -83,6 +86,7 @@ impl ParleyUi {
             settings_dialog: None,
             keymap: Keymap::default(),
             logo: menu::Logo::default(),
+            updates: updates::Updates::default(),
             focus_terminal: false,
             show_shortcuts: false,
             asking_to_exit: false,
@@ -93,6 +97,12 @@ impl ParleyUi {
     /// The app icon to show before the name in the menu bar (the launcher has it as a PNG).
     pub fn set_logo(&mut self, image: egui::ColorImage) {
         self.logo = menu::Logo::new(image);
+    }
+
+    /// How to ask for the latest release (R-UI-11). Without one, Parley doesn't look for
+    /// new versions (tests, and builds that shouldn't).
+    pub fn set_update_checker(&mut self, checker: Checker) {
+        self.updates.set_checker(checker);
     }
 
     /// The settings, for the launcher to keep.
@@ -173,6 +183,10 @@ impl ParleyUi {
         if ui.ctx().options(|o| o.zoom_with_keyboard) {
             ui.ctx().options_mut(|o| o.zoom_with_keyboard = false);
         }
+        if self.applied.is_none() && self.settings.check_for_updates {
+            self.updates.start(ui.ctx(), updates::Check::AtStart);
+        }
+        self.updates.collect();
         if self.applied.as_ref() != Some(&self.settings) {
             let note = settings::apply(ui.ctx(), self.applied.as_ref(), &self.settings);
             if note.is_some() {
@@ -200,6 +214,7 @@ impl ParleyUi {
                 self.show_shortcuts,
                 &self.profiles,
                 self.logo.texture(ui.ctx()),
+                self.updates.available(),
             ));
         });
         Panel::top("toolbar").frame(tool_frame).show(ui, |ui| {
@@ -306,6 +321,11 @@ impl ParleyUi {
                 Action::Settings => {
                     self.settings_dialog = Some(settings::Dialog::open(ctx, &self.settings));
                 }
+                Action::CheckForUpdates => {
+                    let dialog = settings::Dialog::open(ctx, &self.settings).on_about_page();
+                    self.settings_dialog = Some(dialog);
+                    self.updates.start(ctx, updates::Check::Now);
+                }
                 Action::ToggleShortcuts => self.show_shortcuts = !self.show_shortcuts,
                 Action::Key(key) => {
                     if let Some(s) = session.as_deref_mut() {
@@ -371,7 +391,11 @@ impl ParleyUi {
         let Some(dialog) = &mut self.settings_dialog else {
             return;
         };
-        match dialog.show(ctx, &mut self.settings) {
+        let closed = dialog.show(ctx, &mut self.settings, self.updates.status());
+        if dialog.take_check_request() {
+            self.updates.start(ctx, updates::Check::Now);
+        }
+        match closed {
             Some(settings::Closed::Keep) => self.settings_dialog = None,
             Some(settings::Closed::Revert) => {
                 self.settings = dialog.original().clone();
@@ -664,6 +688,163 @@ mod tests {
             "Help on the right: {help:?}"
         );
         assert!(help.right() > 950.0, "at the edge: {help:?}");
+    }
+
+    /// An update checker that answers `found` and counts its calls; never GitHub.
+    fn fake_checker(
+        found: Result<parley_core::update::Found, String>,
+    ) -> (Checker, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = std::sync::Arc::clone(&calls);
+        let checker: Checker = std::sync::Arc::new(move || {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            found.clone()
+        });
+        (checker, calls)
+    }
+
+    fn newer_release() -> parley_core::update::Found {
+        let file = |name: &str| parley_core::update::Download {
+            name: name.to_owned(),
+            url: format!("https://github.com/sorensenNiels/parley/releases/download/v9.9.9/{name}"),
+        };
+        parley_core::update::Found::Newer(parley_core::update::Release {
+            version: "9.9.9".into(),
+            page: "https://github.com/sorensenNiels/parley/releases/tag/v9.9.9".into(),
+            downloads: vec![
+                file("parley_9.9.9_amd64.deb"),
+                file("parley_9.9.9_x86_64.AppImage"),
+            ],
+        })
+    }
+
+    /// Help ▸ Check for updates… (the Help menu, not the toolbar's Help key).
+    fn check_for_updates(harness: &mut Harness<'static, ParleyUi>) {
+        harness
+            .get_all_by_label("Help")
+            .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+            .expect("the Help menu")
+            .click();
+        harness.run();
+        harness.get_by_label("Check for updates…").click();
+    }
+
+    /// Frames until `label` shows: the check runs on a thread.
+    fn wait_for(harness: &mut Harness<'static, ParleyUi>, label: &str) {
+        for _ in 0..200 {
+            harness.step();
+            if harness.query_by_label(label).is_some() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("{label} never showed");
+    }
+
+    fn app_checking(checker: Checker, settings: Settings) -> Harness<'static, ParleyUi> {
+        let mut app = ParleyUi::default();
+        app.set_settings(settings);
+        app.set_update_checker(checker);
+        Harness::builder()
+            .with_size(egui::vec2(1000.0, 800.0))
+            .build_ui_state(|ui, app: &mut ParleyUi| app.ui(ui), app)
+    }
+
+    #[test]
+    fn a_newer_version_found_at_start_up_shows_as_a_link_in_the_menu_bar() {
+        // R-UI-11
+        let (checker, calls) = fake_checker(Ok(newer_release()));
+        let mut harness = app_checking(checker, Settings::default());
+        wait_for(&mut harness, "Parley 9.9.9 is available");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn no_check_at_start_up_when_the_setting_is_off() {
+        // R-UI-11
+        let (checker, calls) = fake_checker(Ok(newer_release()));
+        let settings = Settings {
+            check_for_updates: false,
+            ..Settings::default()
+        };
+        let mut harness = app_checking(checker, settings);
+        harness.run_steps(5);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        harness.run_steps(2);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert!(
+            harness
+                .query_by_label("Parley 9.9.9 is available")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn check_for_updates_opens_about_and_says_what_it_found() {
+        // R-UI-11
+        let (checker, _) = fake_checker(Ok(parley_core::update::Found::UpToDate));
+        let settings = Settings {
+            check_for_updates: false,
+            ..Settings::default()
+        };
+        let mut harness = app_checking(checker, settings);
+        harness.run();
+        check_for_updates(&mut harness);
+        wait_for(&mut harness, "Parley is up to date.");
+        harness.get_by_label(&format!("Version {}", env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    fn a_failed_check_now_says_why_but_one_at_start_up_is_silent() {
+        // R-UI-11
+        let (checker, calls) =
+            fake_checker(Err("could not check for a new version: offline".into()));
+        let mut harness = app_checking(checker, Settings::default());
+        for _ in 0..50 {
+            harness.step();
+            if calls.load(std::sync::atomic::Ordering::SeqCst) == 1 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        harness.run_steps(3);
+        assert!(
+            harness.query_by_label_contains("offline").is_none(),
+            "silent at start-up"
+        );
+        check_for_updates(&mut harness);
+        for _ in 0..200 {
+            harness.step();
+            if harness.query_by_label_contains("offline").is_some() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("the failure never showed");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn on_linux_the_about_page_offers_the_download_commands() {
+        // R-UI-12
+        let (checker, _) = fake_checker(Ok(newer_release()));
+        let mut harness = app_checking(checker, Settings::default());
+        check_for_updates(&mut harness);
+        wait_for(&mut harness, "Copy download command");
+        harness.get_by_label("Copy download command").click();
+        harness.run_steps(2);
+        harness.get_by_label("parley_9.9.9_amd64.deb").click();
+        harness.run_steps(2);
+        harness.get_by_label_contains("curl -fLO 'https://github.com/sorensenNiels/parley/releases/download/v9.9.9/parley_9.9.9_amd64.deb'");
+    }
+
+    #[test]
+    fn without_a_checker_the_about_page_says_so() {
+        // R-UI-11: tests and builds without a checker never contact GitHub.
+        let mut harness = app_with(Vec::new(), &MemoryKeychain::default());
+        check_for_updates(&mut harness);
+        harness.run_steps(3);
+        harness.get_by_label("This build doesn't look for new versions.");
     }
 
     #[test]

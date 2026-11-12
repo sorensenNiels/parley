@@ -1,4 +1,5 @@
-//! Settings (R-UI-6, R-UI-8): theme, text size, density and the terminal font, in a dialog
+//! Settings (R-UI-6, R-UI-8, R-UI-11): theme, text size, density, the terminal font and
+//! looking for new versions, with what this build is on the About page, in a dialog
 //! from Tools ▸ Settings… laid out as Tortuga's (D12): pages listed on the left, and on the
 //! right groups of rows, each a name with a short line about it and the control beside it.
 //! Changes show at once; Cancel puts the old ones back.
@@ -8,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fonts::{self, Installed};
 use crate::theme::{self, Density};
+use crate::updates::UpdateStatus;
 use crate::{dialog, terminal};
 
 /// The text sizes offered, in percent.
@@ -33,6 +35,8 @@ pub struct Settings {
     pub density: Density,
     /// The terminal font's family name: a bundled font or an installed one.
     pub terminal_font: String,
+    /// Look for a new version when Parley starts (R-UI-11).
+    pub check_for_updates: bool,
 }
 
 impl Default for Settings {
@@ -42,6 +46,7 @@ impl Default for Settings {
             text_size: 100,
             density: Density::Comfortable,
             terminal_font: fonts::DEFAULT_TERMINAL_FONT.to_owned(),
+            check_for_updates: true,
         }
     }
 }
@@ -77,6 +82,7 @@ pub fn apply(ctx: &egui::Context, old: Option<&Settings>, new: &Settings) -> Opt
 pub enum Page {
     Appearance,
     Terminal,
+    About,
 }
 
 impl Page {
@@ -84,6 +90,7 @@ impl Page {
         match self {
             Self::Appearance => "Appearance",
             Self::Terminal => "Terminal",
+            Self::About => "About",
         }
     }
 
@@ -97,12 +104,19 @@ impl Page {
                 settings.density = defaults.density;
             }
             Self::Terminal => settings.terminal_font = defaults.terminal_font,
+            Self::About => settings.check_for_updates = defaults.check_for_updates,
         }
     }
 }
 
 /// The pages under their headings, in the order the list shows them.
-const SECTIONS: [(&str, &[Page]); 1] = [("General", &[Page::Appearance, Page::Terminal])];
+const SECTIONS: [(&str, &[Page]); 2] = [
+    ("General", &[Page::Appearance, Page::Terminal]),
+    ("App", &[Page::About]),
+];
+
+/// Where the source and the issues are.
+const REPOSITORY: &str = "https://github.com/sorensenNiels/parley";
 
 /// Width of the list of pages.
 const NAV_WIDTH: f32 = 168.0;
@@ -114,6 +128,10 @@ pub struct Dialog {
     original: Settings,
     installed: Installed,
     page: Page,
+    /// "Check now" was clicked; [`crate::ParleyUi`] starts the check.
+    check_requested: bool,
+    /// What was last copied, to say so.
+    copied: Option<String>,
 }
 
 /// How the dialog closed.
@@ -131,7 +149,20 @@ impl Dialog {
             original: settings.clone(),
             installed: Installed::search(move || ctx.request_repaint()),
             page: Page::Appearance,
+            check_requested: false,
+            copied: None,
         }
+    }
+
+    /// Opens on the About page (Help ▸ Check for updates…).
+    pub fn on_about_page(mut self) -> Self {
+        self.page = Page::About;
+        self
+    }
+
+    /// True once after "Check now" was clicked.
+    pub fn take_check_request(&mut self) -> bool {
+        std::mem::take(&mut self.check_requested)
     }
 
     pub fn original(&self) -> &Settings {
@@ -139,7 +170,12 @@ impl Dialog {
     }
 
     /// Draws the dialog over `settings`, which change as the operator picks.
-    pub fn show(&mut self, ctx: &egui::Context, settings: &mut Settings) -> Option<Closed> {
+    pub fn show(
+        &mut self,
+        ctx: &egui::Context,
+        settings: &mut Settings,
+        updates: &UpdateStatus,
+    ) -> Option<Closed> {
         let (close, closed) = dialog::dialog(ctx, "settings", "Settings", 760.0, |ui| {
             // One size for every page, so the dialog doesn't jump when the page changes.
             let height = (ui.ctx().content_rect().height() - 210.0).clamp(260.0, 500.0);
@@ -158,7 +194,7 @@ impl Dialog {
                 .auto_shrink([false, false])
                 .show(&mut page_ui, |ui| {
                     ui.add_space(4.0);
-                    self.page_content(ui, settings);
+                    self.page_content(ui, settings, updates);
                 });
             ui.add_space(16.0);
             ui.horizontal(|ui| {
@@ -185,10 +221,102 @@ impl Dialog {
         if close { Some(Closed::Revert) } else { closed }
     }
 
-    fn page_content(&self, ui: &mut Ui, settings: &mut Settings) {
+    fn page_content(&mut self, ui: &mut Ui, settings: &mut Settings, updates: &UpdateStatus) {
         match self.page {
             Page::Appearance => appearance_page(ui, settings),
             Page::Terminal => self.terminal_page(ui, settings),
+            Page::About => self.about_page(ui, settings, updates),
+        }
+    }
+
+    /// What this build is, and looking for a new version (R-UI-11), on Linux with the
+    /// `curl` command that downloads a package (R-UI-12). As Tortuga's About page.
+    fn about_page(&mut self, ui: &mut Ui, settings: &mut Settings, updates: &UpdateStatus) {
+        let p = theme::palette(ui);
+        ui.label(theme::semibold("Parley").size(18.0));
+        ui.label(RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION"))).color(p.muted));
+        ui.add_space(14.0);
+        group(ui, "About", |rows| {
+            rows.fact("Built for", |ui| {
+                ui.label(format!(
+                    "{} {}",
+                    std::env::consts::OS,
+                    std::env::consts::ARCH
+                ));
+            });
+            rows.fact("Licence", |ui| {
+                ui.label(env!("CARGO_PKG_LICENSE").replace(" OR ", " or "));
+            });
+            rows.fact("Source", |ui| {
+                ui.hyperlink(REPOSITORY);
+            });
+            rows.full_row(|ui| {
+                if ui
+                    .button("Copy version")
+                    .on_hover_text(version_info())
+                    .clicked()
+                {
+                    ui.ctx().copy_text(version_info());
+                    self.copied = Some("The version is copied.".to_owned());
+                }
+            });
+        });
+        if *updates == UpdateStatus::Unsupported {
+            theme::hint(ui, "This build doesn't look for new versions.");
+            return;
+        }
+        group(ui, "Updates", |rows| {
+            rows.switch(
+                "Look for a new version when Parley starts",
+                Some("Asks GitHub for the latest release; sends nothing else."),
+                &mut settings.check_for_updates,
+            );
+            rows.full_row(|ui| self.update_row(ui, updates));
+        });
+        if let Some(copied) = &self.copied {
+            theme::hint(ui, copied);
+        }
+    }
+
+    /// "Check now" and what the last check found.
+    fn update_row(&mut self, ui: &mut Ui, updates: &UpdateStatus) {
+        ui.horizontal(|ui| {
+            let checking = *updates == UpdateStatus::Checking;
+            if ui
+                .add_enabled(!checking, egui::Button::new("Check now"))
+                .clicked()
+            {
+                self.check_requested = true;
+            }
+            match updates {
+                UpdateStatus::Unsupported | UpdateStatus::NotChecked | UpdateStatus::Failed(_) => {}
+                UpdateStatus::Checking => {
+                    ui.spinner();
+                    ui.label("Looking for a new version…");
+                }
+                UpdateStatus::UpToDate => {
+                    ui.label("Parley is up to date.");
+                }
+                UpdateStatus::Available(release) => {
+                    ui.hyperlink_to(
+                        format!("Parley {} is available", release.version),
+                        &release.page,
+                    )
+                    .on_hover_text("Opens the release page, with its notes and installers.");
+                    let packages = if cfg!(target_os = "linux") {
+                        release.linux_packages()
+                    } else {
+                        Vec::new()
+                    };
+                    if let Some(command) = download_command_menu(ui, &packages) {
+                        ui.ctx().copy_text(command.clone());
+                        self.copied = Some(format!("Copied: {command}"));
+                    }
+                }
+            }
+        });
+        if let UpdateStatus::Failed(e) = updates {
+            theme::error(ui, e);
         }
     }
 
@@ -342,6 +470,30 @@ impl Rows<'_> {
         inner
     }
 
+    /// A setting that is on or off: its name, and a switch named by it.
+    fn switch(&mut self, name: &str, about: Option<&str>, on: &mut bool) {
+        self.row(name, about, |ui, name_id| {
+            theme::switch(ui, on).labelled_by(name_id);
+        });
+    }
+
+    /// A fact, not a setting: its name and `value` as text side by side, on a lower row.
+    fn fact(&mut self, name: &str, value: impl FnOnce(&mut Ui)) {
+        self.divider();
+        self.ui.add_space(7.0);
+        let width = self.label_width;
+        let muted = theme::palette(self.ui).muted;
+        self.ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(vec2(width, 0.0), Layout::top_down(Align::Min), |ui| {
+                ui.set_width(width);
+                ui.label(RichText::new(name).color(muted));
+            });
+            ui.add_space(12.0);
+            ui.vertical(value);
+        });
+        self.ui.add_space(7.0);
+    }
+
     /// A row across the whole card, for what isn't a setting (a preview, a note).
     fn full_row<R>(&mut self, add: impl FnOnce(&mut Ui) -> R) -> R {
         self.divider();
@@ -470,4 +622,41 @@ fn preview(ui: &mut Ui) {
             line(ui, "0Oo 1lI| {}[] æøå ÆØÅ €  ", green);
         });
     ui.add_space(4.0);
+}
+
+/// The app's version and platform, for bug reports.
+fn version_info() -> String {
+    format!(
+        "Parley {} ({} {})",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    )
+}
+
+/// "Copy download command", listing `packages` by file name; returns the command picked.
+/// Nothing when there are none (R-UI-12).
+fn download_command_menu(
+    ui: &mut Ui,
+    packages: &[&parley_core::update::Download],
+) -> Option<String> {
+    if packages.is_empty() {
+        return None;
+    }
+    ui.menu_button("Copy download command", |ui| {
+        let mut picked = None;
+        for package in packages {
+            let command = package.curl_command();
+            if ui
+                .button(&package.name)
+                .on_hover_text(command.as_str())
+                .clicked()
+            {
+                picked = Some(command);
+            }
+        }
+        picked
+    })
+    .inner
+    .flatten()
 }

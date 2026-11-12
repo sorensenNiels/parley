@@ -74,6 +74,13 @@ pub fn run() -> eframe::Result {
             if let Some(settings) = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)) {
                 ui.set_settings(settings);
             }
+            ui.set_update_checker(std::sync::Arc::new(|| {
+                parley_core::update::check(
+                    parley_core::update::LATEST_RELEASE_URL,
+                    env!("CARGO_PKG_VERSION"),
+                )
+                .map_err(|e| e.to_string())
+            }));
             match eframe::icon_data::from_png_bytes(include_bytes!("../icons/64.png")) {
                 Ok(icon) => ui.set_logo(egui::ColorImage::from_rgba_unmultiplied(
                     [icon.width as usize, icon.height as usize],

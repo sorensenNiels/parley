@@ -12,6 +12,7 @@ pub mod screen;
 pub mod session;
 pub mod signon;
 pub mod telnet;
+pub mod update;
 
 pub use ebcdic::CodePage;
 pub use error::{Error, Result};

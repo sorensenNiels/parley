@@ -25,6 +25,10 @@ pub enum Error {
     #[error("cannot read the CA certificate file {path}: {message}")]
     CaFile { path: String, message: String },
 
+    /// Asking GitHub for the latest release failed (R-UI-11).
+    #[error("could not check for a new version: {0}")]
+    UpdateCheck(String),
+
     #[error("the connection failed: {0}")]
     Io(#[from] io::Error),
 }

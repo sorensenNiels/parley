@@ -37,7 +37,7 @@ the device name of R-NET-3 (a taken name), typing in the running app, a CA certi
 
 ### Phase 2: saved sessions and auto sign-on (2026-11-12)
 
-Built: R-UI-5, R-NET-4, R-NET-5, R-UI-6, R-UI-7, R-UI-8, R-UI-9, R-UI-10.
+Built: R-UI-5, R-NET-4, R-NET-5, R-UI-6, R-UI-7, R-UI-8, R-UI-9, R-UI-10, R-UI-11, R-UI-12.
 
 Checked so far:
 - **Automated**: the DES and SHA-1 password substitutes against RFC 4777's test vectors (sections 5.1 and 5.2) and
@@ -51,7 +51,12 @@ Checked so far:
   JetBrains Mono families, thin floating scroll bars, every symbol the UI draws present in the bundled fonts, the
   session dialog keeping its place. Screenshots (Linux/WSLg): start screen, PUB400 connected, session dialog and
   settings dialog in dark, settings dialog in light. R-UI-10: the name (and icon) in the menu bar and Help at its right
-  edge, in kittest and a screenshot.
+  edge, in kittest and a screenshot. R-UI-11/12: version comparison, GitHub's answer read from a fixture (newer, same,
+  404, error, garbage), unsafe download URLs left out, the `curl` command, the request naming only the app (against a
+  local fake server); in kittest with a fake checker: the menu bar link, no check when turned off, Check for updates
+  saying what it found, a failure silent at start-up but shown on Check now, the download command menu on Linux, and
+  no checker meaning no check. Against GitHub (once, by hand): the About page said "up to date" for 0.2.1, and a check
+  as 0.1.0 found 0.2.0 with the `.deb` and AppImage `curl` commands.
 - **Running app** (Linux/WSLg screenshots): the start screen lists the session migrated from the 0.1 settings; the
   session dialog with every option. WSL has no Secret Service, so the dialog says the keychain is unavailable.
   R-UI-6: the start screen, session dialog (two columns, fits a 1000×640 window), settings dialog with the font

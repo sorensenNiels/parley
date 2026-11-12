@@ -22,6 +22,8 @@ pub enum Action {
     Paste,
     ToggleShortcuts,
     Settings,
+    /// Help ▸ Check for updates…: Settings on the About page, checking (R-UI-11).
+    CheckForUpdates,
     Key(Key),
 }
 
@@ -32,6 +34,7 @@ pub fn menu_bar(
     shortcuts_shown: bool,
     profiles: &[Profile],
     logo: Option<&egui::TextureHandle>,
+    newer: Option<&parley_core::update::Release>,
 ) -> Option<Action> {
     let mut action = None;
     MenuBar::new().ui(ui, |ui| {
@@ -92,12 +95,24 @@ pub fn menu_bar(
                 if ui.button("Keyboard shortcuts").clicked() {
                     action = Some(Action::ToggleShortcuts);
                 }
+                if ui.button("Check for updates…").clicked() {
+                    action = Some(Action::CheckForUpdates);
+                }
                 ui.separator();
                 ui.add_enabled(
                     false,
                     Button::new(format!("Parley {}", env!("CARGO_PKG_VERSION"))),
                 );
             });
+            // A quiet link, never a pop-up; the download command is on the About page.
+            if let Some(release) = newer {
+                ui.hyperlink_to(
+                    format!("Parley {} is available", release.version),
+                    &release.page,
+                )
+                .on_hover_text("Opens the release page, with its notes and installers.");
+                ui.add_space(8.0);
+            }
         });
     });
     action
