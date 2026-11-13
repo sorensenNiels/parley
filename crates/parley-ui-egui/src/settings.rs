@@ -51,10 +51,16 @@ pub struct Settings {
     pub sql_rows: u32,
     /// Seconds before the SQL helper stops a statement; 0 for none (R-SQL-18).
     pub sql_timeout: u32,
+    /// What the SQL window's column headings say (R-SQL-29).
+    pub sql_header: crate::sql::grid::HeaderMode,
+    /// A folder of snippets shared with others, besides the operator's own; empty for none (R-SQL-24).
+    pub sql_snippets_shared: String,
     /// The statements run in the SQL window, by saved session, oldest first (R-SQL-7).
     pub sql_history: std::collections::BTreeMap<String, Vec<String>>,
     /// The SQL window's scripts, by saved session (R-SQL-20).
     pub sql_scripts: std::collections::BTreeMap<String, Vec<crate::sql::editor::SavedScript>>,
+    /// The libraries pinned in the SQL window's schema browser, by saved session (R-SQL-34).
+    pub sql_pinned: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 impl Default for Settings {
@@ -70,8 +76,11 @@ impl Default for Settings {
             java_path: String::new(),
             sql_rows: parley_core::sql::protocol::FIRST_ROWS,
             sql_timeout: 0,
+            sql_header: crate::sql::grid::HeaderMode::default(),
+            sql_snippets_shared: String::new(),
             sql_history: std::collections::BTreeMap::new(),
             sql_scripts: std::collections::BTreeMap::new(),
+            sql_pinned: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -365,6 +374,15 @@ impl Dialog {
                         .range(0..=86_400)
                         .suffix(" s");
                     ui.add(value).labelled_by(name_id);
+                },
+            );
+            rows.row(
+                "Shared snippets",
+                Some("A folder of snippets shared with others, such as a network folder."),
+                |ui, name_id| {
+                    let edit = egui::TextEdit::singleline(&mut settings.sql_snippets_shared)
+                        .hint_text("None");
+                    theme::sized_edit(ui, 260.0, edit).labelled_by(name_id);
                 },
             );
             rows.fact("Found", |ui| match &found {

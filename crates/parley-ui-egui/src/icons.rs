@@ -14,6 +14,7 @@ pub const ARROW_DOWN: &str = "\u{E03E}";
 pub const ARROW_UP: &str = "\u{E08E}";
 pub const ARROWS_CLOCKWISE: &str = "\u{E094}";
 pub const BELL: &str = "\u{E0CE}";
+pub const BOOKMARK_SIMPLE: &str = "\u{E0EA}";
 pub const CARET_DOWN: &str = "\u{E136}";
 pub const CHECK_CIRCLE: &str = "\u{E184}";
 pub const CLIPBOARD: &str = "\u{E196}";
@@ -46,11 +47,12 @@ pub const TERMINAL: &str = "\u{EAE8}";
 
 /// Every icon above, for the test that the font has them.
 #[cfg(test)]
-pub const ALL: [&str; 33] = [
+pub const ALL: [&str; 34] = [
     ARROW_DOWN,
     ARROW_UP,
     ARROWS_CLOCKWISE,
     BELL,
+    BOOKMARK_SIMPLE,
     CARET_DOWN,
     CHECK_CIRCLE,
     CLIPBOARD,

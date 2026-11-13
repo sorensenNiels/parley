@@ -6,7 +6,7 @@ use egui::{Panel, RichText, ScrollArea, Ui};
 use parley_core::sql::protocol::Row;
 
 use super::SqlFiles;
-use super::grid::ResultView;
+use super::grid::{HeaderMode, ResultView};
 use crate::{icons, theme};
 
 /// Result tabs kept; the oldest closes first.
@@ -77,7 +77,13 @@ impl Results {
     }
 
     /// Draws the tabs and the shown result; `idle` when no request is in flight.
-    pub fn show(&mut self, ui: &mut Ui, idle: bool, saver: Option<&dyn SqlFiles>) -> Option<Ask> {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        idle: bool,
+        header: &mut HeaderMode,
+        saver: Option<&dyn SqlFiles>,
+    ) -> Option<Ask> {
         if self.tabs.is_empty() {
             theme::hint(ui, "Run a query to see its rows here.");
             return None;
@@ -86,12 +92,25 @@ impl Results {
         let shown = self.shown;
         let tab = self.tabs.get_mut(shown)?;
         let view = &mut tab.view;
+        view.header = *header;
         ui.horizontal(|ui| {
             ui.label(icons::icon(icons::MAGNIFYING_GLASS).color(theme::palette(ui).muted));
             let field =
                 egui::TextEdit::singleline(&mut view.filter).hint_text("Filter the rows fetched");
             theme::sized_edit(ui, 260.0, field)
                 .on_hover_text("Rows that hold this text in any column, ignoring case");
+            // R-SQL-29: what the column headings say.
+            theme::button_row(ui, |ui| {
+                theme::segmented(
+                    ui,
+                    header,
+                    &[
+                        (HeaderMode::Names, "Names"),
+                        (HeaderMode::Headings, "Headings"),
+                        (HeaderMode::Both, "Both"),
+                    ],
+                );
+            });
         });
         let mut ask = None;
         let note = &mut self.note;
@@ -293,6 +312,11 @@ mod tests {
             scale: 0,
             nullable: false,
             numeric: true,
+            field: None,
+            schema: None,
+            table: None,
+            heading: None,
+            text: None,
         };
         ResultView::new(vec![column], vec![vec![Some("1".to_owned())]], more, cursor)
     }

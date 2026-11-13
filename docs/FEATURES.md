@@ -47,6 +47,52 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
   later. **Automated:** versions read from `java -version` (1.8, 11, 21, early access); with SQL on, Add-ons shows
   the Java field, what was found and the helper's folder, and hides them again when off; the dialog keeps its place;
   without the helper or with a Java that does not run, Tools ▸ SQL… explains and links to Eclipse Temurin.
+- **R-SQL-28** (2026-11-13): a visible Run selection, built: "Run selection" while text is selected, otherwise
+  the statement Run would execute on a faint background. **Automated:** the background covers exactly that
+  statement (`æøå` in it) and nothing when text is selected; drawn: the button's name follows the selection.
+- **R-SQL-29** (2026-11-13): IBM i column headings, built. With JTOpen's extended metadata the helper reports each
+  column's field name (or alias), file, heading and text; the heading comes from `QSYS2.SYSCOLUMNS` (blanks between
+  its parts made one space) or, where the catalog has none, from JTOpen's label. Names | Headings | Both above the
+  grid (Headings by default, kept in the settings); the hover gives name, heading, text, file and type; Copy and
+  Export use what the header shows. **Real host:** on the owner's IBM i a DDS file with COLHDG (`MSGSUDTA/REGP`) gave
+  every column its heading and text; an alias keeps its name and has no heading; catalog views have none.
+  **Automated:** the helper's self-test with the owner's real headings (no word split), the modes in Copy and CSV,
+  the hover; drawn: the heading by default, Names switching it.
+- **R-SQL-24..27** (2026-11-13): snippets, built. `.sql` files with `-- title/tags/about/needs` lines, mine in
+  `snippets` beside the settings and an optional shared folder (Settings, Add-ons, SQL); a Snippets tab beside
+  History (search, double-click inserts at the cursor, Run, Edit, Delete, hover with the SQL); Save as snippet… from
+  the selection or the statement under the cursor; `${name}`/`${name:default}` asked for in a form that offers the
+  last values; 13 "did you know" IBM i Services starters, read-only. **Automated:** parsing, writing back, search,
+  placeholders and filling (`æøå`) in parley-core; the panel with a store in memory, the save and values dialogs
+  keep their buttons in place, a name cannot leave its folder (parley-app). **Left:** `sqlprobe --snippets` on the
+  owner's IBM i (each starter on 7.3); the owner tries the panel, in light and dark.
+- **R-SQL-30..33** (2026-11-13): IBM i tools and the second connection, built. `CL:` statements run through
+  `QSYS2.QCMDEXC` (coloured, kept as written in the history, DLT/CLR/END commands confirmed); Explain on an error
+  with a message ID (job log first, then QSQLMSG/QCPFMSG), Job log as a result tab; the current schema and library
+  list in the top bar (click sets the schema, Add runs `CL: ADDLIBLE`), read after Connect and after `SET`/`CL:`;
+  a second helper signs on only after the first did, its job named in the top bar. **Automated:** parsing, guard,
+  colour and format of CL; message IDs and format codes (`æøå`); Explain's fallback; the job context; the second
+  connection's states and that a refused first sign-on stops it. `sqlprobe --tools` ran on the owner's 7.3. **Left:**
+  the owner tries them in the app (two QZDASOINIT jobs in WRKACTJOB).
+- **R-SQL-34, R-SQL-35** (2026-11-13): the schema browser, built. A Database tab beside History and Snippets: the
+  SQL job's library list and the libraries pinned (kept per saved session), each opening to tables, views,
+  indexes, procedures and functions, a table or view to its columns (type; heading and text on hover); read on
+  the second connection, a level at a time, with a filter and Refresh. Double-click inserts the name; the
+  right-click menu has Insert name, Show SQL (`QSYS2.GENERATE_SQL` into a new script tab) and Select first rows.
+  **Automated:** the catalog queries' quoting, rows to objects and columns (`æøå`), DDL lines, the question
+  queue, pinning, and a kittest that opens a library to its tables. **Checked:** `sqlprobe --tools` on the
+  owner's 7.3 as NODEJT400 (D22); the owner in the app (pinning).
+- **R-SQL-36** (2026-11-13): completion as you type, built. After two letters or a `.`, a list under the cursor offers
+  the columns of the statement's tables (by alias too, with type and heading), the tables and views of the current
+  schema or of `library.`, the libraries and SQL keywords; Up/Down, Tab or Enter, Esc. Names come from the
+  browser's cache; what is missing is asked on the second connection and offered when answered. **Automated:**
+  the name typed and its qualifier (not in text or comments, `æøå`), tables and aliases from FROM/JOIN, what is
+  offered from the cache, replacing the typed part, and the keys in a kittest. **Left:** the owner tries it.
+- **R-SQL-37** (2026-11-13): names on hover, built. Hovering a table or view name in the editor (or its alias)
+  shows its qualified name, kind, text and up to 25 columns with type and heading, from the browser's cache (read
+  when missing). **Automated:** the name and library under the pointer (not in comments, `æøå`), aliases, columns
+  of an alias left alone. **Checked:** completion and hover against the owner's 7.3 as NODEJT400 (D22): 9 tables
+  after `NODEJT400.`, 4 columns after `x.`, the hover text. **Left:** the owner tries both in the app.
 - **R-SQL-14..16, R-SQL-18** (2026-11-13): more from results, built (`sql/results`, `sql/grid`). A tab per query
   (up to 10, the oldest closing first, each with its sort, filter and Fetch more); a row's values one under another
   beside the grid (double-click, or Enter on one selected row; Next and Previous); a filter over the rows fetched

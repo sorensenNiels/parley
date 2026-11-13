@@ -18,6 +18,25 @@ const NUMBER_WIDTH: f32 = 52.0;
 const MIN_WIDTH: f32 = 40.0;
 const MAX_FIT: f32 = 420.0;
 
+/// What a column's heading in the grid says (R-SQL-29): the field names, the IBM i column
+/// headings (COLHDG, `LABEL ON`), or both. A column without a heading shows its name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum HeaderMode {
+    Names,
+    #[default]
+    Headings,
+    Both,
+}
+
+/// What `column`'s heading says in `mode`.
+pub fn header_text(column: &Column, mode: HeaderMode) -> String {
+    match (mode, column.heading.as_deref()) {
+        (HeaderMode::Headings, Some(heading)) => heading.to_owned(),
+        (HeaderMode::Both, Some(heading)) => format!("{} · {heading}", column.name),
+        (HeaderMode::Names | HeaderMode::Headings | HeaderMode::Both, _) => column.name.clone(),
+    }
+}
+
 /// A query's result as the window shows it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResultView {
@@ -40,6 +59,8 @@ pub struct ResultView {
     widths: Vec<f32>,
     /// The row shown one value under another (R-SQL-15).
     pub detail: Option<usize>,
+    /// What the headings say (R-SQL-29), as the window's choice sets it.
+    pub header: HeaderMode,
 }
 
 impl ResultView {
@@ -57,6 +78,7 @@ impl ResultView {
             filtered_for: String::new(),
             widths: Vec::new(),
             detail: None,
+            header: HeaderMode::default(),
         };
         view.widths = (0..view.columns.len()).map(|c| view.fit(c)).collect();
         view
@@ -139,7 +161,7 @@ impl ResultView {
         let mut out = self
             .columns
             .iter()
-            .map(|c| clean(&c.name))
+            .map(|c| clean(&header_text(c, self.header)))
             .collect::<Vec<_>>()
             .join("\t");
         let all = !self.shown().any(|(i, _)| self.selected.contains(&i));
@@ -167,7 +189,11 @@ impl ResultView {
             }
         };
         let mut out = String::from('\u{FEFF}');
-        let names: Vec<String> = self.columns.iter().map(|c| field(&c.name)).collect();
+        let names: Vec<String> = self
+            .columns
+            .iter()
+            .map(|c| field(&header_text(c, self.header)))
+            .collect();
         out.push_str(&names.join(","));
         out.push_str("\r\n");
         for (_, row) in self.shown() {
@@ -329,7 +355,9 @@ impl ResultView {
             Some((s, false)) if s == c => Some(icons::ARROW_DOWN),
             _ => None,
         };
-        let name = theme::semibold(&column.name).size(12.0).color(p.muted);
+        let name = theme::semibold(header_text(column, self.header))
+            .size(12.0)
+            .color(p.muted);
         let response = ui
             .allocate_ui(vec2(width, ROW_HEIGHT), |ui| {
                 ui.set_width(width - 8.0);
@@ -359,9 +387,7 @@ impl ResultView {
             },
             if column.nullable { ", may be NULL" } else { "" }
         );
-        let sorted = response
-            .on_hover_text(format!("{kind}. Click to sort."))
-            .clicked();
+        let sorted = response.on_hover_text(about(column, &kind)).clicked();
         // The edge: a few points either side of the column's right border.
         let edge = egui::Rect::from_center_size(
             egui::pos2(ui.cursor().min.x, ui.cursor().center().y),
@@ -395,7 +421,7 @@ impl ResultView {
         let name = self
             .columns
             .get(c)
-            .map_or(0, |col| col.name.chars().count());
+            .map_or(0, |col| header_text(col, self.header).chars().count());
         let longest = self
             .shown()
             .take(500)
@@ -406,6 +432,26 @@ impl ResultView {
             .max(name);
         (longest as f32 * 7.5 + 20.0).clamp(64.0, MAX_FIT)
     }
+}
+
+/// A column's hover: its name, heading, text and type, and where it comes from (R-SQL-29).
+fn about(column: &Column, kind: &str) -> String {
+    let mut lines = vec![column.name.clone()];
+    if let Some(heading) = &column.heading {
+        lines.push(format!("Heading: {heading}"));
+    }
+    if let Some(text) = column
+        .text
+        .as_ref()
+        .filter(|t| Some(*t) != column.heading.as_ref())
+    {
+        lines.push(format!("Text: {text}"));
+    }
+    if let (Some(schema), Some(table)) = (&column.schema, &column.table) {
+        lines.push(format!("From {schema}/{table}"));
+    }
+    lines.push(format!("{kind}. Click to sort."));
+    lines.join("\n")
 }
 
 /// What happened on a column's heading.
@@ -465,6 +511,11 @@ mod tests {
             scale: 0,
             nullable: true,
             numeric,
+            field: None,
+            schema: None,
+            table: None,
+            heading: None,
+            text: None,
         }
     }
 
@@ -596,5 +647,50 @@ mod tests {
             0,
         );
         assert!((long.fit(0) - MAX_FIT).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn headings_names_or_both_head_the_columns_and_copy_uses_them_r_sql_29() {
+        // As the owner's IBM i gave them for a DDS file with COLHDG.
+        let mut seq = column("REGSEQ", true);
+        seq.heading = Some("&Registration.Sequence".to_owned());
+        let plain = column("T", false); // an alias: no heading
+        let mut v = ResultView::new(
+            vec![seq, plain],
+            vec![vec![Some("1".to_owned()), Some("æøå".to_owned())]],
+            false,
+            0,
+        );
+        assert_eq!(
+            v.tsv().lines().next(),
+            Some("&Registration.Sequence\tT"),
+            "headings by default"
+        );
+        v.header = HeaderMode::Names;
+        assert_eq!(v.tsv().lines().next(), Some("REGSEQ\tT"));
+        v.header = HeaderMode::Both;
+        assert_eq!(
+            v.csv().lines().next(),
+            Some("\u{FEFF}REGSEQ · &Registration.Sequence,T")
+        );
+    }
+
+    #[test]
+    fn the_hover_names_heading_text_and_file_r_sql_29() {
+        let mut c = column("REGSEQ", true);
+        c.heading = Some("Registration sequence".to_owned());
+        c.text = Some("Sequence number of the registration".to_owned());
+        c.schema = Some("MSGSUDTA".to_owned());
+        c.table = Some("REGP".to_owned());
+        let hover = about(&c, "DECIMAL (9)");
+        assert_eq!(
+            hover,
+            "REGSEQ\nHeading: Registration sequence\nText: Sequence number of the registration\nFrom MSGSUDTA/REGP\nDECIMAL (9). Click to sort."
+        );
+        c.text = c.heading.clone();
+        assert!(
+            !about(&c, "x").contains("Text:"),
+            "the same text is not said twice"
+        );
     }
 }

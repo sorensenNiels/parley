@@ -3,9 +3,13 @@
 //! results. The helper runs on a thread of its own (`parley_core::sql::runner`), so the window
 //! never waits for the host.
 
+mod browser;
+mod database;
 pub mod editor;
 pub mod grid;
 pub mod results;
+pub mod snippets;
+mod tools;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -43,6 +47,28 @@ pub trait SqlFiles: std::fmt::Debug {
     ) -> Result<Option<String>, String>;
 }
 
+/// What the SQL window is given by Parley each frame.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Around<'a> {
+    /// The statements run for this session, oldest first (R-SQL-7).
+    pub history: &'a [String],
+    /// The file window (R-SQL-8, R-SQL-21); without it, no Export or Open….
+    pub files: Option<&'a dyn SqlFiles>,
+    /// The snippet folders (R-SQL-24); without them, only the starters.
+    pub snippets: Option<&'a dyn snippets::SnippetStore>,
+    /// The shared snippet folder; empty for none (R-SQL-24).
+    pub shared: &'a str,
+}
+
+/// What the panel beside the editor shows (R-SQL-25).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    History,
+    Snippets,
+    /// The schema browser (R-SQL-34).
+    Database,
+}
+
 /// How far the window is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stage {
@@ -62,6 +88,16 @@ enum Waiting {
     Autocommit(bool),
     Commit,
     Rollback,
+    /// The help for the error at `index` in Messages, message `id`: from the job log, or
+    /// from its message file (R-SQL-31).
+    Explain {
+        index: usize,
+        id: String,
+        file: bool,
+    },
+    JobLog,
+    /// The current schema and library list (R-SQL-32).
+    Job,
 }
 
 /// Results or messages under the editor.
@@ -101,7 +137,18 @@ pub struct SqlWindow {
     waiting: Option<(u64, Waiting)>,
     results: results::Results,
     tab: Tab,
+    side: Side,
+    snippets: snippets::SnippetPanel,
+    browser: browser::Browser,
     messages: Vec<(bool, String)>,
+    /// The help asked for an error in Messages (R-SQL-31).
+    helps: tools::Helps,
+    /// The SQL job's current schema and library list, once read (R-SQL-32).
+    job: Option<tools::JobContext>,
+    /// Read the job again when idle: after Connect and after a statement that may change it.
+    job_stale: bool,
+    /// The library typed in the schema menu.
+    add_library: String,
     error_line: Option<String>,
     autocommit: bool,
     uncommitted: bool,
@@ -111,6 +158,12 @@ pub struct SqlWindow {
     ran: Vec<String>,
     /// The sign-on, sent once the helper's hello is read; it holds the password until then.
     pending_connect: Option<Request>,
+    /// The second connection, for the catalog (R-SQL-33, D21).
+    database: database::Database,
+    /// The same sign-on for it, held until the first has signed on, then sent or dropped.
+    pending_catalog: Option<Request>,
+    /// What the result columns' headings say (R-SQL-29); kept in the settings.
+    pub header: grid::HeaderMode,
     /// Rows fetched at a time, and seconds before a statement is stopped (R-SQL-18).
     rows: u32,
     timeout: u32,
@@ -142,7 +195,14 @@ impl SqlWindow {
             waiting: None,
             results: results::Results::default(),
             tab: Tab::Results,
+            side: Side::History,
+            snippets: snippets::SnippetPanel::default(),
+            browser: browser::Browser::default(),
             messages: Vec::new(),
+            helps: tools::Helps::new(),
+            job: None,
+            job_stale: false,
+            add_library: String::new(),
             error_line: None,
             autocommit: true,
             uncommitted: false,
@@ -150,9 +210,29 @@ impl SqlWindow {
             closing: Closing::Open,
             ran: Vec::new(),
             pending_connect: None,
+            database: database::Database::default(),
+            pending_catalog: None,
+            header: grid::HeaderMode::default(),
             rows: protocol::FIRST_ROWS,
             timeout: 0,
         }
+    }
+
+    /// Starts with the column headings saying `header` (R-SQL-29).
+    pub const fn with_header(mut self, header: grid::HeaderMode) -> Self {
+        self.header = header;
+        self
+    }
+
+    /// The libraries pinned in the schema browser for this session (R-SQL-34).
+    pub fn with_pinned(mut self, pinned: Vec<String>) -> Self {
+        self.browser = browser::Browser::with_pinned(pinned);
+        self
+    }
+
+    /// The libraries pinned now, to keep in the settings.
+    pub fn pinned(&self) -> &[String] {
+        self.browser.pinned()
     }
 
     /// Fetches `rows` at a time and stops a statement after `timeout` seconds (0: never).
@@ -190,12 +270,7 @@ impl SqlWindow {
     }
 
     /// Draws the window; false once it is closed.
-    pub fn show(
-        &mut self,
-        ctx: &egui::Context,
-        history: &[String],
-        saver: Option<&dyn SqlFiles>,
-    ) -> bool {
+    pub fn show(&mut self, ctx: &egui::Context, around: Around<'_>) -> bool {
         self.read_events();
         if self.closing == Closing::Closed {
             self.finish();
@@ -218,7 +293,7 @@ impl SqlWindow {
                     }
                     self.request_close();
                 }
-                self.ui(ui, history, saver);
+                self.ui(ui, around);
             },
         );
         if self.closing == Closing::Closed {
@@ -228,7 +303,7 @@ impl SqlWindow {
         true
     }
 
-    fn ui(&mut self, ui: &mut Ui, history: &[String], saver: Option<&dyn SqlFiles>) {
+    fn ui(&mut self, ui: &mut Ui, around: Around<'_>) {
         let top = theme::bar(ui, egui::Margin::symmetric(12, 8));
         Panel::top("sql-top")
             .frame(top)
@@ -240,10 +315,16 @@ impl SqlWindow {
             Stage::Ready => {
                 Panel::right("sql-history")
                     .resizable(true)
-                    .default_size(230.0)
-                    .show(ui, |ui| self.history(ui, history));
-                CentralPanel::default().show(ui, |ui| self.work(ui, saver));
+                    .default_size(250.0)
+                    .show(ui, |ui| self.side(ui, around));
+                CentralPanel::default().show(ui, |ui| self.work(ui, around.files));
             }
+        }
+        let used = self
+            .snippets
+            .dialogs(ui.ctx(), around.snippets, around.shared);
+        if let Some(used) = used {
+            self.use_snippet(used);
         }
         self.confirm_dialog(ui.ctx());
         self.closing_dialog(ui.ctx());
@@ -265,6 +346,16 @@ impl SqlWindow {
                         ))
                         .color(p.muted),
                     );
+                    self.schema_menu(ui);
+                    if let Some((text, problem)) = self.database.status() {
+                        if problem {
+                            ui.label(icons::icon(icons::INFO).color(p.warning_text))
+                                .on_hover_text(text);
+                        } else {
+                            ui.label(icons::icon(icons::DATABASE).color(p.muted).small())
+                                .on_hover_text(text);
+                        }
+                    }
                 }
                 None => {
                     ui.label(RichText::new(&self.config.host).color(p.muted));
@@ -396,14 +487,119 @@ impl SqlWindow {
         self.error_line = None;
         self.stage = Stage::Connecting;
         self.send(Request::Hello, Waiting::Hello);
+        // R-SQL-33: the second helper starts now, and signs on after the first has.
+        self.database.start(&self.java, &self.files, ctx);
+        self.pending_catalog = Some(connect.clone());
         // Sent once the hello shows the helper speaks this protocol.
         self.pending_connect = Some(connect);
     }
 
-    // ---------------------------------------------------------------- the history
+    // ---------------------------------------------------------------- history and snippets
+
+    /// History or Snippets, beside the editor (R-SQL-7, R-SQL-25).
+    fn side(&mut self, ui: &mut Ui, around: Around<'_>) {
+        theme::segmented(
+            ui,
+            &mut self.side,
+            &[
+                (Side::History, "History"),
+                (Side::Snippets, "Snippets"),
+                (Side::Database, "Database"),
+            ],
+        );
+        ui.add_space(6.0);
+        match self.side {
+            Side::History => self.history(ui, around.history),
+            Side::Snippets => {
+                if let Some(used) = self.snippets.show(ui, around.snippets, around.shared) {
+                    self.use_snippet(used);
+                }
+            }
+            Side::Database => {
+                let libraries = self
+                    .job
+                    .as_ref()
+                    .map(|j| j.libraries.clone())
+                    .unwrap_or_default();
+                if let Some(pick) = self.browser.show(ui, &libraries, &mut self.database) {
+                    self.use_pick(pick);
+                }
+            }
+        }
+    }
+
+    /// Offers names for what is being typed, from the schema browser (R-SQL-36).
+    fn complete(&mut self) {
+        let Some((typed, statement)) = self.scripts.completing() else {
+            return;
+        };
+        let (schema, libraries) = self
+            .job
+            .as_ref()
+            .map(|j| (Some(j.schema.clone()), j.libraries.clone()))
+            .unwrap_or_default();
+        let items = self.browser.candidates(
+            &typed,
+            &statement,
+            schema.as_deref(),
+            &libraries,
+            &mut self.database,
+        );
+        self.scripts.offer(items);
+    }
+
+    /// What hovering a name in the editor shows, from the schema browser (R-SQL-37).
+    fn describe(&mut self) {
+        let Some(((qualifier, name), statement)) = self.scripts.pointed() else {
+            return;
+        };
+        let schema = self.job.as_ref().map(|j| j.schema.clone());
+        let text = self.browser.describe(
+            qualifier.as_deref(),
+            &name,
+            &statement,
+            schema.as_deref(),
+            &mut self.database,
+        );
+        self.scripts.describe((qualifier, name), text);
+    }
+
+    /// What was picked in the schema browser (R-SQL-34, R-SQL-35).
+    fn use_pick(&mut self, pick: browser::Pick) {
+        match pick {
+            browser::Pick::Insert(text) => self.scripts.insert(&text),
+            browser::Pick::Script { title, text, run } => {
+                self.scripts.open_new(&title, &text);
+                if run {
+                    self.run_now(&text);
+                }
+            }
+        }
+    }
+
+    /// A snippet into the editor at the cursor, or run (R-SQL-25).
+    fn use_snippet(&mut self, used: snippets::Use) {
+        match used {
+            snippets::Use::Insert(sql) => self.scripts.insert(&sql),
+            snippets::Use::Run(sql) => self.run_now(&sql),
+        }
+    }
+
+    /// Runs the statements of `sql` as Run all does, unless a statement is running.
+    fn run_now(&mut self, sql: &str) {
+        if self.waiting.is_some() || !self.queue.is_empty() {
+            self.error_line = Some("Wait for the statement running to end.".to_owned());
+            return;
+        }
+        self.queue.extend(
+            text::statements(sql)
+                .into_iter()
+                .filter_map(|r| sql.get(r).map(str::to_owned)),
+        );
+        self.next_statement();
+    }
 
     fn history(&mut self, ui: &mut Ui, history: &[String]) {
-        theme::section_label(ui, "History");
         if history.is_empty() {
             theme::hint(ui, "Statements you run are listed here.");
             return;
@@ -433,6 +629,8 @@ impl SqlWindow {
     fn work(&mut self, ui: &mut Ui, saver: Option<&dyn SqlFiles>) {
         self.keys(ui);
         let height = (ui.available_height() * 0.38).clamp(90.0, 320.0);
+        self.complete();
+        self.describe();
         self.scripts.show(ui, height, saver);
         ui.add_space(6.0);
         self.run_buttons(ui);
@@ -458,8 +656,8 @@ impl SqlWindow {
             (
                 i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Enter),
                 i.consume_key(Modifiers::COMMAND, Key::Enter),
-                // Esc closes the find bar first, when it is open.
-                !self.scripts.finding() && i.consume_key(Modifiers::NONE, Key::Escape),
+                // Esc closes the find bar or the completion list first, when one is open.
+                !self.scripts.takes_escape() && i.consume_key(Modifiers::NONE, Key::Escape),
             )
         });
         if all {
@@ -475,8 +673,11 @@ impl SqlWindow {
     fn run_buttons(&mut self, ui: &mut Ui) {
         let idle = self.waiting.is_none() && self.queue.is_empty();
         ui.horizontal(|ui| {
-            let run = icons::button(icons::PLAY, "Run").shortcut_text("Ctrl+Enter");
-            if icons::add_named(ui, idle, run, "Run").clicked() {
+            // R-SQL-28: says what Run does now.
+            let (start, end) = self.scripts.selection();
+            let label = if start < end { "Run selection" } else { "Run" };
+            let run = icons::button(icons::PLAY, label).shortcut_text("Ctrl+Enter");
+            if icons::add_named(ui, idle, run, label).clicked() {
                 self.run_current();
             }
             let all = egui::Button::new("Run all").shortcut_text("Ctrl+Shift+Enter");
@@ -491,6 +692,18 @@ impl SqlWindow {
                 ui.spinner();
                 theme::hint(ui, "Running…");
             }
+            theme::button_row(ui, |ui| {
+                // R-SQL-25: what Run would run, kept as a snippet.
+                let current = self.scripts.current_statement();
+                let save = icons::button(icons::BOOKMARK_SIMPLE, "Save as snippet…");
+                let clicked = icons::add_named(ui, current.is_some(), save, "Save as snippet…")
+                    .on_hover_text("The selection, or the statement under the cursor")
+                    .clicked();
+                if clicked && let Some(sql) = current {
+                    self.snippets.save_as(&sql);
+                    self.side = Side::Snippets;
+                }
+            });
         });
     }
 
@@ -499,19 +712,7 @@ impl SqlWindow {
         if self.waiting.is_some() || !self.queue.is_empty() {
             return;
         }
-        let (start, end) = self.scripts.selection();
-        let script = self.scripts.text();
-        let chosen = if start < end {
-            script
-                .get(start..end)
-                .map(str::trim)
-                .map(|s| s.trim_end_matches(';').trim().to_owned())
-        } else {
-            text::statement_at(script, start)
-                .and_then(|r| script.get(r))
-                .map(str::to_owned)
-        };
-        if let Some(statement) = chosen.filter(|s| !s.is_empty()) {
+        if let Some(statement) = self.scripts.current_statement() {
             self.queue.push_back(statement);
             self.next_statement();
         }
@@ -553,9 +754,11 @@ impl SqlWindow {
     }
 
     /// The request that runs `statement`, with the rows at a time and the timeout (R-SQL-18).
+    /// A `CL:` command runs through `QSYS2.QCMDEXC` (R-SQL-30).
     fn run_request(&self, statement: &str) -> Request {
+        let sql = text::cl_command(statement).map_or_else(|| statement.to_owned(), text::cl_call);
         Request::Run {
-            sql: statement.to_owned(),
+            sql,
             max_rows: self.rows,
             timeout: self.timeout,
         }
@@ -581,7 +784,8 @@ impl SqlWindow {
 
     fn results(&mut self, ui: &mut Ui, saver: Option<&dyn SqlFiles>) {
         let idle = self.waiting.is_none();
-        if let Some(results::Ask::Fetch(cursor)) = self.results.show(ui, idle, saver) {
+        let asked = self.results.show(ui, idle, &mut self.header, saver);
+        if let Some(results::Ask::Fetch(cursor)) = asked {
             let fetch = Request::Fetch {
                 cursor,
                 max_rows: self.rows,
@@ -590,32 +794,16 @@ impl SqlWindow {
         }
     }
 
-    fn messages(&self, ui: &mut Ui) {
-        if self.messages.is_empty() {
-            theme::hint(ui, "Row counts, warnings and errors appear here.");
-            return;
-        }
-        ScrollArea::vertical()
-            .id_salt("sql-messages")
-            .auto_shrink([false, false])
-            .stick_to_bottom(true)
-            .show(ui, |ui| {
-                for (error, text) in &self.messages {
-                    if *error {
-                        theme::error(ui, text);
-                    } else {
-                        ui.label(RichText::new(text).monospace().small());
-                    }
-                }
-            });
-    }
-
     // ---------------------------------------------------------------- answers
 
     /// Takes what the helper answered since the last frame.
     fn read_events(&mut self) {
         while let Some(event) = self.runner.as_ref().and_then(Runner::try_event) {
             self.handle(event);
+        }
+        self.database.read_events();
+        for pick in self.browser.receive(self.database.take_answers()) {
+            self.use_pick(pick);
         }
     }
 
@@ -631,6 +819,8 @@ impl SqlWindow {
             Waiting::Hello => self.on_hello(event),
             Waiting::Connect => self.on_connect(event),
             Waiting::Run(statement) => self.on_run(&statement, event),
+            Waiting::Explain { index, id, file } => self.on_explain(index, &id, file, event),
+            Waiting::JobLog => self.on_job_log(event),
             Waiting::Fetch(cursor) => match event
                 .result
                 .and_then(parley_core::sql::protocol::Answer::into_result::<MoreRows>)
@@ -645,6 +835,7 @@ impl SqlWindow {
                 Ok(_) => self.autocommit = on,
                 Err(e) => self.fail(e.to_string()),
             },
+            Waiting::Job => self.on_job(event),
             Waiting::Commit | Waiting::Rollback => {
                 let done = if waiting == Waiting::Commit {
                     "Committed."
@@ -670,6 +861,7 @@ impl SqlWindow {
                 }
             }
         }
+        self.read_job_when_idle();
     }
 
     fn on_hello(&mut self, event: Event) {
@@ -706,6 +898,10 @@ impl SqlWindow {
                 ));
                 self.connected = Some(connected);
                 self.stage = Stage::Ready;
+                self.job_stale = true;
+                if let Some(connect) = self.pending_catalog.take() {
+                    self.database.sign_on(connect);
+                }
             }
             Err(e) => self.back_to_sign_in(format!(
                 "{e} Not tried again: check the user and password first."
@@ -715,6 +911,9 @@ impl SqlWindow {
 
     fn on_run(&mut self, statement: &str, event: Event) {
         self.ran.push(statement.to_owned());
+        if text::may_change_job(statement) {
+            self.job_stale = true;
+        }
         let short = statement.split_whitespace().collect::<Vec<_>>().join(" ");
         match event
             .result
@@ -737,6 +936,12 @@ impl SqlWindow {
                 self.results
                     .add(statement, ResultView::new(columns, rows, more, cursor));
                 self.tab = Tab::Results;
+            }
+            Ok(Outcome::Count { .. }) if text::cl_command(statement).is_some() => {
+                self.messages.push((false, format!("{short}: done")));
+                if self.queue.is_empty() {
+                    self.tab = Tab::Messages;
+                }
             }
             Ok(Outcome::Count { count }) => {
                 self.messages
@@ -765,6 +970,9 @@ impl SqlWindow {
     fn back_to_sign_in(&mut self, message: String) {
         self.runner = None;
         self.pending_connect = None;
+        // The first sign-on failed: the second does not try the same password.
+        self.pending_catalog = None;
+        self.database.abandon();
         self.stage = Stage::SignIn;
         self.error_line = Some(message);
     }
@@ -847,6 +1055,7 @@ impl SqlWindow {
         if let Some(mut runner) = self.runner.take() {
             runner.send(Request::Close);
         }
+        self.database.close();
     }
 }
 
@@ -856,7 +1065,7 @@ mod tests {
 
     use super::*;
 
-    fn window() -> SqlWindow {
+    pub(super) fn window() -> SqlWindow {
         let config = SessionConfig {
             host: "ibmi".to_owned(),
             ..SessionConfig::default()
@@ -874,7 +1083,7 @@ mod tests {
     }
 
     /// The window as if the helper answered `json` to what it waits for.
-    fn answer(w: &mut SqlWindow, json: &str) {
+    pub(super) fn answer(w: &mut SqlWindow, json: &str) {
         let tag = w.waiting.as_ref().map_or(0, |(tag, _)| *tag);
         w.handle(Event {
             tag,
@@ -883,7 +1092,7 @@ mod tests {
     }
 
     /// The window waiting for `statement`, as if it had sent it.
-    fn running(w: &mut SqlWindow, statement: &str) {
+    pub(super) fn running(w: &mut SqlWindow, statement: &str) {
         w.waiting = Some((1, Waiting::Run(statement.to_owned())));
     }
 
@@ -969,6 +1178,7 @@ mod tests {
         let mut w = window();
         w.stage = Stage::Connecting;
         w.waiting = Some((1, Waiting::Connect));
+        w.pending_catalog = Some(Request::Hello);
         answer(
             &mut w,
             r#"{"id":1,"error":{"message":"Password is not correct for user profile.","sqlstate":"08004","sqlcode":-99999}}"#,
@@ -976,6 +1186,9 @@ mod tests {
         assert_eq!(w.stage, Stage::SignIn);
         let line = w.error_line.as_deref().expect("why");
         assert!(line.contains("Not tried again"), "{line}");
+        // R-SQL-33: the second connection does not try the same password.
+        assert!(w.pending_catalog.is_none());
+        assert_eq!(w.database.state, database::State::Off);
     }
 
     #[test]
@@ -1005,14 +1218,21 @@ mod tests {
     }
 
     /// The window drawn alone, as in a test of the main window (embedded: kittest has one).
-    fn drawn(w: SqlWindow, history: Vec<String>) -> egui_kittest::Harness<'static, SqlWindow> {
+    pub(super) fn drawn(
+        w: SqlWindow,
+        history: Vec<String>,
+    ) -> egui_kittest::Harness<'static, SqlWindow> {
         egui_kittest::Harness::builder()
             .with_size(egui::vec2(1100.0, 760.0))
             .with_max_steps(16)
             .build_ui_state(
                 move |ui, w: &mut SqlWindow| {
                     crate::test_support::install_fonts(ui);
-                    w.show(ui.ctx(), &history, None);
+                    let around = Around {
+                        history: &history,
+                        ..Around::default()
+                    };
+                    w.show(ui.ctx(), around);
                 },
                 w,
             )
@@ -1052,7 +1272,9 @@ mod tests {
             "Messages",
             "Fetch more",
             "Copy all",
-            "HISTORY",
+            "History",
+            "Snippets",
+            "Save as snippet…",
         ] {
             harness.get_by_label(label);
         }
@@ -1061,6 +1283,72 @@ mod tests {
         let run = harness.get_by_label("Run").rect();
         harness.run_steps(5);
         assert_eq!(harness.get_by_label("Run").rect(), run);
+    }
+
+    #[test]
+    fn the_snippets_tab_lists_the_starters_and_runs_one_r_sql_25() {
+        use egui_kittest::kittest::Queryable;
+        let mut w = window();
+        running(&mut w, "VALUES 1");
+        let mut harness = drawn(w, Vec::new());
+        harness.get_by_label("Snippets").click();
+        // The spinner keeps repainting while a statement runs.
+        harness.run_steps(3);
+        harness.get_by_label("Run System status").click();
+        // The spinner keeps repainting while a statement runs.
+        harness.run_steps(3);
+        assert_eq!(
+            harness.state().error_line.as_deref(),
+            Some("Wait for the statement running to end."),
+            "the click reached the window, which runs one statement at a time"
+        );
+    }
+
+    #[test]
+    fn a_snippet_run_queues_its_statements_and_asks_before_a_delete_r_sql_25() {
+        let mut w = window();
+        w.use_snippet(snippets::Use::Run(
+            "VALUES 'æøå';\nDELETE FROM T".to_owned(),
+        ));
+        // Without a helper nothing is sent; the first left the queue, the DELETE waits its turn.
+        assert_eq!(w.queue, ["DELETE FROM T"]);
+    }
+
+    #[test]
+    fn a_snippet_goes_in_at_the_cursor_and_the_statement_is_offered_to_save_r_sql_25() {
+        let mut w = window();
+        w.scripts.set_text("VALUES 'æøå';\n\nSELECT 2", 3);
+        assert_eq!(
+            w.scripts.current_statement().as_deref(),
+            Some("VALUES 'æøå'")
+        );
+        w.use_snippet(snippets::Use::Insert("X ".to_owned()));
+        assert_eq!(w.scripts.text(), "VALX UES 'æøå';\n\nSELECT 2");
+        w.scripts.select(0, 0);
+        w.use_snippet(snippets::Use::Insert("-- ".to_owned()));
+        assert!(w.scripts.text().starts_with("-- VALX"));
+    }
+
+    #[test]
+    fn a_cl_command_runs_through_qcmdexc_and_is_kept_as_written_r_sql_30() {
+        let mut w = window();
+        assert_eq!(
+            w.run_request("CL: SNDMSG MSG('æøå') TOUSR(QSYSOPR)"),
+            Request::Run {
+                sql: "CALL QSYS2.QCMDEXC('SNDMSG MSG(''æøå'') TOUSR(QSYSOPR)')".to_owned(),
+                max_rows: protocol::FIRST_ROWS,
+                timeout: 0,
+            }
+        );
+        w.autocommit = false;
+        running(&mut w, "CL: ADDLIBLE MYLIB");
+        answer(&mut w, r#"{"id":1,"ok":{"kind":"count","count":0}}"#);
+        assert_eq!(w.take_ran(), ["CL: ADDLIBLE MYLIB"]);
+        assert_eq!(
+            w.messages.last().map(|(_, m)| m.as_str()),
+            Some("CL: ADDLIBLE MYLIB: done")
+        );
+        assert!(!w.uncommitted, "a command changes no rows to commit");
     }
 
     #[test]
@@ -1125,7 +1413,7 @@ mod tests {
         harness.key_press(egui::Key::Escape);
         harness.run();
         assert!(harness.query_by_label("Match case").is_none());
-        assert!(!harness.state().scripts.finding());
+        assert!(!harness.state().scripts.takes_escape());
     }
 
     #[test]
@@ -1139,5 +1427,41 @@ mod tests {
         harness.get_by_label("Script 2");
         let (_, saved) = harness.state().scripts();
         assert_eq!(saved.len(), 2, "both kept for the session");
+    }
+
+    #[test]
+    fn run_says_run_selection_while_text_is_selected_r_sql_28() {
+        use egui_kittest::kittest::Queryable;
+        let mut w = window();
+        w.scripts.set_text("VALUES 1; VALUES 2", 0);
+        let harness = drawn(w, Vec::new());
+        harness.get_by_label("Run");
+        let mut w = window();
+        w.scripts.set_text("VALUES 1; VALUES 2", 0);
+        w.scripts.select(0, 8);
+        let harness = drawn(w, Vec::new());
+        harness.get_by_label("Run selection");
+    }
+
+    #[test]
+    fn the_column_heading_shows_by_default_and_names_switch_it_r_sql_29() {
+        use egui_kittest::kittest::Queryable;
+        let mut w = window();
+        running(&mut w, "SELECT * FROM MSGSUDTA.REGP");
+        answer(
+            &mut w,
+            r#"{"id":1,"ok":{"kind":"rows","cursor":3,"columns":[{"name":"REGSEQ","type":"DECIMAL","length":9,"scale":0,"nullable":false,"numeric":true,"field":"REGSEQ","schema":"MSGSUDTA","table":"REGP","heading":"&Registration.Sequence","text":"&Registration.Sequence"}],"rows":[["1"]],"more":false}}"#,
+        );
+        let mut harness = drawn(w, Vec::new());
+        harness.get_by_label("&Registration.Sequence");
+        assert!(harness.query_by_label("REGSEQ").is_none());
+        harness.get_by_label("Names").click();
+        harness.run();
+        harness.get_by_label("REGSEQ");
+        assert_eq!(
+            harness.state().header,
+            grid::HeaderMode::Names,
+            "kept for the settings"
+        );
     }
 }

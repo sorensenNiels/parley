@@ -141,16 +141,16 @@ impl MacroStore for MacroFolder {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use parley_core::macros::Step;
 
     use super::*;
 
     /// A fresh folder under the system's temporary folder, removed when dropped.
-    struct TempDir(PathBuf);
+    pub(crate) struct TempDir(pub(crate) PathBuf);
 
     impl TempDir {
-        fn new(test: &str) -> Self {
+        pub(crate) fn new(test: &str) -> Self {
             let dir = std::env::temp_dir().join(format!("parley-{test}-{}", std::process::id()));
             // Left over from an earlier run that panicked: harmless if it is not there.
             let _ = fs::remove_dir_all(&dir);

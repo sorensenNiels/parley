@@ -216,6 +216,18 @@ pub struct Column {
     pub nullable: bool,
     /// Right-aligned in the grid (R-SQL-8).
     pub numeric: bool,
+    /// The field it comes from, its library and file, when it comes from one (R-SQL-29).
+    #[serde(default)]
+    pub field: Option<String>,
+    #[serde(default)]
+    pub schema: Option<String>,
+    #[serde(default)]
+    pub table: Option<String>,
+    /// The IBM i column heading (COLHDG, `LABEL ON`), its parts joined by spaces, and the text.
+    #[serde(default)]
+    pub heading: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
 }
 
 /// A row: each value as text, `None` for NULL.

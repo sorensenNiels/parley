@@ -16,6 +16,7 @@ mod helpers;
 mod keychain;
 mod macros;
 mod screenshot;
+mod snippets;
 
 use parley_ui_egui::{ParleyUi, Profile};
 

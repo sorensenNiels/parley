@@ -54,6 +54,11 @@
 | IDEA-25 | IBM i Services views built on IDEA-13: the job log of the session's own job, the spooled files of the user (open one as text or PDF), and the message queue behind the "message waiting" indicator, from the `QSYS2` SQL services. |
 | IDEA-26 | Data transfer: download a table or a query result to CSV or Excel, and upload a CSV into a table, as Access Client Solutions' Data Transfer does; built on IDEA-13. |
 | IDEA-28 | **A stand-alone SQL client** (the owner, 2026-11-13): the SQL add-on offered on its own, for people who need SQL on IBM i but no 5250 session — the same Java helper with JTOpen (D20) and SQL window, started directly with a host, user and TLS setting rather than from a connected session, possibly as its own program and installer. The pieces already stand apart: the engine in `parley_core::sql`, the window in `parley-ui-egui`'s `sql` module, the jars in `helpers/`. *Open:* one app with a choice at start or a separate program; how saved sessions and the history are shared; its own name. |
+| IDEA-29 | **Know the database in the SQL window** (the owner, 2026-11-13; picked for Phase 8, R-SQL-30..37): a schema browser of libraries, tables, views, procedures and columns (`QSYS2` catalog); table and column names completed while typing; the DDL of an object (`QSYS2.GENERATE_SQL`); hovering a name shows its columns. |
+| IDEA-30 | **IBM i tools in the SQL window** (the owner, 2026-11-13; picked for Phase 8, R-SQL-30..37): the SQL job's library list and current schema; CL commands through `QSYS2.QCMDEXC`; the SQL job's job log after an error; an SQL message's full second-level text (SQL0204 explained, not just its code). |
+| IDEA-31 | **Parameters and more from results** (the owner, 2026-11-13; Phase 9): a form for `?` and `:name` markers, remembered per statement; quick charts from a result; copy as a Markdown table, `INSERT` statements or JSON; compare two results; a hex/EBCDIC view of `FOR BIT DATA` columns. |
+| IDEA-32 | **Several systems at once** (the owner, 2026-11-13; Phase 10): run one statement on several saved sessions and see the results side by side (test against production). |
+| IDEA-33 | **An SQL assistant** (the owner, 2026-11-13; Phase 10): plain language to SQL with the catalog's table and column names, opt-in. *Needs a decision first:* what may leave the machine (names only, never data?), which model and account, and how it is turned off. |
 
 ## Automation
 
@@ -63,4 +68,4 @@
 | IDEA-11 | Macros: record and play keystrokes, and run one after sign-on ("Run macro" in the session dialog, disabled until then). *Recording*: Tools ▸ Record macro starts it, the status bar shows "REC" until Stop, then Parley asks for a name; after each AID key (Enter, F-keys…) the macro waits for the host to unlock the keyboard before going on, so it does not race the host. Text typed into non-display fields (passwords) is never recorded: the macro stores a "password" step that uses the session's keychain password (D11) or asks for it. *Running*: Tools ▸ Run macro ▸ (name), a key the user assigns, or after sign-on; Esc or Reset stops a running macro. Macros are saved as readable text the user can edit, global or per session. *→ R-KEY-3, R-KEY-4 (Phase 3).* |
 | IDEA-27 | A command bar (Ctrl+K): type a CL command, pick from recent ones, and Parley types it on the command line and presses Enter; it refuses when the screen has no command line. |
 
-Next free ID: `IDEA-29`.
+Next free ID: `IDEA-34`.

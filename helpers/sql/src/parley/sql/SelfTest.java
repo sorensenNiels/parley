@@ -18,6 +18,7 @@ final class SelfTest {
         brokenJsonIsAnErrorNotACrash();
         binaryIsHex();
         timesKeepTheirSeconds();
+        headingsJoinTheirThreeParts();
         if (failures == 0) {
             System.out.println("parley-sql self-test: ok");
         }
@@ -67,6 +68,16 @@ final class SelfTest {
 
     private static void binaryIsHex() {
         check(Helper.Values.hex(new byte[] {0, (byte) 0xC1, 0x7F}).equals("00C17F"), "hex");
+    }
+
+    private static void headingsJoinTheirThreeParts() {
+        // As the owner's IBM i gave them: parts padded to 20, and one text longer than 20.
+        check("&Registration type.Code".equals(Helper.heading("&Registration       type.Code")), "two parts");
+        check("&Registration.Sequence".equals(Helper.heading("&Registration.Sequence")), "no word split");
+        check("Navn".equals(Helper.heading("Navn")), "one short part");
+        check(Helper.heading("                    ") == null, "blank");
+        check(Helper.heading(null) == null, "none");
+        check("Ærø Øst Ål".equals(Helper.heading("Ærø                 Øst                 Ål")), "æøå");
     }
 
     private static void timesKeepTheirSeconds() {

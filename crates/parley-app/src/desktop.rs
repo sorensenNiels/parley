@@ -77,6 +77,7 @@ pub fn run() -> eframe::Result {
             }
             ui.set_sql_helpers(crate::helpers::sql_helpers());
             ui.set_file_saver(Box::new(crate::helpers::SqlFileWindow));
+            ui.set_snippet_store(Box::new(crate::snippets::SnippetFolders::beside_settings()));
             match crate::macros::MacroFolder::beside_settings() {
                 Some(folder) => ui.set_macro_store(Box::new(folder)),
                 None => eprintln!("parley: no folder for macros on this system"),

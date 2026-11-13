@@ -150,6 +150,8 @@ pub enum Risk {
     Drop,
     Truncate,
     Alter,
+    /// A CL command that deletes, clears or ends something (R-SQL-30).
+    Command,
 }
 
 impl Risk {
@@ -161,6 +163,7 @@ impl Risk {
             Self::Drop => "drops an object, with its data",
             Self::Truncate => "deletes every row of the table",
             Self::Alter => "changes the definition of an object",
+            Self::Command => "is a CL command that deletes, clears or ends something",
         }
     }
 }
@@ -168,6 +171,21 @@ impl Risk {
 /// Whether `statement` needs confirming. It reads only the first word and whether `WHERE`
 /// appears outside strings, names and comments: a guard against slips, not a parser.
 pub fn risk(statement: &str) -> Option<Risk> {
+    if let Some(command) = cl_command(statement) {
+        let name = command
+            .split(|c: char| c.is_whitespace() || c == '(')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_uppercase();
+        // A command may be qualified: QSYS/DLTLIB.
+        let name = name.rsplit('/').next().unwrap_or_default();
+        let ends = matches!(
+            name,
+            "PWRDWNSYS" | "ENDSYS" | "ENDSBS" | "ENDTCP" | "ENDJOB"
+        );
+        return (name.starts_with("DLT") || name.starts_with("CLR") || ends)
+            .then_some(Risk::Command);
+    }
     let words: Vec<String> = tokens(statement)
         .into_iter()
         .filter(|(token, _)| *token == Token::Word)
@@ -184,6 +202,51 @@ pub fn risk(statement: &str) -> Option<Risk> {
     }
 }
 
+/// The CL command of a statement written `CL: command` (R-SQL-30, as ACS Run SQL Scripts),
+/// after any comments before it; `None` for SQL.
+pub fn cl_command(statement: &str) -> Option<&str> {
+    let first = tokens(statement)
+        .into_iter()
+        .find(|(token, _)| *token == Token::Word)?
+        .1;
+    let rest = statement.get(first.end..)?;
+    let word = statement.get(first)?;
+    (word.eq_ignore_ascii_case("CL") && rest.starts_with(':'))
+        .then(|| rest.get(1..).unwrap_or_default().trim())
+}
+
+/// The SQL that runs CL `command` in the SQL job: `QSYS2.QCMDEXC`, its quotes doubled.
+pub fn cl_call(command: &str) -> String {
+    format!("CALL QSYS2.QCMDEXC('{}')", command.replace('\'', "''"))
+}
+
+/// Whether `statement` may change the SQL job's current schema or library list (R-SQL-32):
+/// a `SET` statement or a CL command.
+pub fn may_change_job(statement: &str) -> bool {
+    cl_command(statement).is_some()
+        || tokens(statement)
+            .into_iter()
+            .find(|(token, _)| *token == Token::Word)
+            .and_then(|(_, r)| statement.get(r))
+            .is_some_and(|w| w.eq_ignore_ascii_case("SET"))
+}
+
+/// `name` in capitals when it is an IBM i system name (a library, R-SQL-32): 1 to 10 of A–Z,
+/// 0–9, `_`, `#`, `$`, `@`, not starting with a digit or `_`.
+pub fn system_name(name: &str) -> Option<String> {
+    let name = name.trim().to_ascii_uppercase();
+    let first_ok = name
+        .bytes()
+        .next()
+        .is_some_and(|b| b.is_ascii_uppercase() || matches!(b, b'#' | b'$' | b'@'));
+    let ok = first_ok
+        && name.len() <= 10
+        && name.bytes().all(|b| {
+            b.is_ascii_uppercase() || b.is_ascii_digit() || matches!(b, b'_' | b'#' | b'$' | b'@')
+        });
+    ok.then_some(name)
+}
+
 /// What a piece of SQL is, for its colour in the editor (R-SQL-19).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -196,8 +259,8 @@ pub enum Kind {
     Comment,
 }
 
-/// SQL's reserved and common words, in capitals and in order, for colouring only.
-const KEYWORDS: [&str; 103] = [
+/// SQL's reserved and common words, in capitals and in order, for colouring and completion.
+pub(super) const KEYWORDS: [&str; 103] = [
     "ADD",
     "ALL",
     "ALTER",
@@ -309,6 +372,7 @@ pub fn highlight(sql: &str) -> Vec<(Range<usize>, Kind)> {
     let bytes = sql.as_bytes();
     let mut out = Vec::new();
     let mut at = 0;
+    let mut command_next = false;
     while let Some(&b) = bytes.get(at) {
         let start = at;
         let kind = match b {
@@ -347,10 +411,19 @@ pub fn highlight(sql: &str) -> Vec<(Range<usize>, Kind)> {
                 while bytes.get(at).copied().is_some_and(is_word_byte) {
                     at += 1;
                 }
-                sql.get(start..at)
-                    .map(str::to_ascii_uppercase)
-                    .filter(|w| KEYWORDS.contains(&w.as_str()))
-                    .map(|_| Kind::Keyword)
+                let word = sql.get(start..at).map(str::to_ascii_uppercase);
+                if command_next {
+                    // R-SQL-30: the command after `CL:`.
+                    command_next = false;
+                    Some(Kind::Keyword)
+                } else if word.as_deref() == Some("CL") && bytes.get(at) == Some(&b':') {
+                    at += 1;
+                    command_next = true;
+                    Some(Kind::Keyword)
+                } else {
+                    word.filter(|w| KEYWORDS.contains(&w.as_str()))
+                        .map(|_| Kind::Keyword)
+                }
             }
             _ => {
                 at += 1;
@@ -465,7 +538,15 @@ fn second_word(previous: Option<&Lexeme<'_>>, word: &str) -> bool {
 /// `sql` formatted (R-SQL-22): keywords in capitals, each main clause on its own line with its
 /// contents indented under it, AND and OR and joins on lines of their own, a nested SELECT
 /// indented inside its parentheses. Strings, names, numbers and comments stay as written.
+///
+/// Text that holds a CL command (R-SQL-30) is left as it is: CL is not SQL.
 pub fn format(sql: &str) -> String {
+    let has_cl = statements(sql)
+        .into_iter()
+        .any(|r| sql.get(r).and_then(cl_command).is_some());
+    if has_cl {
+        return sql.trim().to_owned();
+    }
     let lexemes = lexemes(sql);
     let mut f = Formatter::default();
     for (i, lexeme) in lexemes.iter().enumerate() {
@@ -785,5 +866,81 @@ mod tests {
         );
         assert_eq!(format(&once), once);
         assert_eq!(format(""), "");
+    }
+
+    #[test]
+    fn a_cl_statement_is_found_after_comments_and_called_through_qcmdexc_r_sql_30() {
+        assert_eq!(cl_command("CL: ADDLIBLE MYLIB"), Some("ADDLIBLE MYLIB"));
+        assert_eq!(
+            cl_command("-- add it\n  cl:SNDMSG MSG('æøå''s') TOUSR(QSYSOPR)"),
+            Some("SNDMSG MSG('æøå''s') TOUSR(QSYSOPR)")
+        );
+        assert_eq!(cl_command("SELECT CL FROM T"), None);
+        assert_eq!(cl_command("CLOSE C"), None);
+        assert_eq!(cl_command(""), None);
+        assert_eq!(cl_command("CL:"), Some(""));
+        assert_eq!(
+            cl_call("SNDMSG MSG('æøå''s') TOUSR(QSYSOPR)"),
+            "CALL QSYS2.QCMDEXC('SNDMSG MSG(''æøå''''s'') TOUSR(QSYSOPR)')"
+        );
+    }
+
+    #[test]
+    fn a_cl_command_that_deletes_clears_or_ends_is_confirmed_r_sql_30() {
+        for command in [
+            "CL: DLTLIB X",
+            "CL: qsys/clrpfm F",
+            "CL: PWRDWNSYS *IMMED",
+            "cl: ENDJOB(123/A/B)",
+        ] {
+            assert_eq!(risk(command), Some(Risk::Command), "{command}");
+        }
+        for command in ["CL: ADDLIBLE X", "CL: WRKACTJOB", "CL: DSPLIB DLTLIB"] {
+            assert_eq!(risk(command), None, "{command}");
+        }
+    }
+
+    #[test]
+    fn cl_and_its_command_are_coloured_and_left_alone_by_format_r_sql_30() {
+        let sql = "CL: ADDLIBLE MYLIB;\nselect a from t";
+        let pieces: Vec<(&str, Kind)> = highlight(sql)
+            .into_iter()
+            .filter_map(|(r, k)| sql.get(r).map(|t| (t, k)))
+            .collect();
+        assert_eq!(
+            &pieces[..2],
+            [("CL:", Kind::Keyword), ("ADDLIBLE", Kind::Keyword)]
+        );
+        assert!(!pieces.iter().any(|(t, _)| *t == "MYLIB"));
+        assert_eq!(format("CL: addlible   mylib"), "CL: addlible   mylib");
+        assert_eq!(format(sql), sql, "text holding a command is left alone");
+    }
+
+    #[test]
+    fn set_and_cl_may_change_the_job_r_sql_32() {
+        for statement in ["SET SCHEMA X", "-- c\nset path = X", "CL: ADDLIBLE X"] {
+            assert!(may_change_job(statement), "{statement}");
+        }
+        for statement in ["SELECT SET FROM T", "VALUES 'SET'", ""] {
+            assert!(!may_change_job(statement), "{statement}");
+        }
+    }
+
+    #[test]
+    fn a_library_name_is_a_system_name_r_sql_32() {
+        assert_eq!(system_name(" msgsudta "), Some("MSGSUDTA".to_owned()));
+        assert_eq!(system_name("$LIB#@_1"), Some("$LIB#@_1".to_owned()));
+        for name in [
+            "",
+            "1LIB",
+            "_LIB",
+            "ELEVENCHARS",
+            "MY LIB",
+            "ÆØÅ",
+            "A'B",
+            "A)",
+        ] {
+            assert_eq!(system_name(name), None, "{name}");
+        }
     }
 }

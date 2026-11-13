@@ -209,6 +209,8 @@ public final class Helper {
         properties.setProperty("errors", "full");
         properties.setProperty("secure", tls ? "true" : "false");
         properties.setProperty("block size", "512");
+        // The library and file each column comes from, for its heading and text (R-SQL-29).
+        properties.setProperty("extended metadata", "true");
         // A query timeout cancels the statement after that long, rather than JTOpen's default
         // of letting the IBM i refuse a query by its estimated time (R-SQL-18).
         properties.setProperty("query timeout mechanism", "cancel");
@@ -276,6 +278,7 @@ public final class Helper {
         result.put("kind", "rows");
         result.put("cursor", id);
         result.put("columns", columns(rows.getMetaData()));
+        addHeadings(result);
         putRows(result, id, maxRows);
         return result;
     }
@@ -323,7 +326,15 @@ public final class Helper {
         List<Object> columns = new ArrayList<>();
         for (int c = 1; c <= meta.getColumnCount(); c++) {
             Map<String, Object> column = new LinkedHashMap<>();
-            column.put("name", meta.getColumnLabel(c));
+            // With extended metadata JTOpen puts the column heading in the label; the name is
+            // the field's (or the alias), as the operator wrote it in the statement (R-SQL-29).
+            String name = meta.getColumnName(c);
+            String label = blankToNull(meta.getColumnLabel(c));
+            column.put("name", name);
+            column.put("field", blankToNull(name));
+            column.put("label", label != null && !label.equals(name) ? heading(label) : null);
+            column.put("schema", blankToNull(meta.getSchemaName(c)));
+            column.put("table", blankToNull(meta.getTableName(c)));
             column.put("type", meta.getColumnTypeName(c));
             column.put("length", (long) meta.getPrecision(c));
             column.put("scale", (long) meta.getScale(c));
@@ -332,6 +343,82 @@ public final class Helper {
             columns.add(column);
         }
         return columns;
+    }
+
+    /** null for a missing or blank value, the value trimmed otherwise. */
+    private static String blankToNull(String value) {
+        return value == null || value.trim().isEmpty() ? null : value.trim();
+    }
+
+    /**
+     * Each column's heading (COLHDG, LABEL ON: three parts of 20) and text from the catalog,
+     * where the column comes from a file (R-SQL-29). A column the catalog does not answer for
+     * keeps none: the lookup never fails the query.
+     */
+    @SuppressWarnings("unchecked")
+    private void addHeadings(Map<String, Object> result) {
+        String sql = "SELECT COLUMN_NAME, SYSTEM_COLUMN_NAME, COLUMN_HEADING, COLUMN_TEXT"
+                + " FROM QSYS2.SYSCOLUMNS WHERE TABLE_SCHEMA = ?"
+                + " AND (TABLE_NAME = ? OR SYSTEM_TABLE_NAME = ?)";
+        Map<String, Map<String, String[]>> byTable = new HashMap<>();
+        for (Object o : (List<Object>) result.get("columns")) {
+            Map<String, Object> column = (Map<String, Object>) o;
+            Object schema = column.get("schema");
+            Object table = column.get("table");
+            Object field = column.get("field");
+            if (schema == null || table == null || field == null) {
+                continue;
+            }
+            String key = schema + "/" + table;
+            Map<String, String[]> catalog = byTable.computeIfAbsent(key, k -> catalog(sql,
+                    (String) schema, (String) table));
+            String[] found = catalog.get(((String) field).toUpperCase(java.util.Locale.ROOT));
+            if (found != null) {
+                column.put("heading", found[0]);
+                column.put("text", found[1]);
+            }
+        }
+        // Where the catalog had nothing (a view, an alias), the label JTOpen gave, if any.
+        for (Object o : (List<Object>) result.get("columns")) {
+            Map<String, Object> column = (Map<String, Object>) o;
+            Object label = column.remove("label");
+            if (column.get("heading") == null && label != null) {
+                column.put("heading", label);
+            }
+        }
+    }
+
+    /** A file's columns from the catalog: name to {heading, text}; empty when not found. */
+    private Map<String, String[]> catalog(String sql, String schema, String table) {
+        Map<String, String[]> columns = new HashMap<>();
+        try (java.sql.PreparedStatement query = connected().prepareStatement(sql)) {
+            query.setString(1, schema);
+            query.setString(2, table);
+            query.setString(3, table);
+            try (ResultSet rows = query.executeQuery()) {
+                while (rows.next()) {
+                    String[] about = {heading(rows.getString(3)), blankToNull(rows.getString(4))};
+                    columns.put(rows.getString(1), about);
+                    columns.put(rows.getString(2), about);
+                }
+            }
+        } catch (SQLException e) {
+            // No catalog answer (no authority, a temporary result): the columns keep their names.
+        }
+        return columns;
+    }
+
+    /**
+     * A column heading on one line: its parts (up to three of 20, padded with blanks, or one
+     * longer text) with each run of blanks made one space. Cutting at every 20 would split
+     * words of a heading written as one text.
+     */
+    static String heading(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String joined = raw.trim().replaceAll("\\s+", " ");
+        return joined.isEmpty() ? null : joined;
     }
 
     private void closeCursor(long id) {

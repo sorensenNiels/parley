@@ -7,7 +7,18 @@
 //! cargo run -p parley-core --example sqlprobe -- HOST --sign-on USER [--tls] [--ccsid 277]
 //! ```
 //!
-//! `--sql USER` instead runs a few read-only statements through the SQL helper (R-SQL-11, D20;
+//! `--tools USER` signs on once and runs the SQL window's own queries (R-SQL-30..32): a CL
+//! command that fails harmlessly, Explain for its message and an SQL one, the job log and the
+//! library list; it prints counts, message texts and the current schema, never rows of data.
+//!
+//! The password is asked for, or read from the file `PARLEY_PASSWORD_FILE` names: that is for
+//! the test profile the owner made for Claude to probe with (D22), never for PUB400.
+//!
+//! `--snippets USER` signs on once and runs each starter snippet (R-SQL-27), saying only whether
+//! it ran and how many rows and columns came back, never the rows.
+//!
+//! `--sql USER [--query "SQL"]` instead runs a few read-only statements (or only the one given)
+//! through the SQL helper (R-SQL-11, D20;
 //! build it first with `make helper`): one sign-on through `JTOpen`, never retried.
 //!
 //! `--sign-on USER` instead signs on once to the sign-on server (R-SQL-2, R-NET-9): it asks for
@@ -65,8 +76,15 @@ fn main() {
             .and_then(|i| args.get(i + 1))
             .cloned()
     };
+    if let Some(user) = value("--tools") {
+        std::process::exit(tools(&host, &user, flag("--tls")));
+    }
+    if let Some(user) = value("--snippets") {
+        std::process::exit(snippets(&host, &user, flag("--tls")));
+    }
     if let Some(user) = value("--sql") {
-        std::process::exit(sql(&host, &user, flag("--tls")));
+        let query = value("--query");
+        std::process::exit(sql(&host, &user, flag("--tls"), query.as_deref()));
     }
     if let Some(user) = value("--sign-on") {
         let ccsid = value("--ccsid").map_or(Some(CodePage::Ccsid37), |n| {
@@ -676,7 +694,7 @@ fn sign_on(host: &str, user: &str, tls: bool, code_page: CodePage) -> i32 {
 // ---------------------------------------------------------------- SQL through the helper
 
 /// Statements that between them show each kind of value, a fetch in blocks and an error.
-const STATEMENTS: [(&str, u32); 6] = [
+const STATEMENTS: [(&str, u32); 7] = [
     ("VALUES CURRENT SERVER", 10),
     (
         "SELECT CURRENT USER, CURRENT DATE, CURRENT TIME, CURRENT TIMESTAMP FROM SYSIBM.SYSDUMMY1",
@@ -694,18 +712,31 @@ const STATEMENTS: [(&str, u32); 6] = [
          WHERE TABLE_SCHEMA = 'QSYS2' FETCH FIRST 12 ROWS ONLY",
         5,
     ),
+    // R-SQL-29: what a column says about itself (label, field, file, heading, text), also
+    // under an alias.
+    (
+        "SELECT TABLE_NAME AS T, TABLE_SCHEMA, ROW_LENGTH FROM QSYS2.SYSTABLES \
+         WHERE TABLE_SCHEMA = 'QSYS2' FETCH FIRST 2 ROWS ONLY",
+        10,
+    ),
     ("SELECT * FROM PARLEY_NO_SUCH_TABLE_42704", 10),
     ("VALUES CURRENT SERVER", 10),
 ];
 
 /// Signs on once through the helper and runs [`STATEMENTS`]; the exit code: 0 all ran as
 /// expected, 1 not.
-fn sql(host: &str, user: &str, tls: bool) -> i32 {
+fn sql(host: &str, user: &str, tls: bool, query: Option<&str>) -> i32 {
     let Some(mut helper) = connect(host, user, tls) else {
         return 1;
     };
     let mut as_expected = true;
-    for (statement, max_rows) in STATEMENTS {
+    // `--query`: that statement alone, instead of the usual ones.
+    let own = query.map(|q| [(q, 20)]);
+    let statements: &[(&str, u32)] = match &own {
+        Some(one) => one,
+        None => &STATEMENTS,
+    };
+    for &(statement, max_rows) in statements {
         println!(
             "> {}",
             statement.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -737,6 +768,24 @@ fn call<T: for<'de> serde::Deserialize<'de>>(
         .into_result()
 }
 
+/// The password: from the file `PARLEY_PASSWORD_FILE` names, for a test profile the owner set up
+/// for Claude to probe with (the file is the owner's and never printed); else asked for.
+fn password(user: &str, host: &str) -> Option<String> {
+    if let Some(file) = std::env::var_os("PARLEY_PASSWORD_FILE") {
+        return match std::fs::read_to_string(&file) {
+            Ok(text) => Some(text.trim_end_matches(['\r', '\n']).to_owned()),
+            Err(e) => {
+                eprintln!("parley: cannot read PARLEY_PASSWORD_FILE: {e}");
+                None
+            }
+        };
+    }
+    let prompt = format!("Password for {user} on {host} (not shown): ");
+    rpassword::prompt_password(prompt)
+        .map_err(|e| eprintln!("parley: cannot read the password: {e}"))
+        .ok()
+}
+
 /// Starts the helper and connects once; `None` after saying why not.
 fn connect(host: &str, user: &str, tls: bool) -> Option<parley_core::sql::helper::Helper> {
     use parley_core::password::Password;
@@ -764,10 +813,7 @@ fn connect(host: &str, user: &str, tls: bool) -> Option<parley_core::sql::helper
     };
     println!("Connecting to {host} as {user}, {how}");
     println!("One attempt only: a refusal is not retried.\n");
-    let prompt = format!("Password for {user} on {host} (not shown): ");
-    let password = rpassword::prompt_password(prompt)
-        .map_err(|e| eprintln!("parley: cannot read the password: {e}"))
-        .ok()?;
+    let password = password(user, host)?;
     let request = Request::Connect(Connect {
         host: host.to_owned(),
         tls,
@@ -835,6 +881,12 @@ fn run_statement(
         })
         .collect();
     println!("  columns: {}", heading.join(" | "));
+    for c in &columns {
+        println!(
+            "    {}: field {:?}, file {:?}.{:?}, heading {:?}, text {:?}",
+            c.name, c.field, c.schema, c.table, c.heading, c.text
+        );
+    }
     let mut blocks = 1;
     while more {
         match call::<MoreRows>(helper, &Request::Fetch { cursor, max_rows }) {
@@ -861,4 +913,209 @@ fn run_statement(
     }
     println!("  {} rows in {blocks} block(s)", rows.len());
     true
+}
+
+// ---------------------------------------------------------------- starter snippets (R-SQL-27)
+
+/// Runs every starter snippet, its placeholders filled with defaults or harmless test values;
+/// prints ok or the error, and row and column counts only.
+fn snippets(host: &str, user: &str, tls: bool) -> i32 {
+    use parley_core::sql::protocol::{Outcome, Request};
+    use parley_core::sql::snippet::{STARTERS, Snippet, fill};
+
+    let Some(mut helper) = connect(host, user, tls) else {
+        return 1;
+    };
+    let test_value = |name: &str| match name {
+        "library" => Some("QSYS".to_owned()),
+        "object" => Some("QSYSOPR".to_owned()),
+        _ => None,
+    };
+    let mut failed = 0;
+    for (name, text) in STARTERS {
+        let snippet = Snippet::parse(text, name);
+        let sql = fill(&snippet.sql, test_value);
+        let run = Request::Run {
+            sql,
+            max_rows: 5,
+            timeout: 60,
+        };
+        // Said first, so a snippet the host takes long over is named while it runs.
+        println!("...     {}", snippet.title);
+        match call::<Outcome>(&mut helper, &run) {
+            Ok(Outcome::Rows {
+                columns,
+                rows,
+                more,
+                ..
+            }) => {
+                let more = if more { "+" } else { "" };
+                println!(
+                    "ok      {} ({}): {}{more} rows, {} columns",
+                    snippet.title,
+                    snippet.needs,
+                    rows.len(),
+                    columns.len()
+                );
+            }
+            Ok(Outcome::Count { count }) => {
+                println!("ok      {}: {count} rows changed", snippet.title);
+            }
+            Err(e) => {
+                failed += 1;
+                let first = e
+                    .to_string()
+                    .split(". ")
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned();
+                println!("FAILED  {} ({}): {first}", snippet.title, snippet.needs);
+            }
+        }
+    }
+    helper.close();
+    println!(
+        "\n{} of {} starter snippets ran.",
+        STARTERS.len() - failed,
+        STARTERS.len()
+    );
+    i32::from(failed > 0)
+}
+
+/// `--tools`: the SQL window's IBM i tools against a real host (R-SQL-30..32).
+fn tools(host: &str, user: &str, tls: bool) -> i32 {
+    use parley_core::sql::protocol::{Outcome, Request};
+    use parley_core::sql::{catalog, message, text};
+
+    let Some(mut helper) = connect(host, user, tls) else {
+        return 1;
+    };
+    let mut run = |label: &str, sql: String| -> Result<Outcome, String> {
+        let request = Request::Run {
+            sql,
+            max_rows: catalog::MAX_OBJECTS + 1,
+            timeout: 60,
+        };
+        let outcome = call::<Outcome>(&mut helper, &request).map_err(|e| e.to_string());
+        match &outcome {
+            Ok(Outcome::Rows { rows, columns, .. }) => {
+                println!(
+                    "ok      {label}: {} rows, {} columns",
+                    rows.len(),
+                    columns.len()
+                );
+            }
+            Ok(Outcome::Count { count }) => println!("ok      {label}: count {count}"),
+            Err(e) => println!("error   {label}: {e}"),
+        }
+        outcome
+    };
+    let mut good = true;
+    // R-SQL-30: QTEMP is always in the library list, so this fails with CPF2103 and changes nothing.
+    let cl = run(
+        "CL: ADDLIBLE QTEMP (expect CPF2103)",
+        text::cl_call("ADDLIBLE QTEMP"),
+    );
+    let cl_id = cl
+        .as_ref()
+        .err()
+        .and_then(|e| message::message_id(e).map(str::to_owned));
+    println!("        message ID read from it: {cl_id:?}");
+    let sql_error = run(
+        "SELECT FROM a missing table (expect SQL0204)",
+        "SELECT * FROM QTEMP.PARLEY_NO_SUCH_TABLE".to_owned(),
+    );
+    let sql_id = sql_error
+        .as_ref()
+        .err()
+        .and_then(|e| message::message_id(e).map(str::to_owned));
+    println!("        message ID read from it: {sql_id:?}");
+    // R-SQL-31: Explain, from the job log and from the message file.
+    for id in [cl_id, sql_id].into_iter().flatten() {
+        for (label, sql) in [
+            ("job log", message::from_job_log(&id)),
+            ("message file", message::from_message_file(&id)),
+        ] {
+            match run(&format!("Explain {id} from the {label}"), sql) {
+                Ok(Outcome::Rows { rows, .. }) => {
+                    if let Some(row) = rows.first() {
+                        let text = |n: usize| row.get(n).cloned().flatten().unwrap_or_default();
+                        println!("        {}", text(0));
+                        for line in message::second_level(&text(1)).lines().take(6) {
+                            println!("        | {line}");
+                        }
+                    }
+                }
+                Ok(Outcome::Count { .. }) => {}
+                Err(_) => good = false,
+            }
+        }
+    }
+    if run("Job log", message::JOB_LOG.to_owned()).is_err() {
+        good = false;
+    }
+    // R-SQL-32
+    match run("Library list and current schema", catalog::JOB.to_owned()) {
+        Ok(Outcome::Rows { rows, .. }) => {
+            let schema = rows
+                .first()
+                .and_then(|r| r.first().cloned().flatten())
+                .unwrap_or_default();
+            println!("        current schema {schema}");
+        }
+        _ => good = false,
+    }
+    good &= browser(&mut run, user);
+    helper.close();
+    i32::from(!good)
+}
+
+/// The schema browser's queries (R-SQL-34): counts per kind only, no object names.
+fn browser(
+    run: &mut impl FnMut(&str, String) -> Result<parley_core::sql::protocol::Outcome, String>,
+    user: &str,
+) -> bool {
+    use parley_core::sql::catalog;
+    use parley_core::sql::protocol::Outcome;
+
+    let mut good = true;
+    // The profile's own library too: NODEJT400's is the one Claude may look into (D22).
+    let own = parley_core::sql::text::system_name(user);
+    for library in ["QGPL", "QSYS2"].into_iter().chain(own.as_deref()) {
+        match run(&format!("Objects in {library}"), catalog::objects(library)) {
+            Ok(Outcome::Rows { rows, .. }) => {
+                let objects = catalog::objects_from(&rows);
+                for kind in catalog::Kind::ALL {
+                    let n = objects.iter().filter(|o| o.kind == kind).count();
+                    println!("        {}: {n}", kind.plural());
+                }
+            }
+            _ => good = false,
+        }
+    }
+    match run(
+        "Columns of QSYS2.SYSTABLES",
+        catalog::columns("QSYS2", "SYSTABLES"),
+    ) {
+        Ok(Outcome::Rows { rows, .. }) => {
+            for column in catalog::columns_from(&rows).iter().take(3) {
+                println!(
+                    "        {} {} \"{}\"",
+                    column.name, column.data_type, column.heading
+                );
+            }
+        }
+        _ => good = false,
+    }
+    // R-SQL-35: Show SQL; the number of lines only.
+    match run(
+        "Show SQL of QSYS2.SYSTABLES",
+        catalog::ddl("QSYS2", "SYSTABLES", catalog::Kind::View),
+    ) {
+        Ok(Outcome::Rows { rows, .. }) => {
+            println!("        {} lines", catalog::ddl_from(&rows).lines().count());
+        }
+        _ => good = false,
+    }
+    good
 }

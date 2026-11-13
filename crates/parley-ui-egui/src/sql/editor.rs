@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 use super::SqlFiles;
 use crate::{dialog, icons, theme};
 
+mod complete;
+pub use complete::{Item, MAX_ITEMS};
+
 /// Text longer than this is not coloured while it is edited: it would be scanned every frame.
 const MAX_COLOURED: usize = 200_000;
 
@@ -91,7 +94,16 @@ pub struct Scripts {
     generation: u64,
     /// Said under the editor after Open, Save or a failure.
     pub note: Option<String>,
+    /// The completion list while a name is typed (R-SQL-36).
+    popup: Option<complete::Popup>,
+    /// The name under the pointer and where it is (R-SQL-37).
+    pointed: Option<(Name, usize)>,
+    /// What the window said about a name, shown while the pointer is on it.
+    described: Option<(Name, String)>,
 }
+
+/// A name in the text, and the name before a `.` in front of it.
+pub type Name = (Option<String>, String);
 
 impl Scripts {
     /// The scripts kept for a session, or one empty script.
@@ -106,6 +118,9 @@ impl Scripts {
             select_next: None,
             generation: 0,
             note: None,
+            popup: None,
+            pointed: None,
+            described: None,
         };
         for s in saved {
             let number = scripts.take_number();
@@ -159,6 +174,15 @@ impl Scripts {
         self.generation += 1;
     }
 
+    /// A new script tab named `title` holding `text`, shown (R-SQL-35).
+    pub fn open_new(&mut self, title: &str, text: &str) {
+        self.new_tab();
+        if let Some(tab) = self.tabs.last_mut() {
+            title.clone_into(&mut tab.title);
+            text.clone_into(&mut tab.text);
+        }
+    }
+
     /// The shown script's text.
     pub fn text(&self) -> &str {
         self.tabs.get(self.shown).map_or("", |t| t.text.as_str())
@@ -182,6 +206,43 @@ impl Scripts {
         }
     }
 
+    /// Puts `text` in the shown script in place of the selection, or at the cursor, and the
+    /// cursor after it (a snippet, R-SQL-25).
+    pub fn insert(&mut self, text: &str) {
+        let (start, end) = self.selection;
+        let Some(tab) = self.tabs.get_mut(self.shown) else {
+            return;
+        };
+        let start = start.min(tab.text.len());
+        let end = end.clamp(start, tab.text.len());
+        if !tab.text.is_char_boundary(start) || !tab.text.is_char_boundary(end) {
+            return;
+        }
+        tab.text.replace_range(start..end, text);
+        let after = start + text.len();
+        self.selection = (after, after);
+        let chars = tab.text.get(..after).map_or(0, |t| t.chars().count());
+        self.select_next = Some((chars, chars));
+        self.generation += 1;
+    }
+
+    /// The selection, or the statement under the cursor: what Run runs (R-SQL-7).
+    pub fn current_statement(&self) -> Option<String> {
+        let (start, end) = self.selection;
+        let script = self.text();
+        let chosen = if start < end {
+            script
+                .get(start..end)
+                .map(str::trim)
+                .map(|s| s.trim_end_matches(';').trim().to_owned())
+        } else {
+            text::statement_at(script, start)
+                .and_then(|r| script.get(r))
+                .map(str::to_owned)
+        };
+        chosen.filter(|s| !s.is_empty())
+    }
+
     /// The shown script's text and the cursor, as a test sets them.
     #[cfg(test)]
     pub fn set_text(&mut self, text: &str, cursor: usize) {
@@ -191,9 +252,84 @@ impl Scripts {
         self.selection = (cursor, cursor);
     }
 
-    /// Whether the find bar takes Esc (the window's Cancel does otherwise).
-    pub const fn finding(&self) -> bool {
-        self.find.is_some()
+    /// The selection, as a test sets it.
+    #[cfg(test)]
+    pub fn select(&mut self, start: usize, end: usize) {
+        self.selection = (start, end);
+    }
+
+    /// Whether the editor takes Esc, for the find bar or the completion list (the window's
+    /// Cancel does otherwise).
+    pub fn takes_escape(&self) -> bool {
+        self.find.is_some() || self.popup.as_ref().is_some_and(|p| !p.items.is_empty())
+    }
+
+    /// The name being typed and the statement it is in, while completion is wanted (R-SQL-36).
+    pub fn completing(&self) -> Option<(parley_core::sql::complete::Typed, String)> {
+        let popup = self.popup.as_ref()?;
+        let script = self.text();
+        let statement = text::statement_at(script, popup.typed.end)
+            .and_then(|r| script.get(r))
+            .unwrap_or_default();
+        Some((popup.typed.clone(), statement.to_owned()))
+    }
+
+    /// The name under the pointer and the statement it is in (R-SQL-37).
+    pub fn pointed(&self) -> Option<(Name, String)> {
+        let (name, at) = self.pointed.clone()?;
+        let script = self.text();
+        let statement = text::statement_at(script, at)
+            .and_then(|r| script.get(r))
+            .unwrap_or_default();
+        Some((name, statement.to_owned()))
+    }
+
+    /// What hovering `name` shows; `None` for nothing.
+    pub fn describe(&mut self, name: Name, text: Option<String>) {
+        self.described = text.map(|t| (name, t));
+    }
+
+    /// What to offer for the name being typed.
+    pub fn offer(&mut self, items: Vec<Item>) {
+        if let Some(popup) = &mut self.popup {
+            popup.offer(items);
+        }
+    }
+
+    /// Puts offered item `index` in place of what was typed.
+    fn accept(&mut self, index: usize) {
+        let Some(popup) = self.popup.take() else {
+            return;
+        };
+        if let Some(item) = popup.items.get(index) {
+            self.selection = (popup.typed.start, popup.typed.end);
+            self.insert(&item.insert);
+        }
+    }
+
+    /// After the text field: a list while a name is being typed, gone when the cursor leaves it.
+    fn follow_typing(&mut self, changed: bool, cursor_at: Option<egui::Pos2>) {
+        let (start, end) = self.selection;
+        if changed && start == end {
+            let typed = parley_core::sql::complete::typed_at(self.text(), start)
+                .filter(|t| t.qualifier.is_some() || t.prefix.chars().count() >= 2);
+            self.popup = typed.map(|typed| match self.popup.take() {
+                Some(mut popup) => {
+                    popup.typed = typed;
+                    popup
+                }
+                None => complete::Popup::new(typed),
+            });
+        } else if self
+            .popup
+            .as_ref()
+            .is_some_and(|p| start != end || p.typed.end != start)
+        {
+            self.popup = None;
+        }
+        if let Some(popup) = &mut self.popup {
+            popup.at = cursor_at.or(popup.at);
+        }
     }
 
     /// The tabs, the actions and the editor, `height` high for the text.
@@ -204,6 +340,9 @@ impl Scripts {
             self.find_bar(ui);
         }
         self.text_field(ui, height);
+        if let Some(index) = self.popup.as_ref().and_then(|p| p.show(ui)) {
+            self.accept(index);
+        }
         if let Some(note) = self.note.as_deref().filter(|n| !n.is_empty()) {
             theme::hint(ui, note);
         }
@@ -213,6 +352,13 @@ impl Scripts {
     // ---------------------------------------------------------------- keys and actions
 
     fn keys(&mut self, ui: &Ui, files: Option<&dyn SqlFiles>) {
+        // R-SQL-36: the list takes its keys before the text field and the window see them.
+        let action = self.popup.as_mut().map(|p| (p.keys(ui), p.chosen));
+        match action {
+            Some((complete::KeyAction::Accept, chosen)) => self.accept(chosen),
+            Some((complete::KeyAction::Close, _)) => self.popup = None,
+            Some((complete::KeyAction::None, _)) | None => {}
+        }
         let command = Modifiers::COMMAND;
         let shift = Modifiers::COMMAND | Modifiers::SHIFT;
         let (new, close, next, open, save, format, find, replace) = ui.input_mut(|i| {
@@ -443,13 +589,30 @@ impl Scripts {
             state.store(ui.ctx(), id);
             ui.memory_mut(|m| m.request_focus(id));
         }
+        // R-SQL-28: without a selection, the statement Run would execute is shown faintly.
+        let (start, end) = self.selection;
+        let current = if start < end {
+            None
+        } else {
+            text::statement_at(&tab.text, start)
+        };
         let mut layouter =
             |ui: &Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| -> Arc<egui::Galley> {
-                let job = coloured(ui, buffer.as_str(), wrap_width);
+                let text = buffer.as_str();
+                // Only while the text is the one the range was found in.
+                let current = current.as_ref().filter(|r| r.end <= text.len());
+                let job = coloured(ui, text, wrap_width, current);
                 ui.fonts_mut(|f| f.layout_job(job))
             };
         let before = tab.text.len();
         let mut changed = false;
+        let mut cursor_at = None;
+        let mut pointer_at = None;
+        let described = self.described.as_ref().filter(|(name, _)| {
+            self.pointed
+                .as_ref()
+                .is_some_and(|(pointed, _)| pointed == name)
+        });
         ScrollArea::vertical()
             .id_salt(("sql-editor", tab.number))
             .max_height(height)
@@ -464,14 +627,32 @@ impl Scripts {
                     .hint_text("SELECT * FROM QSYS2.SYSTABLES FETCH FIRST 10 ROWS ONLY")
                     .show(ui);
                 changed = output.response.changed();
+                let response = &output.response.response;
+                if response.hovered()
+                    && let Some(pos) = response.hover_pos()
+                {
+                    let cursor = output.galley.cursor_from_pos(pos - output.galley_pos);
+                    pointer_at = Some(byte_at(&tab.text, cursor.index.0));
+                    if let Some((_, text)) = described {
+                        response.clone().on_hover_text(text.as_str());
+                    }
+                }
                 if let Some(range) = output.cursor_range {
+                    let below = output.galley.pos_from_cursor(range.primary).left_bottom();
+                    cursor_at = Some(output.galley_pos + below.to_vec2());
                     let (a, b) = (range.primary.index.0, range.secondary.index.0);
                     self.selection = (byte_at(&tab.text, a.min(b)), byte_at(&tab.text, a.max(b)));
                 }
             });
-        if changed || tab.text.len() != before {
+        let changed = changed || tab.text.len() != before;
+        if changed {
             self.generation += 1;
         }
+        self.follow_typing(changed, cursor_at);
+        self.pointed = pointer_at.and_then(|at| {
+            let name = parley_core::sql::complete::name_at(self.text(), at)?;
+            Some((name, at))
+        });
     }
 
     // ---------------------------------------------------------------- find and replace
@@ -633,24 +814,43 @@ impl Scripts {
 
 /// `text` laid out for the editor, in colour unless it is very long (R-SQL-19), as Tortuga's
 /// code colours.
-fn coloured(ui: &Ui, text: &str, wrap_width: f32) -> LayoutJob {
+fn coloured(ui: &Ui, text: &str, wrap_width: f32, current: Option<&Range<usize>>) -> LayoutJob {
     let p = theme::palette(ui);
     let plain = ui.visuals().text_color();
     let font = egui::TextStyle::Monospace.resolve(ui.style());
-    let format = |color: Color32| TextFormat::simple(font.clone(), color);
     let spans = if text.len() <= MAX_COLOURED {
         text::highlight(text)
     } else {
         Vec::new()
     };
     let mut job = LayoutJob::default();
+    // Appends `range` of `text` in `color`, the part inside `current` on a faint background.
+    let mut append = |range: Range<usize>, color: Color32| {
+        let cuts = current.map_or(vec![range.clone()], |c| {
+            let a = c.start.clamp(range.start, range.end);
+            let b = c.end.clamp(range.start, range.end);
+            vec![range.start..a, a..b, b..range.end]
+        });
+        for cut in cuts.into_iter().filter(|c| !c.is_empty()) {
+            let Some(piece) = text.get(cut.clone()) else {
+                continue;
+            };
+            let mut format = TextFormat::simple(font.clone(), color);
+            if current
+                .as_ref()
+                .is_some_and(|c| c.start <= cut.start && cut.end <= c.end)
+            {
+                format.background = p.surface_hover;
+            }
+            job.append(piece, 0.0, format);
+        }
+    };
     let mut at = 0;
     for (range, kind) in spans {
-        let (Some(before), Some(part)) = (text.get(at..range.start), text.get(range.clone()))
-        else {
+        if range.start < at {
             continue;
-        };
-        job.append(before, 0.0, format(plain));
+        }
+        append(at..range.start, plain);
         let color = match kind {
             Kind::Keyword => p.blue,
             Kind::String => p.ok,
@@ -658,10 +858,10 @@ fn coloured(ui: &Ui, text: &str, wrap_width: f32) -> LayoutJob {
             Kind::Number => p.redirect,
             Kind::Comment => p.muted,
         };
-        job.append(part, 0.0, format(color));
+        append(range.clone(), color);
         at = range.end;
     }
-    job.append(text.get(at..).unwrap_or_default(), 0.0, format(plain));
+    append(at..text.len(), plain);
     job.wrap.max_width = wrap_width;
     job
 }
@@ -842,5 +1042,97 @@ mod tests {
         assert_eq!(file_name("/home/u/jobs.sql"), "jobs.sql");
         assert_eq!(file_name("C:\\Users\\u\\æøå.sql"), "æøå.sql");
         assert_eq!(file_name("plain.sql"), "plain.sql");
+    }
+
+    #[test]
+    fn the_statement_run_would_execute_is_on_a_faint_background_r_sql_28() {
+        let text = "VALUES 1;\nSELECT 'æøå' FROM T;\n";
+        let current = text::statement_at(text, 12).expect("a statement");
+        let mut harness = egui_kittest::Harness::new_ui(move |ui| {
+            crate::test_support::install_fonts(ui);
+            let job = coloured(ui, text, 400.0, Some(&current));
+            let shaded: String = job
+                .sections
+                .iter()
+                .filter(|s| s.format.background != Color32::TRANSPARENT)
+                .filter_map(|s| text.get(s.byte_range.start.0..s.byte_range.end.0))
+                .collect();
+            assert_eq!(shaded, "SELECT 'æøå' FROM T");
+            let plain = coloured(ui, text, 400.0, None);
+            assert!(
+                plain
+                    .sections
+                    .iter()
+                    .all(|s| s.format.background == Color32::TRANSPARENT)
+            );
+        });
+        harness.run();
+    }
+
+    fn offered(label: &str) -> Item {
+        Item {
+            label: label.to_owned(),
+            detail: "column".to_owned(),
+            insert: label.to_owned(),
+        }
+    }
+
+    #[test]
+    fn typing_a_name_opens_the_list_and_a_choice_replaces_it_r_sql_36() {
+        let mut scripts = Scripts::restore(&[]);
+        let text = "SELECT k.na FROM qgpl.kunder k";
+        scripts.set_text(text, 11);
+        scripts.follow_typing(true, None);
+        let (typed, statement) = scripts.completing().expect("completing");
+        assert_eq!(
+            (typed.prefix.as_str(), typed.qualifier.as_deref()),
+            ("NA", Some("K"))
+        );
+        assert_eq!(statement, text);
+        scripts.offer(vec![offered("NAVN"), offered("NAVN_ÆØÅ")]);
+        assert!(
+            scripts.takes_escape(),
+            "Esc closes the list, not the window's Cancel"
+        );
+        scripts.accept(1);
+        assert_eq!(scripts.text(), "SELECT k.NAVN_ÆØÅ FROM qgpl.kunder k");
+        assert!(scripts.completing().is_none());
+    }
+
+    #[test]
+    fn the_list_closes_when_the_cursor_leaves_the_name_r_sql_36() {
+        let mut scripts = Scripts::restore(&[]);
+        scripts.set_text("SELECT ka", 9);
+        scripts.follow_typing(true, None);
+        assert!(scripts.completing().is_some());
+        scripts.select(3, 3);
+        scripts.follow_typing(false, None);
+        assert!(scripts.completing().is_none());
+        // One letter is not enough to offer anything without a qualifier.
+        scripts.set_text("SELECT k", 8);
+        scripts.follow_typing(true, None);
+        assert!(scripts.completing().is_none());
+    }
+
+    #[test]
+    fn down_and_enter_choose_from_the_list_r_sql_36() {
+        let mut scripts = Scripts::restore(&[]);
+        scripts.set_text("SELECT na", 9);
+        scripts.follow_typing(true, Some(egui::pos2(40.0, 40.0)));
+        scripts.offer(vec![offered("NAVN"), offered("NAVN2")]);
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(600.0, 400.0))
+            .build_ui_state(
+                |ui, s: &mut Scripts| {
+                    crate::test_support::install_fonts(ui);
+                    s.show(ui, 200.0, None);
+                },
+                scripts,
+            );
+        harness.run_steps(2);
+        harness.key_press(Key::ArrowDown);
+        harness.key_press(Key::Enter);
+        harness.run_steps(2);
+        assert_eq!(harness.state().text(), "SELECT NAVN2");
     }
 }

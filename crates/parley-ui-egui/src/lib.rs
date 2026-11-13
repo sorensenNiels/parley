@@ -35,6 +35,7 @@ use sessions::{Editor, Outcome};
 pub use settings::{Settings, Theme};
 pub use sql::SqlFiles;
 pub use sql::editor::SavedScript;
+pub use sql::snippets::SnippetStore;
 pub use theme::Density;
 pub use updates::Checker;
 
@@ -92,6 +93,8 @@ pub struct ParleyUi {
     sql_notice: Option<String>,
     /// The file window for exports and scripts (R-SQL-8, R-SQL-21).
     file_saver: Option<Box<dyn sql::SqlFiles>>,
+    /// The snippet folders (R-SQL-24); without them, the SQL window has only the starters.
+    snippet_store: Option<Box<dyn sql::snippets::SnippetStore>>,
     /// The SQL window's scripts as last kept in the settings (R-SQL-20).
     sql_scripts_kept: u64,
 }
@@ -134,6 +137,7 @@ impl ParleyUi {
             sql_users: std::collections::BTreeMap::new(),
             sql_notice: None,
             file_saver: None,
+            snippet_store: None,
             sql_scripts_kept: 0,
         }
     }
@@ -156,6 +160,11 @@ impl ParleyUi {
     /// How the SQL window reaches files (R-SQL-8, R-SQL-21); without it, no Export or Open….
     pub fn set_file_saver(&mut self, saver: Box<dyn sql::SqlFiles>) {
         self.file_saver = Some(saver);
+    }
+
+    /// Where the SQL window keeps snippets (R-SQL-24).
+    pub fn set_snippet_store(&mut self, store: Box<dyn sql::snippets::SnippetStore>) {
+        self.snippet_store = Some(store);
     }
 
     /// Where the SQL helper's jars are (R-SQL-13); `None` when this installation has none.
@@ -645,7 +654,15 @@ impl ParleyUi {
                         user,
                         &scripts,
                     )
-                    .with_limits(self.settings.sql_rows, self.settings.sql_timeout),
+                    .with_limits(self.settings.sql_rows, self.settings.sql_timeout)
+                    .with_header(self.settings.sql_header)
+                    .with_pinned(
+                        self.settings
+                            .sql_pinned
+                            .get(&profile.name)
+                            .cloned()
+                            .unwrap_or_default(),
+                    ),
                 );
             }
             Err(e) => self.sql_notice = Some(e.to_string()),
@@ -666,11 +683,31 @@ impl ParleyUi {
                 .get(&session)
                 .cloned()
                 .unwrap_or_default();
-            let open = window.show(ctx, &history, self.file_saver.as_deref());
+            let around = sql::Around {
+                history: &history,
+                files: self.file_saver.as_deref(),
+                snippets: self.snippet_store.as_deref(),
+                shared: &self.settings.sql_snippets_shared,
+            };
+            let open = window.show(ctx, around);
             let ran = window.take_ran();
             if !window.user.trim().is_empty() {
                 self.sql_users
                     .insert(session.clone(), window.user.trim().to_owned());
+            }
+            // The choice of headings (R-SQL-29), kept for the next window.
+            self.settings.sql_header = window.header;
+            // The libraries pinned in the schema browser (R-SQL-34).
+            let pinned = window.pinned();
+            if self
+                .settings
+                .sql_pinned
+                .get(&session)
+                .map_or(!pinned.is_empty(), |p| p != pinned)
+            {
+                self.settings
+                    .sql_pinned
+                    .insert(session.clone(), pinned.to_vec());
             }
             // The scripts, kept when they changed (R-SQL-20).
             if window.scripts_generation() != self.sql_scripts_kept {
