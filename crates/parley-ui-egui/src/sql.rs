@@ -3,7 +3,9 @@
 //! results. The helper runs on a thread of its own (`parley_core::sql::runner`), so the window
 //! never waits for the host.
 
+pub mod editor;
 pub mod grid;
+pub mod results;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -25,10 +27,20 @@ use grid::ResultView;
 
 use crate::{dialog, icons, theme};
 
-/// Saves a file where the operator chooses (the system's file window, in the app).
-pub trait FileSaver: std::fmt::Debug {
-    /// `Ok(None)` when the operator cancelled; the path saved to otherwise.
-    fn save(&self, suggested: &str, bytes: &[u8]) -> Result<Option<String>, String>;
+/// Files the SQL window reads and writes through the system's file window, in the app
+/// (R-SQL-8, R-SQL-21). `Ok(None)` is the operator cancelling.
+pub trait SqlFiles: std::fmt::Debug {
+    /// Saves an export where the operator chooses; the path saved to.
+    fn export_csv(&self, suggested: &str, bytes: &[u8]) -> Result<Option<String>, String>;
+    /// A `.sql` file the operator picks: its path and text.
+    fn open_script(&self) -> Result<Option<(String, String)>, String>;
+    /// Saves `text` to `path`, or where the operator chooses when `path` is `None`; the path.
+    fn save_script(
+        &self,
+        path: Option<&str>,
+        suggested: &str,
+        text: &str,
+    ) -> Result<Option<String>, String>;
 }
 
 /// How far the window is.
@@ -45,7 +57,8 @@ enum Waiting {
     Hello,
     Connect,
     Run(String),
-    Fetch,
+    /// More rows from this cursor.
+    Fetch(u64),
     Autocommit(bool),
     Commit,
     Rollback,
@@ -81,13 +94,12 @@ pub struct SqlWindow {
     password: String,
     runner: Option<Runner>,
     connected: Option<Connected>,
-    editor: String,
-    /// The selection or cursor in the editor last frame, as byte offsets.
-    selection: (usize, usize),
+    /// The scripts in the editor (R-SQL-20).
+    scripts: editor::Scripts,
     /// Statements still to run (Run all).
     queue: VecDeque<String>,
     waiting: Option<(u64, Waiting)>,
-    view: Option<ResultView>,
+    results: results::Results,
     tab: Tab,
     messages: Vec<(bool, String)>,
     error_line: Option<String>,
@@ -97,10 +109,11 @@ pub struct SqlWindow {
     closing: Closing,
     /// Statements run since the last [`SqlWindow::take_ran`], for the history.
     ran: Vec<String>,
-    /// Said under the grid after Copy or Export.
-    note: Option<String>,
     /// The sign-on, sent once the helper's hello is read; it holds the password until then.
     pending_connect: Option<Request>,
+    /// Rows fetched at a time, and seconds before a statement is stopped (R-SQL-18).
+    rows: u32,
+    timeout: u32,
 }
 
 impl SqlWindow {
@@ -112,6 +125,7 @@ impl SqlWindow {
         java: PathBuf,
         files: HelperFiles,
         user: &str,
+        scripts: &[editor::SavedScript],
     ) -> Self {
         Self {
             session: session.to_owned(),
@@ -123,11 +137,10 @@ impl SqlWindow {
             password: String::new(),
             runner: None,
             connected: None,
-            editor: String::new(),
-            selection: (0, 0),
+            scripts: editor::Scripts::restore(scripts),
             queue: VecDeque::new(),
             waiting: None,
-            view: None,
+            results: results::Results::default(),
             tab: Tab::Results,
             messages: Vec::new(),
             error_line: None,
@@ -136,9 +149,27 @@ impl SqlWindow {
             confirm: None,
             closing: Closing::Open,
             ran: Vec::new(),
-            note: None,
             pending_connect: None,
+            rows: protocol::FIRST_ROWS,
+            timeout: 0,
         }
+    }
+
+    /// Fetches `rows` at a time and stops a statement after `timeout` seconds (0: never).
+    pub const fn with_limits(mut self, rows: u32, timeout: u32) -> Self {
+        self.rows = rows;
+        self.timeout = timeout;
+        self
+    }
+
+    /// The scripts as the settings keep them, and a count that changes with them (R-SQL-20).
+    pub fn scripts(&self) -> (u64, Vec<editor::SavedScript>) {
+        (self.scripts.generation(), self.scripts.to_saved())
+    }
+
+    /// Changes to the scripts so far: when it moves on, [`SqlWindow::scripts`] is worth keeping.
+    pub const fn scripts_generation(&self) -> u64 {
+        self.scripts.generation()
     }
 
     /// The statements run since last asked, for the history (R-SQL-7).
@@ -163,7 +194,7 @@ impl SqlWindow {
         &mut self,
         ctx: &egui::Context,
         history: &[String],
-        saver: Option<&dyn FileSaver>,
+        saver: Option<&dyn SqlFiles>,
     ) -> bool {
         self.read_events();
         if self.closing == Closing::Closed {
@@ -197,7 +228,7 @@ impl SqlWindow {
         true
     }
 
-    fn ui(&mut self, ui: &mut Ui, history: &[String], saver: Option<&dyn FileSaver>) {
+    fn ui(&mut self, ui: &mut Ui, history: &[String], saver: Option<&dyn SqlFiles>) {
         let top = theme::bar(ui, egui::Margin::symmetric(12, 8));
         Panel::top("sql-top")
             .frame(top)
@@ -391,7 +422,7 @@ impl SqlWindow {
                         .on_hover_text(statement)
                         .clicked()
                     {
-                        statement.clone_into(&mut self.editor);
+                        self.scripts.append(statement);
                     }
                 }
             });
@@ -399,28 +430,10 @@ impl SqlWindow {
 
     // ---------------------------------------------------------------- writing and running
 
-    fn work(&mut self, ui: &mut Ui, saver: Option<&dyn FileSaver>) {
+    fn work(&mut self, ui: &mut Ui, saver: Option<&dyn SqlFiles>) {
         self.keys(ui);
         let height = (ui.available_height() * 0.38).clamp(90.0, 320.0);
-        ScrollArea::vertical()
-            .id_salt("sql-editor")
-            .max_height(height)
-            .min_scrolled_height(height)
-            .show(ui, |ui| {
-                let editor = TextEdit::multiline(&mut self.editor)
-                    .code_editor()
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(8)
-                    .hint_text("SELECT * FROM QSYS2.SYSTABLES FETCH FIRST 10 ROWS ONLY");
-                let output = editor.show(ui);
-                if let Some(range) = output.cursor_range {
-                    let (a, b) = (range.primary.index.0, range.secondary.index.0);
-                    self.selection = (
-                        byte_at(&self.editor, a.min(b)),
-                        byte_at(&self.editor, a.max(b)),
-                    );
-                }
-            });
+        self.scripts.show(ui, height, saver);
         ui.add_space(6.0);
         self.run_buttons(ui);
         if let Some(error) = &self.error_line {
@@ -445,7 +458,8 @@ impl SqlWindow {
             (
                 i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Enter),
                 i.consume_key(Modifiers::COMMAND, Key::Enter),
-                i.consume_key(Modifiers::NONE, Key::Escape),
+                // Esc closes the find bar first, when it is open.
+                !self.scripts.finding() && i.consume_key(Modifiers::NONE, Key::Escape),
             )
         });
         if all {
@@ -485,15 +499,16 @@ impl SqlWindow {
         if self.waiting.is_some() || !self.queue.is_empty() {
             return;
         }
-        let (start, end) = self.selection;
+        let (start, end) = self.scripts.selection();
+        let script = self.scripts.text();
         let chosen = if start < end {
-            self.editor
+            script
                 .get(start..end)
                 .map(str::trim)
                 .map(|s| s.trim_end_matches(';').trim().to_owned())
         } else {
-            text::statement_at(&self.editor, start)
-                .and_then(|r| self.editor.get(r))
+            text::statement_at(script, start)
+                .and_then(|r| script.get(r))
                 .map(str::to_owned)
         };
         if let Some(statement) = chosen.filter(|s| !s.is_empty()) {
@@ -507,9 +522,10 @@ impl SqlWindow {
         if self.waiting.is_some() || !self.queue.is_empty() {
             return;
         }
-        let statements: Vec<String> = text::statements(&self.editor)
+        let script = self.scripts.text();
+        let statements: Vec<String> = text::statements(script)
             .into_iter()
-            .filter_map(|r| self.editor.get(r).map(str::to_owned))
+            .filter_map(|r| script.get(r).map(str::to_owned))
             .collect();
         self.queue.extend(statements);
         self.next_statement();
@@ -532,12 +548,17 @@ impl SqlWindow {
 
     fn start(&mut self, statement: String) {
         self.error_line = None;
-        self.note = None;
-        let run = Request::Run {
-            sql: statement.clone(),
-            max_rows: protocol::FIRST_ROWS,
-        };
+        let run = self.run_request(&statement);
         self.send(run, Waiting::Run(statement));
+    }
+
+    /// The request that runs `statement`, with the rows at a time and the timeout (R-SQL-18).
+    fn run_request(&self, statement: &str) -> Request {
+        Request::Run {
+            sql: statement.to_owned(),
+            max_rows: self.rows,
+            timeout: self.timeout,
+        }
     }
 
     fn cancel(&mut self) {
@@ -558,78 +579,14 @@ impl SqlWindow {
 
     // ---------------------------------------------------------------- results
 
-    fn results(&mut self, ui: &mut Ui, saver: Option<&dyn FileSaver>) {
-        let Some(view) = &mut self.view else {
-            theme::hint(ui, "Run a query to see its rows here.");
-            return;
-        };
-        let mut fetch = false;
-        Panel::bottom("sql-grid-actions").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let shown = view.rows.len();
-                theme::hint(
-                    ui,
-                    format!(
-                        "{shown} rows{}",
-                        if view.cursor.is_some() {
-                            ", more to fetch"
-                        } else {
-                            ""
-                        }
-                    ),
-                );
-                if view.cursor.is_some()
-                    && ui
-                        .add_enabled(self.waiting.is_none(), egui::Button::new("Fetch more"))
-                        .clicked()
-                {
-                    fetch = true;
-                }
-                theme::button_row(ui, |ui| {
-                    if let Some(saver) = saver {
-                        let export = icons::button(icons::EXPORT, "Export…");
-                        if icons::add_named(ui, true, export, "Export…")
-                            .on_hover_text("All rows fetched, as CSV")
-                            .clicked()
-                        {
-                            self.note =
-                                Some(match saver.save("query.csv", view.csv().as_bytes()) {
-                                    Ok(Some(path)) => format!("Saved {path}"),
-                                    Ok(None) => String::new(),
-                                    Err(e) => format!("Not saved: {e}"),
-                                });
-                        }
-                    }
-                    let what = if view.selected_count() > 0 {
-                        "Copy rows"
-                    } else {
-                        "Copy all"
-                    };
-                    let copy = icons::button(icons::COPY, what);
-                    if icons::add_named(ui, true, copy, what)
-                        .on_hover_text(
-                            "As tab-separated text: it pastes into a spreadsheet as columns",
-                        )
-                        .clicked()
-                    {
-                        ui.ctx().copy_text(view.tsv());
-                        self.note = Some("Copied.".to_owned());
-                    }
-                    if let Some(note) = self.note.as_deref().filter(|n| !n.is_empty()) {
-                        theme::hint(ui, note);
-                    }
-                });
-            });
-        });
-        view.show(ui);
-        if fetch && let Some(cursor) = view.cursor {
-            self.send(
-                Request::Fetch {
-                    cursor,
-                    max_rows: protocol::FIRST_ROWS,
-                },
-                Waiting::Fetch,
-            );
+    fn results(&mut self, ui: &mut Ui, saver: Option<&dyn SqlFiles>) {
+        let idle = self.waiting.is_none();
+        if let Some(results::Ask::Fetch(cursor)) = self.results.show(ui, idle, saver) {
+            let fetch = Request::Fetch {
+                cursor,
+                max_rows: self.rows,
+            };
+            self.send(fetch, Waiting::Fetch(cursor));
         }
     }
 
@@ -674,15 +631,11 @@ impl SqlWindow {
             Waiting::Hello => self.on_hello(event),
             Waiting::Connect => self.on_connect(event),
             Waiting::Run(statement) => self.on_run(&statement, event),
-            Waiting::Fetch => match event
+            Waiting::Fetch(cursor) => match event
                 .result
                 .and_then(parley_core::sql::protocol::Answer::into_result::<MoreRows>)
             {
-                Ok(more) => {
-                    if let Some(view) = &mut self.view {
-                        view.append(more.rows, more.more);
-                    }
-                }
+                Ok(more) => self.results.append(cursor, more.rows, more.more),
                 Err(e) => self.fail(e.to_string()),
             },
             Waiting::Autocommit(on) => match event
@@ -781,7 +734,8 @@ impl SqlWindow {
                         if more { ", more to fetch" } else { "" }
                     ),
                 ));
-                self.view = Some(ResultView::new(columns, rows, more, cursor));
+                self.results
+                    .add(statement, ResultView::new(columns, rows, more, cursor));
                 self.tab = Tab::Results;
             }
             Ok(Outcome::Count { count }) => {
@@ -896,13 +850,6 @@ impl SqlWindow {
     }
 }
 
-/// The byte offset of character `index` in `text` (egui counts characters).
-fn byte_at(text: &str, index: usize) -> usize {
-    text.char_indices()
-        .nth(index)
-        .map_or(text.len(), |(byte, _)| byte)
-}
-
 #[cfg(test)]
 mod tests {
     use parley_core::sql::protocol::Answer;
@@ -920,6 +867,7 @@ mod tests {
             PathBuf::from("java"),
             HelperFiles::in_folder(std::path::Path::new("/none")),
             "usr",
+            &[],
         );
         w.stage = Stage::Ready;
         w
@@ -948,7 +896,7 @@ mod tests {
             &mut w,
             r#"{"id":1,"ok":{"kind":"rows","cursor":3,"columns":[{"name":"NAME","type":"VARCHAR","length":10,"scale":0,"nullable":true,"numeric":false}],"rows":[["æøå"],[null]],"more":true}}"#,
         );
-        let view = w.view.as_ref().expect("a grid");
+        let view = w.results.shown_view().expect("a grid");
         assert_eq!(view.rows.len(), 2);
         assert_eq!(view.cursor, Some(3), "more to fetch");
         assert_eq!(w.tab, Tab::Results);
@@ -998,8 +946,8 @@ mod tests {
     #[test]
     fn a_bulk_change_waits_for_confirmation_r_sql_9() {
         let mut w = window();
-        w.editor = "SELECT 1 FROM T; DELETE FROM T".to_owned();
-        w.selection = (w.editor.len(), w.editor.len());
+        let script = "SELECT 1 FROM T; DELETE FROM T";
+        w.scripts.set_text(script, script.len());
         w.run_current();
         let (statement, risk) = w.confirm.clone().expect("asked");
         assert_eq!(statement, "DELETE FROM T");
@@ -1010,7 +958,7 @@ mod tests {
     #[test]
     fn run_all_queues_every_statement_in_order_r_sql_7() {
         let mut w = window();
-        w.editor = "VALUES 1;\nVALUES 'æøå';\n".to_owned();
+        w.scripts.set_text("VALUES 1;\nVALUES 'æøå';\n", 0);
         w.run_all();
         // Without a helper nothing is sent; the first statement left the queue to be run.
         assert_eq!(w.queue, ["VALUES 'æøå'"]);
@@ -1040,6 +988,7 @@ mod tests {
             PathBuf::from("/no/such/java"),
             files,
             "usr",
+            &[],
         );
         "TopSecret9".clone_into(&mut w.password);
         w.connect(&egui::Context::default());
@@ -1051,8 +1000,8 @@ mod tests {
 
     #[test]
     fn character_positions_become_byte_offsets_r_sql_7() {
-        assert_eq!(byte_at("æøå;", 3), 6);
-        assert_eq!(byte_at("abc", 9), 3);
+        assert_eq!(editor::byte_at("æøå;", 3), 6);
+        assert_eq!(editor::byte_at("abc", 9), 3);
     }
 
     /// The window drawn alone, as in a test of the main window (embedded: kittest has one).
@@ -1112,5 +1061,83 @@ mod tests {
         let run = harness.get_by_label("Run").rect();
         harness.run_steps(5);
         assert_eq!(harness.get_by_label("Run").rect(), run);
+    }
+
+    #[test]
+    fn the_rows_at_a_time_and_the_timeout_go_with_each_statement_r_sql_18() {
+        let w = window().with_limits(250, 15);
+        assert_eq!(
+            w.run_request("VALUES 1"),
+            Request::Run {
+                sql: "VALUES 1".to_owned(),
+                max_rows: 250,
+                timeout: 15,
+            }
+        );
+        let plain = window();
+        assert_eq!(
+            plain.run_request("VALUES 1"),
+            Request::Run {
+                sql: "VALUES 1".to_owned(),
+                max_rows: protocol::FIRST_ROWS,
+                timeout: 0,
+            },
+            "the defaults: 1000 rows, no timeout"
+        );
+    }
+
+    #[test]
+    fn enter_on_a_selected_row_shows_its_values_one_under_another_r_sql_15() {
+        use egui_kittest::kittest::Queryable;
+        let mut w = window();
+        running(&mut w, "SELECT NAME FROM T");
+        answer(
+            &mut w,
+            r#"{"id":1,"ok":{"kind":"rows","cursor":3,"columns":[{"name":"NAME","type":"VARCHAR","length":10,"scale":0,"nullable":true,"numeric":false},{"name":"NOTE","type":"VARCHAR","length":10,"scale":0,"nullable":true,"numeric":false}],"rows":[["æøå",null],["b","c"]],"more":false}}"#,
+        );
+        let mut harness = drawn(w, Vec::new());
+        assert!(harness.query_by_label_contains("Row 1 of").is_none());
+        harness.get_by_label("1").click();
+        harness.run();
+        let selected = harness
+            .state()
+            .results
+            .shown_view()
+            .map(ResultView::selected_count);
+        assert_eq!(selected, Some(1), "a click on the row's number selects it");
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        harness.get_by_label("Row 1 of 2");
+        harness.get_by_label("Copy NAME");
+        harness.get_by_label("Next row").click();
+        harness.run();
+        harness.get_by_label("Row 2 of 2");
+    }
+
+    #[test]
+    fn ctrl_f_opens_the_find_bar_and_esc_closes_it_without_cancelling_r_sql_23() {
+        use egui_kittest::kittest::Queryable;
+        let mut harness = drawn(window(), Vec::new());
+        assert!(harness.query_by_label("Match case").is_none());
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::F);
+        harness.run();
+        harness.get_by_label("Match case");
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        assert!(harness.query_by_label("Match case").is_none());
+        assert!(!harness.state().scripts.finding());
+    }
+
+    #[test]
+    fn ctrl_t_adds_a_script_tab_r_sql_20() {
+        use egui_kittest::kittest::Queryable;
+        let mut harness = drawn(window(), Vec::new());
+        harness.get_by_label("Script 1");
+        assert!(harness.query_by_label("Script 2").is_none());
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::T);
+        harness.run();
+        harness.get_by_label("Script 2");
+        let (_, saved) = harness.state().scripts();
+        assert_eq!(saved.len(), 2, "both kept for the session");
     }
 }

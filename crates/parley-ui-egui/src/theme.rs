@@ -56,6 +56,10 @@ pub struct Palette {
     pub ok: Color32,
     pub fail: Color32,
     pub warning_text: Color32,
+    /// Code colours, as Tortuga's (D12): amber (numbers), blue (keywords), purple (names).
+    pub redirect: Color32,
+    pub blue: Color32,
+    pub purple: Color32,
 }
 
 const LIGHT: Palette = Palette {
@@ -71,6 +75,9 @@ const LIGHT: Palette = Palette {
     ok: Color32::from_rgb(0x05, 0x96, 0x69),
     fail: Color32::from_rgb(0xdc, 0x26, 0x26),
     warning_text: Color32::from_rgb(0x92, 0x40, 0x0e),
+    redirect: Color32::from_rgb(0xd9, 0x77, 0x06),
+    blue: Color32::from_rgb(0x25, 0x63, 0xeb),
+    purple: Color32::from_rgb(0x93, 0x33, 0xea),
 };
 
 const DARK: Palette = Palette {
@@ -86,6 +93,9 @@ const DARK: Palette = Palette {
     ok: Color32::from_rgb(0x34, 0xd3, 0x99),
     fail: Color32::from_rgb(0xf8, 0x71, 0x71),
     warning_text: Color32::from_rgb(0xfc, 0xd3, 0x4d),
+    redirect: Color32::from_rgb(0xfb, 0xbf, 0x24),
+    blue: Color32::from_rgb(0x60, 0xa5, 0xfa),
+    purple: Color32::from_rgb(0xc0, 0x84, 0xfc),
 };
 
 pub fn palette(ui: &Ui) -> Palette {
@@ -388,6 +398,57 @@ pub fn key_parts(keys: &str) -> Vec<&str> {
         Some(rest) => rest.split('+').chain(["+"]).collect(),
         None => keys.split('+').collect(),
     }
+}
+
+/// Underlined tabs on a full-width rule, as Tortuga's (D12). `items` are (value, label,
+/// optional badge such as a count).
+pub fn tabs<T: PartialEq + Copy, S: AsRef<str>>(
+    ui: &mut Ui,
+    current: &mut T,
+    items: &[(T, S, Option<String>)],
+) {
+    let p = palette(ui);
+    let mut underlines = Vec::new();
+    let row = ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 20.0;
+        for (value, label, badge) in items {
+            let selected = *current == *value;
+            let color = if selected { p.text } else { p.muted };
+            // One real button per tab, so clicks work everywhere (also inside dialogs).
+            let label = label.as_ref();
+            let mut atoms = vec![egui::Atom::from(semibold(label).color(color))];
+            if let Some(b) = badge {
+                let c = if selected { p.accent } else { p.muted };
+                atoms.push(egui::Atom::from(semibold(b).size(10.5).color(c)));
+            }
+            let atoms: egui::Atoms<'_> = atoms.into_iter().collect();
+            let response = ui.add(egui::Button::new(atoms).frame(false).gap(5.0));
+            let name = match badge {
+                Some(b) => format!("{label} ({b})"),
+                None => label.to_owned(),
+            };
+            response.widget_info(|| WidgetInfo::selected(Role::Tab, true, selected, &name));
+            if selected {
+                underlines.push((response.rect.x_range(), p.accent));
+            } else if response.hovered() {
+                underlines.push((response.rect.x_range(), p.muted.gamma_multiply(0.5)));
+            }
+            if response.clicked() {
+                *current = *value;
+            }
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+            }
+        }
+    });
+    let y = row.response.rect.bottom() + 6.0;
+    let painter = ui.painter();
+    let full = ui.max_rect().x_range();
+    painter.hline(full, y, Stroke::new(1.0, p.border));
+    for (x, color) in underlines {
+        painter.hline(x, y - 0.5, Stroke::new(2.0, color));
+    }
+    ui.add_space(12.0);
 }
 
 /// Adds a text field of exactly `width`. Inside a [`egui::Grid`] a plain

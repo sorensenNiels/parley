@@ -47,8 +47,14 @@ pub struct Settings {
     pub keyboard_maps: Vec<KeyMap>,
     /// The Java the SQL add-on runs its helper with; empty: `JAVA_HOME`, then `PATH` (R-SQL-12).
     pub java_path: String,
+    /// Rows the SQL window fetches at first and with each Fetch more (R-SQL-18).
+    pub sql_rows: u32,
+    /// Seconds before the SQL helper stops a statement; 0 for none (R-SQL-18).
+    pub sql_timeout: u32,
     /// The statements run in the SQL window, by saved session, oldest first (R-SQL-7).
     pub sql_history: std::collections::BTreeMap<String, Vec<String>>,
+    /// The SQL window's scripts, by saved session (R-SQL-20).
+    pub sql_scripts: std::collections::BTreeMap<String, Vec<crate::sql::editor::SavedScript>>,
 }
 
 impl Default for Settings {
@@ -62,7 +68,10 @@ impl Default for Settings {
             addons: AddOnSettings::default(),
             keyboard_maps: Vec::new(),
             java_path: String::new(),
+            sql_rows: parley_core::sql::protocol::FIRST_ROWS,
+            sql_timeout: 0,
             sql_history: std::collections::BTreeMap::new(),
+            sql_scripts: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -129,6 +138,8 @@ impl Page {
             Self::AddOns => {
                 settings.addons = defaults.addons;
                 settings.java_path = defaults.java_path;
+                settings.sql_rows = defaults.sql_rows;
+                settings.sql_timeout = defaults.sql_timeout;
             }
             Self::About => settings.check_for_updates = defaults.check_for_updates,
         }
@@ -334,6 +345,26 @@ impl Dialog {
                     let edit =
                         egui::TextEdit::singleline(&mut settings.java_path).hint_text("Automatic");
                     theme::sized_edit(ui, 260.0, edit).labelled_by(name_id);
+                },
+            );
+            rows.row(
+                "Rows at a time",
+                Some("Fetched at first, and by each Fetch more."),
+                |ui, name_id| {
+                    let value = egui::DragValue::new(&mut settings.sql_rows)
+                        .range(100..=100_000)
+                        .speed(50);
+                    ui.add(value).labelled_by(name_id);
+                },
+            );
+            rows.row(
+                "Query timeout",
+                Some("Seconds before a statement is stopped; 0 for none."),
+                |ui, name_id| {
+                    let value = egui::DragValue::new(&mut settings.sql_timeout)
+                        .range(0..=86_400)
+                        .suffix(" s");
+                    ui.add(value).labelled_by(name_id);
                 },
             );
             rows.fact("Found", |ui| match &found {

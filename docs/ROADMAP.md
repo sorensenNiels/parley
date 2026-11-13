@@ -32,6 +32,7 @@ modern take on what surrounds the screen: sessions, keyboard mapping, copy and p
 | Phase 3: keyboard maps and macros | Done (2026-11-12): verified on Windows, macOS and Linux (FEATURES.md): R-DS-5, keyboard maps (R-KEY-2), macros (R-KEY-3, R-KEY-4), add-ons (R-ADD-1, R-ADD-2), auto sign-on removed (R-NET-7, D16). Then the macro editor (R-KEY-5) Stop in the status bar (R-KEY-6) and import and export of macros (R-KEY-7), built, waiting for a check in the running app. |
 | Phase 4: a modern look | Built (2026-11-12), waiting for a check in the running app on each OS (FEATURES.md, In progress): icons (R-UI-13, D17), an interactive status bar (R-UI-14), one header with the session (R-UI-15), the 5250 keys in a Keys menu in the status bar (R-UI-16), a shortcut sheet (R-UI-17). |
 | Phase 5: SQL against the host | Built (2026-11-13), waiting for the owner's check against their IBM i: the SQL window over a Java helper with IBM's JTOpen (D20): R-SQL-3..13. Built first: R-NET-8, R-SQL-1 and R-SQL-2 (the native sign-on, kept for the probe), verified on the owner's IBM i. |
+| Phase 6: the SQL window, deeper | Built (2026-11-13), waiting for the owner's use: more from results (R-SQL-14..16, R-SQL-18; R-SQL-17 dropped) and editor and scripts (R-SQL-19..23). |
 
 ## 4. Phases
 
@@ -88,6 +89,18 @@ Java (such as IDEA-25's message queue); the SQL window does not use them.
 Out of scope here: IBM i Services views (IDEA-25), data transfer (IDEA-26), stored procedure result sets beyond the
 first, LOB contents (shown as "(LOB)"), bundling a Java runtime (Java is installed by the user, R-SQL-12).
 
+### Phase 6 — The SQL window, deeper (built)
+
+The owner chose two areas of the SQL add-on (2026-11-13), built in this order:
+1. **More from results:** a tab per query (R-SQL-14), a row's values one under another (R-SQL-15), filtering and
+   resizing in the grid (R-SQL-16), the rows fetched at a time and a query timeout as settings (R-SQL-18).
+   *R-SQL-17, export to Excel, was dropped (the owner, 2026-11-13): CSV only, no new dependency.*
+2. **Editor and scripts:** SQL in colour (R-SQL-19), several scripts in tabs (R-SQL-20), open and save `.sql`
+   files (R-SQL-21), formatting (R-SQL-22), find and replace (R-SQL-23).
+
+Not here: the schema browser and completion, the IBM i tools (library list, CL, job log) and the stand-alone
+client (IDEA-28), for later phases.
+
 ### Later (unordered, to be planned)
 
 Printer sessions (IDEA-18), SQL against the session's host (IDEA-13); see [IDEAS.md](IDEAS.md).
@@ -114,6 +127,15 @@ ones come from [IDEAS.md](IDEAS.md). Areas: `NET` connection and telnet, `DS` th
 | R-SQL-8 | **Results** (2026-11-13, draft). Each query's rows in a grid: column names with their types on hover, NULL shown apart from an empty string, numbers right-aligned, dates in ISO form. At most 1000 rows are fetched at first ("1000 rows shown · Fetch more"); a click on a column heading sorts the rows fetched. Copy a cell, the selected rows or all rows as tab-separated text (pastes as columns in a spreadsheet); Export… writes CSV (UTF-8) through the file window. Row counts, SQLSTATE and messages go to a Messages tab, an error also as a red line under the editor. | 5 |
 | R-SQL-9 | **A guard for changes** (2026-11-13, draft). Before running `DELETE` or `UPDATE` without `WHERE`, or `DROP`, `TRUNCATE` or `ALTER`, the window names the statement and asks to confirm. The check reads the statement's first words and the presence of `WHERE` outside strings and comments; it only guards against slips, and says so. | 5 |
 | R-SQL-10 | **SQL is an add-on** (2026-11-13, draft; D15). The SQL window is the add-on "SQL" in Settings ▸ Add-ons, off by default (the owner, 2026-11-13: only those who want SQL see it and need Java); while it is off, Tools ▸ SQL… and the `sql` function are not there, Java is never looked for and no helper runs (D20). | 5 |
+| R-SQL-14 | **A result tab per query** (2026-11-13, draft). Each query run gets its own tab above the grid, named by its first words and row count ("SELECT * FROM ORDERS · 1000"); the newest is shown. Run all opens a tab per query it runs. Up to 10 tabs are kept, the oldest closing first; a tab closes with its ×, and each keeps its sort, filter, selection and Fetch more. | 6 |
+| R-SQL-15 | **A row's values one under another** (2026-11-13, draft). Double-clicking a row, or Enter on a selected one, shows its columns in a panel beside the grid: name, type, and the whole value wrapped (NULL apart from empty), each with a Copy button; the arrows step to the row above or below. | 6 |
+| R-SQL-16 | **Filter and resize the grid** (2026-11-13, draft). A filter field above the grid keeps the fetched rows that hold its text in any column, ignoring case, and says how many of how many are shown; Copy and Export take the rows shown. Dragging a column heading's right edge changes its width; double-clicking the edge fits it to the values shown. | 6 |
+| R-SQL-18 | **Rows at a time and a query timeout** (2026-11-13, draft). Settings ▸ Add-ons ▸ SQL: the rows fetched at first and by each Fetch more (default 1000, 100 to 100 000), and a query timeout in seconds (default none), after which the helper cancels the statement and says so. | 6 |
+| R-SQL-19 | **SQL in colour** (2026-11-13, draft). The editor shows keywords, strings, delimited names, numbers and comments in colours from the theme, in light and dark, as the user types, using the same scanner as statement splitting (`sql::text`); a large script stays responsive. | 6 |
+| R-SQL-20 | **Several scripts in tabs** (2026-11-13, draft). The editor holds several scripts, each in a tab named by its file or "Script n"; New tab (Ctrl+T), close (Ctrl+W, asking when a file's changes are not saved), Ctrl+Tab between them. Run works in the tab shown. The tabs, saved or not, come back for the same saved session the next time (kept with the settings, as the history; the owner, 2026-11-13). | 6 |
+| R-SQL-21 | **Open and save SQL files** (2026-11-13, draft). Open… (Ctrl+O), Save (Ctrl+S) and Save as… through the system's file window, UTF-8 text with the `.sql` extension; the tab shows the file's name and a dot while changes are not saved; opening a file that is open already shows its tab. | 6 |
+| R-SQL-22 | **Format SQL** (2026-11-13, draft). Ctrl+Shift+F formats the selection, or the statement under the cursor: keywords in capitals, each main clause (SELECT, FROM, WHERE, GROUP BY, ORDER BY, …) on its own line, the lists under it indented, strings, names and comments left exactly as written. A pure function in `parley_core::sql::text`, tested on statements with `æøå`, comments and nested selects. | 6 |
+| R-SQL-23 | **Find and replace** (2026-11-13, draft). Ctrl+F opens a find bar over the editor (next, previous, match case), Ctrl+H adds replace and replace all; Esc closes it. | 6 |
 | R-SQL-1 | **Host-server framing and the port mapper** (2026-11-13; D19; built, kept for the probe and later host-server features, not used by the SQL window, D20). `parley-core` builds and reads the host servers' records: the 20-byte header (length, header id, server id, CS instance, correlation, template length, request/reply id), the template, and the parameters as length/code point/data. The port mapper (449) is asked where `as-signon` and `as-database` listen (`-s` with TLS); when it cannot be reached, the usual ports are used (8476/8471, 9476/9471). A record that is short, longer than its data, or has a parameter running past its end is an error, never a panic. Tested with the replies `make probe-sql` recorded (R-NET-8). | 5 |
 | R-SQL-2 | **Sign-on** (2026-11-13; D19; built and verified with DES on the owner's IBM i, kept for the probe, not used by the SQL window, D20). Exchange of attributes, then the sign-on request with a password substitute of the kind the host's password level asks for: levels 0–1 (DES) and 2–3 (SHA); another level is an error that names it. The password is a `Password` (hidden `Debug`), is turned into the substitute and dropped, and never reaches an error, a log or a trace. The host's answers are named: wrong password, user disabled, password expired (change it in a 5250 session), user unknown. The algorithms come from public documentation; where none is found, that is reported to the owner before anything is built from other sources. | 5 |
 | R-NET-9 | **Record a sign-on and a query** (2026-11-13; for R-SQL-2 tests. *The sign-on part is built and was run on the owner's IBM i; the query part is dropped with D20, which needs no recorded database traffic.*) `make probe-sql HOST=… ARGS="--sign-on USER [--tls]"` asks for the password on the terminal (not echoed), signs on, runs `VALUES CURRENT SERVER` and a small `SELECT` from `QSYS2.SYSTABLES`, prints the results, and writes what passed both ways to a file with the password substitute and seeds blanked. Only the owner runs it, on systems they have an account on; Claude never does (CLAUDE.md). | 5 |
@@ -162,4 +184,4 @@ Ideas that might become requirements later are in [IDEAS.md](IDEAS.md) (`IDEA-n`
 - A choice that future work must respect becomes a decision in §7.
 - An idea is not a plan: it goes in [IDEAS.md](IDEAS.md) until it is picked, then becomes requirements here.
 
-Next free IDs (removed rows keep their numbers): `R-P-5` · `R-NET-10` · `R-DS-6` · `R-EBC-2` · `R-KEY-9` · `R-UI-18` · `R-ADD-3` · `R-SQL-14` · `R-NF-2` · `D21` (ideas: last line of IDEAS.md).
+Next free IDs (removed rows keep their numbers): `R-P-5` · `R-NET-10` · `R-DS-6` · `R-EBC-2` · `R-KEY-9` · `R-UI-18` · `R-ADD-3` · `R-SQL-24` · `R-NF-2` · `D21` (ideas: last line of IDEAS.md).

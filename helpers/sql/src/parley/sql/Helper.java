@@ -24,6 +24,7 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.SQLTimeoutException;
 import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
@@ -149,7 +150,7 @@ public final class Helper {
             case "connect":
                 return connect(request);
             case "run":
-                return run(text(request, "sql"), maxRows(request));
+                return run(text(request, "sql"), maxRows(request), seconds(request, "timeout"));
             case "fetch":
                 return fetch(number(request, "cursor"), maxRows(request));
             case "close_cursor":
@@ -208,6 +209,9 @@ public final class Helper {
         properties.setProperty("errors", "full");
         properties.setProperty("secure", tls ? "true" : "false");
         properties.setProperty("block size", "512");
+        // A query timeout cancels the statement after that long, rather than JTOpen's default
+        // of letting the IBM i refuse a query by its estimated time (R-SQL-18).
+        properties.setProperty("query timeout mechanism", "cancel");
         // Seconds to give up connecting; JTOpen's own default waits minutes for a silent host.
         properties.setProperty("login timeout", String.valueOf(LOGIN_TIMEOUT));
         request.remove("password");
@@ -240,15 +244,21 @@ public final class Helper {
         }
     }
 
-    private Map<String, Object> run(String sql, int maxRows) throws SQLException {
+    private Map<String, Object> run(String sql, int maxRows, int timeout) throws SQLException {
         Statement statement = connected().createStatement();
         running = statement;
         boolean query;
         try {
             statement.setFetchSize(BLOCK);
+            statement.setQueryTimeout(timeout); // 0: none (R-SQL-18)
             query = statement.execute(sql);
         } catch (SQLException e) {
             statement.close();
+            if (timeout > 0 && (e instanceof SQLTimeoutException || "57014".equals(e.getSQLState()))) {
+                throw new SQLException("The statement ran longer than " + timeout
+                        + " seconds, so it was stopped (" + e.getMessage() + ")", e.getSQLState(),
+                        e.getErrorCode(), e);
+            }
             throw e;
         } finally {
             running = null;
@@ -412,6 +422,13 @@ public final class Helper {
             throw new IllegalArgumentException("the request needs \"" + name + "\" as a number");
         }
         return (Long) value;
+    }
+
+    /** A number of seconds in the request, 0 when absent; at most a day. */
+    private static int seconds(Map<String, Object> request, String name) {
+        Object value = request.get(name);
+        long seconds = value instanceof Long ? (Long) value : 0;
+        return (int) Math.max(0, Math.min(seconds, 86_400));
     }
 
     private static int maxRows(Map<String, Object> request) {

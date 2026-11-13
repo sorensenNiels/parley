@@ -47,6 +47,23 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
   later. **Automated:** versions read from `java -version` (1.8, 11, 21, early access); with SQL on, Add-ons shows
   the Java field, what was found and the helper's folder, and hides them again when off; the dialog keeps its place;
   without the helper or with a Java that does not run, Tools ▸ SQL… explains and links to Eclipse Temurin.
+- **R-SQL-14..16, R-SQL-18** (2026-11-13): more from results, built (`sql/results`, `sql/grid`). A tab per query
+  (up to 10, the oldest closing first, each with its sort, filter and Fetch more); a row's values one under another
+  beside the grid (double-click, or Enter on one selected row; Next and Previous); a filter over the rows fetched
+  ("n of m rows shown", Copy and Export take the rows shown); column widths dragged at a heading's edge, fitted with
+  a double-click; rows at a time and a query timeout in Settings, the timeout as JTOpen's `cancel` mechanism.
+  **Automated:** tabs (newest shown, ten kept, fetch into the right tab, closing), filter with `æøå` and a hidden
+  selection, the detail stepping and stopping at the ends, widths fitted within limits, limits in each request; drawn:
+  a row's number selects it and Enter shows "Row 1 of 2". Two bugs found by these tests: the row's double-click area
+  covered its number (no selection), and a focused number took Enter as a click. **Left:** the owner's use.
+- **R-SQL-19..23** (2026-11-13): the editor, built (`sql/editor`, `sql::text::highlight` and `format`). Keywords,
+  strings, names, numbers and comments in Tortuga's code colours (light and dark); scripts in tabs kept per saved
+  session, with a dot when changed and a question before closing one; Open…, Save, Save as… through the file window
+  (UTF-8 `.sql`); Format (Ctrl+Shift+F) on the selection or the statement under the cursor; find (Ctrl+F) and
+  replace (Ctrl+H), Esc closing the bar before it cancels a statement. **Automated:** highlighting (strings,
+  comments and names are never keywords), formatting (clauses, AND/OR, joins, nested selects, kept strings and
+  comments, formatting twice changes nothing), find ignoring case for `ÆØÅ`, replace all, scripts kept and restored
+  with whether they changed, closing asks only when changed; drawn: Ctrl+F and Esc, Ctrl+T. **Left:** the owner's use.
 - **R-SQL-6..10** (2026-11-13): the SQL window, built (`sql`, `sql/grid` in the UI; `sql::text` and
   `sql::runner` in the engine). Its own OS window (egui viewport); sign-on asked each time, the password taken out of
   its field at once; Run (selection or statement under the cursor), Run all, Cancel; results in a grid (numbers

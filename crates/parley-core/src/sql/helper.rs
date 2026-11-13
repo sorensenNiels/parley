@@ -245,6 +245,7 @@ mod tests {
         let run = Request::Run {
             sql: "VALUES 1".to_owned(),
             max_rows: 10,
+            timeout: 0,
         };
         let answer = helper.call(&run).expect("answered").expect("an answer");
         assert!(answer.outcome.is_err());

@@ -806,6 +806,7 @@ fn run_statement(
     let run = Request::Run {
         sql: statement.to_owned(),
         max_rows,
+        timeout: 0,
     };
     let (cursor, columns, mut rows, mut more) = match call::<Outcome>(helper, &run) {
         Ok(Outcome::Count { count }) => {

@@ -19,9 +19,11 @@ pub const FIRST_ROWS: u32 = 1000;
 pub enum Request {
     Hello,
     Connect(Connect),
+    /// `timeout`: seconds before the helper cancels it; 0 for none (R-SQL-18).
     Run {
         sql: String,
         max_rows: u32,
+        timeout: u32,
     },
     Fetch {
         cursor: u64,
@@ -80,9 +82,14 @@ impl Request {
                 put("ca_file", c.ca_file.clone().into());
                 "connect"
             }
-            Self::Run { sql, max_rows } => {
+            Self::Run {
+                sql,
+                max_rows,
+                timeout,
+            } => {
                 put("sql", sql.clone().into());
                 put("max_rows", (*max_rows).into());
+                put("timeout", (*timeout).into());
                 "run"
             }
             Self::Fetch { cursor, max_rows } => {
@@ -249,6 +256,7 @@ mod tests {
         let run = Request::Run {
             sql: "SELECT 'æøå' FROM \"T\"\n".to_owned(),
             max_rows: 1000,
+            timeout: 30,
         };
         let line = run.line(3);
         assert!(!line.contains('\n'), "one line: {line}");
@@ -256,6 +264,7 @@ mod tests {
         assert_eq!(value["op"], "run");
         assert_eq!(value["id"], 3);
         assert_eq!(value["sql"], "SELECT 'æøå' FROM \"T\"\n");
+        assert_eq!(value["timeout"], 30);
         let cancel: Value = serde_json::from_str(&Request::Cancel.line(9)).expect("JSON");
         assert_eq!(
             cancel,

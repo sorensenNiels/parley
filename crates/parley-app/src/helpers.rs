@@ -67,13 +67,13 @@ mod tests {
     }
 }
 
-/// Saves the SQL window's exports through the system's file window (R-SQL-8), as macro export
-/// does (rfd, GTK 3 on Linux).
+/// The SQL window's files through the system's file window (R-SQL-8, R-SQL-21), as macro
+/// import and export (rfd, GTK 3 on Linux).
 #[derive(Debug)]
-pub struct CsvSaver;
+pub struct SqlFileWindow;
 
-impl parley_ui_egui::FileSaver for CsvSaver {
-    fn save(&self, suggested: &str, bytes: &[u8]) -> Result<Option<String>, String> {
+impl parley_ui_egui::SqlFiles for SqlFileWindow {
+    fn export_csv(&self, suggested: &str, bytes: &[u8]) -> Result<Option<String>, String> {
         let Some(path) = rfd::FileDialog::new()
             .set_title("Export rows")
             .add_filter("CSV", &["csv"])
@@ -83,6 +83,42 @@ impl parley_ui_egui::FileSaver for CsvSaver {
             return Ok(None);
         };
         std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(Some(path.display().to_string()))
+    }
+
+    fn open_script(&self) -> Result<Option<(String, String)>, String> {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Open SQL script")
+            .add_filter("SQL", &["sql"])
+            .pick_file()
+        else {
+            return Ok(None);
+        };
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        let text = String::from_utf8(bytes)
+            .map_err(|_| format!("{} is not UTF-8 text", path.display()))?;
+        Ok(Some((path.display().to_string(), text)))
+    }
+
+    fn save_script(
+        &self,
+        path: Option<&str>,
+        suggested: &str,
+        text: &str,
+    ) -> Result<Option<String>, String> {
+        let path = match path {
+            Some(path) => std::path::PathBuf::from(path),
+            None => match rfd::FileDialog::new()
+                .set_title("Save SQL script")
+                .add_filter("SQL", &["sql"])
+                .set_file_name(suggested)
+                .save_file()
+            {
+                Some(path) => path,
+                None => return Ok(None),
+            },
+        };
+        std::fs::write(&path, text).map_err(|e| e.to_string())?;
         Ok(Some(path.display().to_string()))
     }
 }

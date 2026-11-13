@@ -33,7 +33,8 @@ use menu::Action;
 pub use profile::Profile;
 use sessions::{Editor, Outcome};
 pub use settings::{Settings, Theme};
-pub use sql::FileSaver;
+pub use sql::SqlFiles;
+pub use sql::editor::SavedScript;
 pub use theme::Density;
 pub use updates::Checker;
 
@@ -89,8 +90,10 @@ pub struct ParleyUi {
     sql_users: std::collections::BTreeMap<String, String>,
     /// Why the SQL window cannot open (no Java, no helper), while that is shown (R-SQL-12).
     sql_notice: Option<String>,
-    /// Saves an exported result where the operator chooses (R-SQL-8).
-    file_saver: Option<Box<dyn sql::FileSaver>>,
+    /// The file window for exports and scripts (R-SQL-8, R-SQL-21).
+    file_saver: Option<Box<dyn sql::SqlFiles>>,
+    /// The SQL window's scripts as last kept in the settings (R-SQL-20).
+    sql_scripts_kept: u64,
 }
 
 impl Default for ParleyUi {
@@ -131,6 +134,7 @@ impl ParleyUi {
             sql_users: std::collections::BTreeMap::new(),
             sql_notice: None,
             file_saver: None,
+            sql_scripts_kept: 0,
         }
     }
 
@@ -149,8 +153,8 @@ impl ParleyUi {
         self.logo = menu::Logo::new(image);
     }
 
-    /// How the SQL window's Export… saves a file (R-SQL-8); without one, there is no Export….
-    pub fn set_file_saver(&mut self, saver: Box<dyn sql::FileSaver>) {
+    /// How the SQL window reaches files (R-SQL-8, R-SQL-21); without it, no Export or Open….
+    pub fn set_file_saver(&mut self, saver: Box<dyn sql::SqlFiles>) {
         self.file_saver = Some(saver);
     }
 
@@ -626,13 +630,23 @@ impl ParleyUi {
         match parley_core::sql::java::find(configured.as_deref()) {
             Ok(java) => {
                 let user = self.sql_users.get(&profile.name).map_or("", String::as_str);
-                self.sql_window = Some(sql::SqlWindow::open(
-                    &profile.name,
-                    &profile.config,
-                    java.path,
-                    parley_core::sql::helper::HelperFiles::in_folder(folder),
-                    user,
-                ));
+                let scripts = self
+                    .settings
+                    .sql_scripts
+                    .get(&profile.name)
+                    .cloned()
+                    .unwrap_or_default();
+                self.sql_window = Some(
+                    sql::SqlWindow::open(
+                        &profile.name,
+                        &profile.config,
+                        java.path,
+                        parley_core::sql::helper::HelperFiles::in_folder(folder),
+                        user,
+                        &scripts,
+                    )
+                    .with_limits(self.settings.sql_rows, self.settings.sql_timeout),
+                );
             }
             Err(e) => self.sql_notice = Some(e.to_string()),
         }
@@ -657,6 +671,12 @@ impl ParleyUi {
             if !window.user.trim().is_empty() {
                 self.sql_users
                     .insert(session.clone(), window.user.trim().to_owned());
+            }
+            // The scripts, kept when they changed (R-SQL-20).
+            if window.scripts_generation() != self.sql_scripts_kept {
+                let (generation, scripts) = window.scripts();
+                self.sql_scripts_kept = generation;
+                self.settings.sql_scripts.insert(session.clone(), scripts);
             }
             add_to_history(self.settings.sql_history.entry(session).or_default(), ran);
             if !open {

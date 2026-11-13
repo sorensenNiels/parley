@@ -1,7 +1,9 @@
-//! A query's rows in a grid (R-SQL-8), drawn as Tortuga draws its tables: a header row, then a
-//! row per line in fixed-width cells, only the visible rows laid out. Numbers right-aligned,
-//! NULL shown apart from an empty string; a click on a heading sorts the rows fetched, a click
-//! on a row's number selects it for copying.
+//! A query's rows in a grid (R-SQL-8, R-SQL-16), drawn as Tortuga draws its tables: a header
+//! row, then a row per line in fixed-width cells, only the visible rows laid out. Numbers
+//! right-aligned, NULL shown apart from an empty string. A click on a heading sorts the rows
+//! fetched, dragging its right edge resizes the column (a double-click fits it), a click on a
+//! row's number selects it, a double-click on a row shows its values one under another
+//! (R-SQL-15). A filter keeps the rows that hold its text.
 
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
@@ -13,52 +15,72 @@ use crate::{icons, theme};
 
 const ROW_HEIGHT: f32 = 20.0;
 const NUMBER_WIDTH: f32 = 52.0;
+const MIN_WIDTH: f32 = 40.0;
+const MAX_FIT: f32 = 420.0;
 
 /// A query's result as the window shows it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResultView {
     pub columns: Vec<Column>,
     pub rows: Vec<Row>,
     /// Where more rows come from, while there are more.
     pub cursor: Option<u64>,
-    /// The rows in the order shown: indices into `rows`.
-    order: Vec<usize>,
+    /// Every row in sort order: indices into `rows`.
+    sorted: Vec<usize>,
+    /// The rows shown: `sorted` that pass the filter.
+    visible: Vec<usize>,
     /// The column sorted on, and whether ascending.
     sort: Option<(usize, bool)>,
     /// Selected rows, as indices into `rows`.
     selected: BTreeSet<usize>,
+    /// Text a row must hold to be shown, in any column, ignoring case (R-SQL-16).
+    pub filter: String,
+    /// The filter `visible` was made for.
+    filtered_for: String,
+    widths: Vec<f32>,
+    /// The row shown one value under another (R-SQL-15).
+    pub detail: Option<usize>,
 }
 
 impl ResultView {
     pub fn new(columns: Vec<Column>, rows: Vec<Row>, more: bool, cursor: u64) -> Self {
-        let order = (0..rows.len()).collect();
-        Self {
+        let sorted: Vec<usize> = (0..rows.len()).collect();
+        let mut view = Self {
+            visible: sorted.clone(),
+            sorted,
             columns,
             rows,
             cursor: more.then_some(cursor),
-            order,
             sort: None,
             selected: BTreeSet::new(),
-        }
+            filter: String::new(),
+            filtered_for: String::new(),
+            widths: Vec::new(),
+            detail: None,
+        };
+        view.widths = (0..view.columns.len()).map(|c| view.fit(c)).collect();
+        view
     }
 
-    /// Rows from "Fetch more"; the sort, if any, takes them in.
+    /// Rows from "Fetch more"; the sort and the filter take them in.
     pub fn append(&mut self, rows: Vec<Row>, more: bool) {
         let start = self.rows.len();
         self.rows.extend(rows);
-        self.order.extend(start..self.rows.len());
+        self.sorted.extend(start..self.rows.len());
         if !more {
             self.cursor = None;
         }
         if let Some((column, ascending)) = self.sort {
             self.sort_rows(column, ascending);
         }
+        self.refilter();
     }
 
     /// A click on column `column`'s heading: ascending, then descending.
     pub fn sort_by(&mut self, column: usize) {
         let ascending = !matches!(self.sort, Some((c, true)) if c == column);
         self.sort_rows(column, ascending);
+        self.refilter();
     }
 
     fn sort_rows(&mut self, column: usize, ascending: bool) {
@@ -69,19 +91,48 @@ impl ResultView {
                 .and_then(|r| r.get(column))
                 .and_then(Option::as_deref)
         };
-        self.order.sort_by(|&a, &b| {
+        self.sorted.sort_by(|&a, &b| {
             let order = compare(value(a), value(b), numeric);
             if ascending { order } else { order.reverse() }
         });
         self.sort = Some((column, ascending));
     }
 
-    /// The rows shown, in their order.
-    fn shown(&self) -> impl Iterator<Item = &Row> {
-        self.order.iter().filter_map(|&i| self.rows.get(i))
+    /// Makes `visible` the sorted rows that hold the filter's text.
+    fn refilter(&mut self) {
+        let needle = self.filter.trim().to_lowercase();
+        self.visible = if needle.is_empty() {
+            self.sorted.clone()
+        } else {
+            let rows = &self.rows;
+            self.sorted
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    rows.get(i).is_some_and(|row| {
+                        row.iter()
+                            .flatten()
+                            .any(|v| v.to_lowercase().contains(&needle))
+                    })
+                })
+                .collect()
+        };
+        self.filtered_for.clone_from(&self.filter);
     }
 
-    /// The selected rows, or all rows when none is selected, as tab-separated text with the
+    /// How many rows are shown, of how many fetched.
+    pub fn counts(&self) -> (usize, usize) {
+        (self.visible.len(), self.rows.len())
+    }
+
+    /// The rows shown, in their order.
+    fn shown(&self) -> impl Iterator<Item = (usize, &Row)> {
+        self.visible
+            .iter()
+            .filter_map(|&i| Some((i, self.rows.get(i)?)))
+    }
+
+    /// The selected rows shown, or all rows shown when none is, as tab-separated text with the
     /// column names first: it pastes into a spreadsheet as columns.
     pub fn tsv(&self) -> String {
         let clean = |s: &str| s.replace(['\t', '\n', '\r'], " ");
@@ -91,12 +142,8 @@ impl ResultView {
             .map(|c| clean(&c.name))
             .collect::<Vec<_>>()
             .join("\t");
-        let all = self.selected.is_empty();
-        for (i, row) in self
-            .order
-            .iter()
-            .filter_map(|&i| Some((i, self.rows.get(i)?)))
-        {
+        let all = !self.shown().any(|(i, _)| self.selected.contains(&i));
+        for (i, row) in self.shown() {
             if all || self.selected.contains(&i) {
                 out.push('\n');
                 let cells: Vec<String> = row
@@ -109,8 +156,8 @@ impl ResultView {
         out
     }
 
-    /// All rows as CSV (RFC 4180, UTF-8 with a byte-order mark so spreadsheets read æøå):
-    /// the column names, then the rows in the order shown; NULL as an empty field.
+    /// The rows shown as CSV (RFC 4180, UTF-8 with a byte-order mark so spreadsheets read
+    /// æøå): the column names, then the rows in the order shown; NULL as an empty field.
     pub fn csv(&self) -> String {
         let field = |s: &str| {
             if s.contains([',', '"', '\n', '\r']) {
@@ -123,7 +170,7 @@ impl ResultView {
         let names: Vec<String> = self.columns.iter().map(|c| field(&c.name)).collect();
         out.push_str(&names.join(","));
         out.push_str("\r\n");
-        for row in self.shown() {
+        for (_, row) in self.shown() {
             let cells: Vec<String> = row
                 .iter()
                 .map(|v| field(v.as_deref().unwrap_or("")))
@@ -134,28 +181,67 @@ impl ResultView {
         out
     }
 
+    /// How many of the rows shown are selected.
     pub fn selected_count(&self) -> usize {
-        self.selected.len()
+        self.shown()
+            .filter(|(i, _)| self.selected.contains(i))
+            .count()
+    }
+
+    /// The row of the detail panel and its place among the rows shown (1-based).
+    pub fn detail_row(&self) -> Option<(&Row, usize)> {
+        let index = self.detail?;
+        let position = self.visible.iter().position(|&i| i == index)?;
+        Some((self.rows.get(index)?, position + 1))
+    }
+
+    /// The detail panel on the row `step` places down (negative: up) among the rows shown.
+    pub fn step_detail(&mut self, step: isize) {
+        let Some(position) = self
+            .detail
+            .and_then(|d| self.visible.iter().position(|&i| i == d))
+        else {
+            return;
+        };
+        let next = position.saturating_add_signed(step);
+        if let Some(&index) = self.visible.get(next) {
+            self.detail = Some(index);
+        }
     }
 
     /// Draws the grid in the space left.
     pub fn show(&mut self, ui: &mut Ui) {
-        let p = theme::palette(ui);
-        let widths: Vec<f32> = (0..self.columns.len()).map(|c| self.width(c)).collect();
-        let total = NUMBER_WIDTH + widths.iter().sum::<f32>();
+        if self.filter != self.filtered_for {
+            self.refilter();
+        }
+        // Enter on one selected row shows it, as a double-click does (R-SQL-15). Taken before
+        // the rows are drawn: a focused row number would take Enter as a click.
+        if self.selected.len() == 1
+            && !ui.ctx().egui_wants_keyboard_input()
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+        {
+            self.detail = self.selected.first().copied();
+        }
+        let total = NUMBER_WIDTH + self.widths.iter().sum::<f32>();
         let mut sort = None;
         let mut toggle = None;
+        let mut open = None;
+        let mut resized = None;
         ScrollArea::horizontal()
             .id_salt("sql-grid-h")
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.set_min_width(total);
                 ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
                     ui.set_height(ROW_HEIGHT);
                     ui.allocate_space(vec2(NUMBER_WIDTH, ROW_HEIGHT));
-                    for (c, column) in self.columns.iter().enumerate() {
-                        if self.heading(ui, c, column, widths[c]) {
-                            sort = Some(c);
+                    for c in 0..self.columns.len() {
+                        match self.heading(ui, c) {
+                            Heading::Sort => sort = Some(c),
+                            Heading::Resize(width) => resized = Some((c, width)),
+                            Heading::Fit => resized = Some((c, self.fit(c))),
+                            Heading::None => {}
                         }
                     }
                 });
@@ -163,56 +249,81 @@ impl ResultView {
                 ScrollArea::vertical()
                     .id_salt("sql-grid-v")
                     .auto_shrink([false, false])
-                    .show_rows(ui, ROW_HEIGHT, self.order.len(), |ui, range| {
+                    .show_rows(ui, ROW_HEIGHT, self.visible.len(), |ui, range| {
                         for position in range {
-                            let Some(&index) = self.order.get(position) else {
+                            let Some(&index) = self.visible.get(position) else {
                                 continue;
                             };
-                            let selected = self.selected.contains(&index);
-                            let top = ui.cursor().min;
-                            if selected {
-                                let rect = egui::Rect::from_min_size(top, vec2(total, ROW_HEIGHT));
-                                ui.painter().rect_filled(rect, 3.0, p.surface_hover);
+                            let (clicked, double) = self.row(ui, index, total);
+                            if clicked {
+                                toggle = Some(index);
                             }
-                            ui.horizontal(|ui| {
-                                ui.set_height(ROW_HEIGHT);
-                                let number =
-                                    egui::Button::selectable(selected, (index + 1).to_string());
-                                if ui
-                                    .add_sized([NUMBER_WIDTH - 4.0, ROW_HEIGHT - 2.0], number)
-                                    .clicked()
-                                {
-                                    toggle = Some(index);
-                                }
-                                if let Some(row) = self.rows.get(index) {
-                                    for (c, value) in row.iter().enumerate() {
-                                        let numeric =
-                                            self.columns.get(c).is_some_and(|col| col.numeric);
-                                        cell(
-                                            ui,
-                                            widths.get(c).copied().unwrap_or(120.0),
-                                            value.as_deref(),
-                                            numeric,
-                                        );
-                                    }
-                                }
-                            });
+                            if double {
+                                open = Some(index);
+                            }
                         }
                     });
             });
         if let Some(c) = sort {
             self.sort_by(c);
         }
+        if let Some((c, width)) = resized
+            && let Some(w) = self.widths.get_mut(c)
+        {
+            *w = width.max(MIN_WIDTH);
+        }
         if let Some(i) = toggle
             && !self.selected.remove(&i)
         {
             self.selected.insert(i);
         }
+        if open.is_some() {
+            self.detail = open;
+        }
     }
 
-    /// A column's heading, a button that sorts; true when clicked.
-    fn heading(&self, ui: &mut Ui, c: usize, column: &Column, width: f32) -> bool {
+    /// Draws row `index`, `total` wide: (its number was clicked, its values double-clicked).
+    fn row(&self, ui: &mut Ui, index: usize, total: f32) -> (bool, bool) {
         let p = theme::palette(ui);
+        let selected = self.selected.contains(&index);
+        let rect = egui::Rect::from_min_size(ui.cursor().min, vec2(total, ROW_HEIGHT));
+        if selected || self.detail == Some(index) {
+            ui.painter().rect_filled(rect, 3.0, p.surface_hover);
+        }
+        let clicked = ui
+            .horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.set_height(ROW_HEIGHT);
+                let number = egui::Button::selectable(selected, (index + 1).to_string());
+                let size = [NUMBER_WIDTH - 4.0, ROW_HEIGHT - 2.0];
+                let clicked = ui.add_sized(size, number).clicked();
+                ui.add_space(4.0);
+                if let Some(row) = self.rows.get(index) {
+                    for (c, value) in row.iter().enumerate() {
+                        let numeric = self.columns.get(c).is_some_and(|col| col.numeric);
+                        let width = self.widths.get(c).copied().unwrap_or(120.0);
+                        cell(ui, width, value.as_deref(), numeric);
+                    }
+                }
+                clicked
+            })
+            .inner;
+        // The values only: over the row's number it would take its clicks.
+        let mut values = rect;
+        values.min.x += NUMBER_WIDTH;
+        let id = ui.make_persistent_id(("sql-row", index));
+        let double = ui.interact(values, id, Sense::click()).double_clicked();
+        (clicked, double)
+    }
+
+    /// A column's heading: a click sorts; its right edge resizes the column, and a
+    /// double-click on the edge fits it.
+    fn heading(&self, ui: &mut Ui, c: usize) -> Heading {
+        let p = theme::palette(ui);
+        let Some(column) = self.columns.get(c) else {
+            return Heading::None;
+        };
+        let width = self.widths.get(c).copied().unwrap_or(120.0);
         let arrow = match self.sort {
             Some((s, true)) if s == c => Some(icons::ARROW_UP),
             Some((s, false)) if s == c => Some(icons::ARROW_DOWN),
@@ -248,32 +359,64 @@ impl ResultView {
             },
             if column.nullable { ", may be NULL" } else { "" }
         );
-        response
+        let sorted = response
             .on_hover_text(format!("{kind}. Click to sort."))
-            .clicked()
+            .clicked();
+        // The edge: a few points either side of the column's right border.
+        let edge = egui::Rect::from_center_size(
+            egui::pos2(ui.cursor().min.x, ui.cursor().center().y),
+            vec2(8.0, ROW_HEIGHT),
+        );
+        let drag = ui.interact(
+            edge,
+            ui.make_persistent_id(("sql-col-edge", c)),
+            Sense::click_and_drag(),
+        );
+        if drag.hovered() || drag.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        if drag.double_clicked() {
+            Heading::Fit
+        } else if drag.dragged() {
+            Heading::Resize(width + drag.drag_delta().x)
+        } else if sorted {
+            Heading::Sort
+        } else {
+            Heading::None
+        }
     }
 
-    /// A column's width, from its name and its first rows' values.
+    /// The width that fits column `c`'s name and the values shown (the first 500).
     #[expect(
         clippy::cast_precision_loss,
         reason = "character counts are far below f32's exact range"
     )]
-    fn width(&self, c: usize) -> f32 {
+    fn fit(&self, c: usize) -> f32 {
         let name = self
             .columns
             .get(c)
             .map_or(0, |col| col.name.chars().count());
         let longest = self
-            .rows
-            .iter()
-            .take(200)
-            .filter_map(|row| row.get(c))
+            .shown()
+            .take(500)
+            .filter_map(|(_, row)| row.get(c))
             .map(|v| v.as_deref().map_or(4, |s| s.chars().count()))
             .max()
             .unwrap_or(0)
             .max(name);
-        (longest as f32 * 7.5 + 20.0).clamp(64.0, 360.0)
+        (longest as f32 * 7.5 + 20.0).clamp(64.0, MAX_FIT)
     }
+}
+
+/// What happened on a column's heading.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Heading {
+    None,
+    Sort,
+    /// Dragged to this width.
+    Resize(f32),
+    /// Its edge was double-clicked.
+    Fit,
 }
 
 /// One value: right-aligned when numeric, NULL muted in italics.
@@ -291,7 +434,7 @@ fn cell(ui: &mut Ui, width: f32, value: Option<&str>, numeric: bool) {
                 Some(text) => RichText::new(text),
                 None => RichText::new("NULL").italics().color(p.muted),
             };
-            ui.add(Label::new(text).truncate());
+            ui.add(Label::new(text).truncate().selectable(false));
         });
     });
 }
@@ -341,15 +484,17 @@ mod tests {
         )
     }
 
+    fn amounts(v: &ResultView) -> Vec<Option<&str>> {
+        v.shown().map(|(_, r)| r[0].as_deref()).collect()
+    }
+
     #[test]
     fn numbers_sort_as_numbers_with_null_first_and_a_second_click_reverses_r_sql_8() {
         let mut v = view();
         v.sort_by(0);
-        let amounts: Vec<Option<&str>> = v.shown().map(|r| r[0].as_deref()).collect();
-        assert_eq!(amounts, [None, Some("-2"), Some("9"), Some("10.5")]);
+        assert_eq!(amounts(&v), [None, Some("-2"), Some("9"), Some("10.5")]);
         v.sort_by(0);
-        let amounts: Vec<Option<&str>> = v.shown().map(|r| r[0].as_deref()).collect();
-        assert_eq!(amounts, [Some("10.5"), Some("9"), Some("-2"), None]);
+        assert_eq!(amounts(&v), [Some("10.5"), Some("9"), Some("-2"), None]);
     }
 
     #[test]
@@ -360,9 +505,8 @@ mod tests {
             vec![vec![Some("0".to_owned()), Some("x".to_owned())]],
             false,
         );
-        let amounts: Vec<Option<&str>> = v.shown().map(|r| r[0].as_deref()).collect();
         assert_eq!(
-            amounts,
+            amounts(&v),
             [None, Some("-2"), Some("0"), Some("9"), Some("10.5")]
         );
         assert_eq!(v.cursor, None);
@@ -386,5 +530,71 @@ mod tests {
         );
         assert_eq!(v.csv(), "\u{FEFF}A,B\r\n\"say \"\"hi\"\", æøå\",\r\n");
         assert_eq!(v.cursor, None, "no more rows");
+    }
+
+    #[test]
+    fn the_filter_keeps_rows_holding_its_text_ignoring_case_and_copy_takes_them_r_sql_16() {
+        let mut v = view();
+        "ÆØ".clone_into(&mut v.filter);
+        v.refilter();
+        assert_eq!(v.counts(), (1, 4));
+        assert_eq!(v.tsv(), "AMOUNT\tNAME\n10.5\tæøå");
+        assert_eq!(v.csv(), "\u{FEFF}AMOUNT,NAME\r\n10.5,æøå\r\n");
+        "nothing like it".clone_into(&mut v.filter);
+        v.refilter();
+        assert_eq!(v.counts(), (0, 4));
+        v.filter.clear();
+        v.refilter();
+        assert_eq!(v.counts(), (4, 4));
+    }
+
+    #[test]
+    fn a_selection_hidden_by_the_filter_is_not_copied_r_sql_16() {
+        let mut v = view();
+        v.selected.insert(0); // the æøå row
+        "-2".clone_into(&mut v.filter);
+        v.refilter();
+        assert_eq!(v.selected_count(), 0);
+        assert_eq!(
+            v.tsv(),
+            "AMOUNT\tNAME\n-2\t",
+            "the rows shown, not the hidden selection"
+        );
+    }
+
+    #[test]
+    fn the_detail_steps_through_the_rows_shown_and_stops_at_the_ends_r_sql_15() {
+        let mut v = view();
+        v.sort_by(0); // NULL, -2, 9, 10.5
+        v.detail = Some(1); // the -2 row
+        assert_eq!(v.detail_row().map(|(_, at)| at), Some(2));
+        v.step_detail(1);
+        assert_eq!(v.detail_row().and_then(|(r, _)| r[0].as_deref()), Some("9"));
+        v.step_detail(10);
+        assert_eq!(
+            v.detail_row().and_then(|(r, _)| r[0].as_deref()),
+            Some("9"),
+            "past the end"
+        );
+        v.step_detail(-5);
+        assert_eq!(
+            v.detail_row().and_then(|(r, _)| r[0].as_deref()),
+            None,
+            "the NULL row, first"
+        );
+        assert_eq!(v.detail_row().map(|(_, at)| at), Some(1));
+    }
+
+    #[test]
+    fn a_column_fits_its_longest_value_within_limits_r_sql_16() {
+        let v = view();
+        assert!(v.fit(0) >= 64.0);
+        let long = ResultView::new(
+            vec![column("X", false)],
+            vec![vec![Some("x".repeat(500))]],
+            false,
+            0,
+        );
+        assert!((long.fit(0) - MAX_FIT).abs() < f32::EPSILON);
     }
 }
