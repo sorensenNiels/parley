@@ -1,26 +1,30 @@
-//! The menu bar and the toolbar (R-UI-4). Both only report what the operator chose, as an
-//! [`Action`] for [`crate::ParleyUi`] to carry out. The menus hold what Parley can do today and
-//! grow as features arrive.
+//! The header (R-UI-15, R-UI-10): the app's icon and name, the menus, and on the right Help, the
+//! session in use and a newer version. It only reports what the operator chose, as an
+//! [`Action`] for [`crate::ParleyUi`] to carry out.
 
-use egui::{Button, MenuBar, RichText, Ui};
-use parley_core::{Aid, Key, MacroState, SessionConfig};
+use egui::{Button, MenuBar, RichText, Sense, Ui};
+use parley_core::net::LinkState;
+use parley_core::{Key, MacroState};
 
+use crate::icons;
+use crate::keymap::{Function, KeyMap};
 use crate::profile::Profile;
 use crate::theme;
 
-/// Something the operator chose from the menu bar or the toolbar.
+/// Something the operator chose from the header or the status bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     NewSession,
     /// The session dialog, on the session in use or the first one.
     EditSessions,
-    /// Connect to the saved session at this index.
+    /// Connect to the saved session at this index, closing the open one first.
     Connect(usize),
     Disconnect,
     Exit,
     CopyScreen,
     Paste,
-    ToggleShortcuts,
+    /// The keyboard shortcut sheet (R-UI-17).
+    Shortcuts,
     Settings,
     /// Help ▸ Check for updates…: Settings on the About page, checking (R-UI-11).
     CheckForUpdates,
@@ -43,93 +47,62 @@ pub struct MacroMenu<'a> {
     pub names: &'a [String],
 }
 
-/// The app's icon and name, then the menus; Help on the right.
-pub fn menu_bar(
-    ui: &mut Ui,
-    connected: bool,
-    shortcuts_shown: bool,
-    profiles: &[Profile],
-    logo: Option<&egui::TextureHandle>,
-    newer: Option<&parley_core::update::Release>,
-    macros: Option<&MacroMenu<'_>>,
-) -> Option<Action> {
+/// What the header shows.
+pub struct Header<'a> {
+    /// The state of the open connection; `None` when there is none.
+    pub link: Option<&'a LinkState>,
+    pub profiles: &'a [Profile],
+    /// The session in use.
+    pub current: Option<&'a Profile>,
+    pub logo: Option<&'a egui::TextureHandle>,
+    pub newer: Option<&'a parley_core::update::Release>,
+    /// `None` while the Macros add-on is off (R-ADD-2).
+    pub macros: Option<&'a MacroMenu<'a>>,
+    /// The keyboard map in use, for the keys the menus show.
+    pub map: &'a KeyMap,
+    pub mac: bool,
+}
+
+impl std::fmt::Debug for Header<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Header")
+            .field("link", &self.link)
+            .field("current", &self.current.map(|p| &p.name))
+            .finish_non_exhaustive()
+    }
+}
+
+impl Header<'_> {
+    const fn connected(&self) -> bool {
+        self.link.is_some()
+    }
+
+    /// The first key that does `function`, as the menus show it.
+    fn key(&self, function: &Function) -> Option<String> {
+        self.map.keys_for(function, self.mac).into_iter().next()
+    }
+}
+
+/// The header: brand, menus; Help, the session pill and a newer version on the right.
+pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     let mut action = None;
     MenuBar::new().ui(ui, |ui| {
-        brand(ui, logo);
-        ui.menu_button("File", |ui| {
-            if ui.button("New session…").clicked() {
-                action = Some(Action::NewSession);
+        brand(ui, header.logo);
+        let menus = [file_menu, edit_menu, view_menu, tools_menu];
+        for menu in menus {
+            if let Some(chosen) = menu(ui, header) {
+                action = Some(chosen);
             }
-            if ui.button("Edit sessions…").clicked() {
-                action = Some(Action::EditSessions);
-            }
-            ui.add_enabled_ui(!connected && !profiles.is_empty(), |ui| {
-                ui.menu_button("Connect to", |ui| {
-                    for (i, profile) in profiles.iter().enumerate() {
-                        if ui.button(&profile.name).clicked() {
-                            action = Some(Action::Connect(i));
-                        }
-                    }
-                });
-            });
-            ui.separator();
-            if ui
-                .add_enabled(connected, Button::new("Disconnect"))
-                .clicked()
-            {
-                action = Some(Action::Disconnect);
-            }
-            ui.separator();
-            if ui.button("Exit").clicked() {
-                action = Some(Action::Exit);
-            }
-        });
-        ui.menu_button("Edit", |ui| {
-            let copy = Button::new("Copy screen").shortcut_text("Ctrl+C");
-            if ui.add_enabled(connected, copy).clicked() {
-                action = Some(Action::CopyScreen);
-            }
-            let paste = Button::new("Paste").shortcut_text("Ctrl+V");
-            if ui.add_enabled(connected, paste).clicked() {
-                action = Some(Action::Paste);
-            }
-        });
-        ui.menu_button("View", |ui| {
-            if ui
-                .add(Button::new("Keyboard shortcuts").selected(shortcuts_shown))
-                .clicked()
-            {
-                action = Some(Action::ToggleShortcuts);
-            }
-        });
-        ui.menu_button("Tools", |ui| {
-            // Only while the Macros add-on is on (R-ADD-2).
-            if let Some(macros) = macros {
-                if let Some(chosen) = macro_items(ui, macros) {
-                    action = Some(chosen);
-                }
-                ui.separator();
-            }
-            if ui.button("Settings…").clicked() {
-                action = Some(Action::Settings);
-            }
-        });
+        }
         theme::button_row(ui, |ui| {
-            ui.menu_button("Help", |ui| {
-                if ui.button("Keyboard shortcuts").clicked() {
-                    action = Some(Action::ToggleShortcuts);
-                }
-                if ui.button("Check for updates…").clicked() {
-                    action = Some(Action::CheckForUpdates);
-                }
-                ui.separator();
-                ui.add_enabled(
-                    false,
-                    Button::new(format!("Parley {}", env!("CARGO_PKG_VERSION"))),
-                );
-            });
+            if let Some(chosen) = help_menu(ui, header) {
+                action = Some(chosen);
+            }
+            if let Some(chosen) = session_pill(ui, header) {
+                action = Some(chosen);
+            }
             // A quiet link, never a pop-up; the download command is on the About page.
-            if let Some(release) = newer {
+            if let Some(release) = header.newer {
                 ui.hyperlink_to(
                     format!("Parley {} is available", release.version),
                     &release.page,
@@ -142,39 +115,227 @@ pub fn menu_bar(
     action
 }
 
+/// One menu item: `icon`, `text` and the key that does `function`, if any.
+fn item(
+    ui: &mut Ui,
+    header: &Header<'_>,
+    enabled: bool,
+    (icon, text): (&str, &str),
+    function: Option<&Function>,
+) -> bool {
+    let mut button = icons::button(icon, text);
+    if let Some(key) = function.and_then(|f| header.key(f)) {
+        button = button.shortcut_text(key);
+    }
+    icons::add_named(ui, enabled, button, text).clicked()
+}
+
+fn file_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
+    let mut action = None;
+    ui.menu_button("File", |ui| {
+        if item(ui, header, true, (icons::PLUS, "New session…"), None) {
+            action = Some(Action::NewSession);
+        }
+        if item(ui, header, true, (icons::PENCIL, "Edit sessions…"), None) {
+            action = Some(Action::EditSessions);
+        }
+        let can_connect = !header.connected() && !header.profiles.is_empty();
+        if let Some(i) = connect_menu(ui, can_connect, header.profiles, None) {
+            action = Some(Action::Connect(i));
+        }
+        ui.separator();
+        if item(
+            ui,
+            header,
+            header.connected(),
+            (icons::POWER, "Disconnect"),
+            None,
+        ) {
+            action = Some(Action::Disconnect);
+        }
+        ui.separator();
+        if item(ui, header, true, (icons::SIGN_OUT, "Exit"), None) {
+            action = Some(Action::Exit);
+        }
+    });
+    action
+}
+
+/// "Connect to ▸" with every saved session but `except`; the index of the one chosen.
+fn connect_menu(
+    ui: &mut Ui,
+    enabled: bool,
+    profiles: &[Profile],
+    except: Option<&str>,
+) -> Option<usize> {
+    let mut chosen = None;
+    ui.add_enabled_ui(enabled, |ui| {
+        let text = (icons::icon(icons::PLUGS_CONNECTED), "Connect to");
+        ui.menu_button(text, |ui| {
+            for (i, profile) in profiles.iter().enumerate() {
+                if Some(profile.name.as_str()) != except && ui.button(&profile.name).clicked() {
+                    chosen = Some(i);
+                }
+            }
+        })
+        .response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, "Connect to"));
+    });
+    chosen
+}
+
+fn edit_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
+    let mut action = None;
+    ui.menu_button("Edit", |ui| {
+        let on = header.connected();
+        let copy = (icons::COPY, "Copy screen");
+        if item(ui, header, on, copy, Some(&Function::CopyScreen)) {
+            action = Some(Action::CopyScreen);
+        }
+        if item(
+            ui,
+            header,
+            on,
+            (icons::CLIPBOARD, "Paste"),
+            Some(&Function::Paste),
+        ) {
+            action = Some(Action::Paste);
+        }
+    });
+    action
+}
+
+fn view_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
+    let mut action = None;
+    ui.menu_button("View", |ui| {
+        let shortcuts = (icons::KEYBOARD, "Keyboard shortcuts");
+        if item(ui, header, true, shortcuts, Some(&Function::Shortcuts)) {
+            action = Some(Action::Shortcuts);
+        }
+    });
+    action
+}
+
+fn tools_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
+    let mut action = None;
+    ui.menu_button("Tools", |ui| {
+        if let Some(macros) = header.macros {
+            action = macro_items(ui, header, macros);
+            ui.separator();
+        }
+        if item(ui, header, true, (icons::GEAR, "Settings…"), None) {
+            action = Some(Action::Settings);
+        }
+    });
+    action
+}
+
+fn help_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
+    let mut action = None;
+    ui.menu_button("Help", |ui| {
+        let shortcuts = (icons::KEYBOARD, "Keyboard shortcuts");
+        if item(ui, header, true, shortcuts, Some(&Function::Shortcuts)) {
+            action = Some(Action::Shortcuts);
+        }
+        let check = (icons::ARROWS_CLOCKWISE, "Check for updates…");
+        if item(ui, header, true, check, None) {
+            action = Some(Action::CheckForUpdates);
+        }
+        ui.separator();
+        let version = format!("Parley {}", env!("CARGO_PKG_VERSION"));
+        ui.add_enabled(false, icons::button(icons::INFO, &version));
+    });
+    action
+}
+
 /// Record / Stop recording, Run macro ▸, Stop macro and Macros…
-fn macro_items(ui: &mut Ui, macros: &MacroMenu<'_>) -> Option<Action> {
+fn macro_items(ui: &mut Ui, header: &Header<'_>, macros: &MacroMenu<'_>) -> Option<Action> {
     let mut action = None;
     let idle = macros.state == Some(MacroState::Off);
+    let record = Some(&Function::RecordMacro);
     if macros.state == Some(MacroState::Recording) {
-        if ui.button("Stop recording").clicked() {
+        if item(ui, header, true, (icons::STOP, "Stop recording"), record) {
             action = Some(Action::StopRecording);
         }
-    } else if ui.add_enabled(idle, Button::new("Record macro")).clicked() {
+    } else if item(ui, header, idle, (icons::RECORD, "Record macro"), record) {
         action = Some(Action::RecordMacro);
     }
-    ui.add_enabled_ui(idle && !macros.names.is_empty(), |ui| {
-        ui.menu_button("Run macro", |ui| {
+    let can_run = idle && !macros.names.is_empty();
+    ui.add_enabled_ui(can_run, |ui| {
+        ui.menu_button((icons::icon(icons::PLAY), "Run macro"), |ui| {
             for (i, name) in macros.names.iter().enumerate() {
-                if ui.button(name).clicked() {
+                let key = header.key(&Function::RunMacro(name.clone()));
+                let button = Button::new(name).shortcut_text(key.unwrap_or_default());
+                if ui.add(button).clicked() {
                     action = Some(Action::RunMacro(i));
                 }
             }
-        });
+        })
+        .response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, can_run, "Run macro"));
     });
     let playing = matches!(
         macros.state,
         Some(MacroState::Playing | MacroState::NeedsPassword)
     );
     if playing {
-        let stop = Button::new("Stop macro").shortcut_text("Reset");
-        if ui.add(stop).clicked() {
+        let stop = icons::button(icons::STOP, "Stop macro").shortcut_text("Reset");
+        if icons::add_named(ui, true, stop, "Stop macro").clicked() {
             action = Some(Action::StopMacro);
         }
     }
-    if ui.button("Macros…").clicked() {
+    if item(ui, header, true, (icons::LIST, "Macros…"), None) {
         action = Some(Action::Macros);
     }
+    action
+}
+
+/// The session in use while connected (R-UI-15): a status dot, its name, host:port and a lock
+/// for TLS; a menu to switch, edit or disconnect. Laid out right to left.
+fn session_pill(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
+    let (Some(link), Some(profile)) = (header.link, header.current) else {
+        return None;
+    };
+    let p = theme::palette(ui);
+    let config = &profile.config;
+    let lock = if config.tls { icons::LOCK } else { "" };
+    let atoms = (
+        theme::semibold(&profile.name),
+        RichText::new(format!("{}:{}", config.host, config.port)).color(p.muted),
+        icons::icon(lock).color(p.muted),
+        icons::icon(icons::CARET_DOWN).color(p.muted),
+    );
+    let mut action = None;
+    let response = ui.menu_button(atoms, |ui| {
+        theme::section_label(ui, &profile.name);
+        let others = header.profiles.len() > 1;
+        if let Some(i) = connect_menu(ui, others, header.profiles, Some(&profile.name)) {
+            action = Some(Action::Connect(i));
+        }
+        if item(ui, header, true, (icons::PENCIL, "Edit session…"), None) {
+            action = Some(Action::EditSessions);
+        }
+        ui.separator();
+        if item(ui, header, true, (icons::POWER, "Disconnect"), None) {
+            action = Some(Action::Disconnect);
+        }
+    });
+    let state = match link {
+        LinkState::Connected => "online",
+        LinkState::Connecting => "connecting",
+        LinkState::Closed(_) => "offline",
+    };
+    response
+        .response
+        .on_hover_text(format!("{} is {state}", profile.name));
+    let color = match link {
+        LinkState::Connected => p.ok,
+        LinkState::Connecting => p.warning_text,
+        LinkState::Closed(_) => p.muted,
+    };
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), Sense::hover());
+    ui.painter().circle_filled(rect.center(), 4.0, color);
+    ui.add_space(4.0);
     action
 }
 
@@ -225,39 +386,4 @@ fn brand(ui: &mut Ui, logo: Option<&egui::TextureHandle>) {
     ui.add_space(8.0);
     ui.separator();
     ui.add_space(2.0);
-}
-
-/// 5250 keys a PC keyboard lacks, and the common actions, as buttons.
-/// `config` is the open session's, `None` while not connected.
-pub fn toolbar(ui: &mut Ui, config: Option<&SessionConfig>) -> Option<Action> {
-    let connected = config.is_some();
-    let mut action = None;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        let mut button = |ui: &mut Ui, button: Button<'_>, chosen: Action| {
-            if ui.add_enabled(connected, button).clicked() {
-                action = Some(chosen);
-            }
-        };
-        button(ui, Button::new("Disconnect"), Action::Disconnect);
-        ui.separator();
-        button(ui, Button::new("Copy"), Action::CopyScreen);
-        button(ui, Button::new("Paste"), Action::Paste);
-        ui.separator();
-        button(ui, Button::new("Clear"), Action::Key(Key::Aid(Aid::CLEAR)));
-        button(ui, Button::new("Attn"), Action::Key(Key::Attention));
-        button(ui, Button::new("Sysreq"), Action::Key(Key::SystemRequest));
-        button(ui, Button::new("Reset"), Action::Key(Key::Reset));
-        button(ui, Button::new("Help"), Action::Key(Key::Aid(Aid::HELP)));
-        let enter = theme::primary_button(ui, "⏵ Enter");
-        button(ui, enter, Action::Key(Key::Aid(Aid::ENTER)));
-
-        if let Some(config) = config {
-            let muted = theme::palette(ui).muted;
-            theme::button_row(ui, |ui| {
-                ui.label(RichText::new(format!("{}:{}", config.host, config.port)).color(muted));
-            });
-        }
-    });
-    action
 }

@@ -156,6 +156,7 @@ fn key_label(key: PcKey) -> &'static str {
         PcKey::Plus => "+",
         PcKey::Minus => "-",
         PcKey::Equals => "=",
+        PcKey::Slash => "/",
         key => key.name(),
     }
 }
@@ -170,6 +171,8 @@ pub enum Function {
     RecordMacro,
     /// Run the macro of this name (R-KEY-4).
     RunMacro(String),
+    /// Open the keyboard shortcut sheet (R-UI-17).
+    Shortcuts,
 }
 
 /// The 5250 keys that go to the host, beside F1–F24, in the order Settings lists them.
@@ -217,6 +220,7 @@ impl Function {
             Self::Paste => "paste".to_owned(),
             Self::RecordMacro => "record-macro".to_owned(),
             Self::RunMacro(name) => format!("{RUN_MACRO}{name}"),
+            Self::Shortcuts => "shortcuts".to_owned(),
         }
     }
 
@@ -225,6 +229,7 @@ impl Function {
             "copy" => Self::CopyScreen,
             "paste" => Self::Paste,
             "record-macro" => Self::RecordMacro,
+            "shortcuts" => Self::Shortcuts,
             _ => match id.strip_prefix(RUN_MACRO) {
                 Some(name) => Self::RunMacro(name.to_owned()),
                 None => Self::Key(key_named(id)?),
@@ -249,6 +254,7 @@ impl Function {
             Self::Paste => "Paste into fields".to_owned(),
             Self::RecordMacro => "Record macro, stop recording".to_owned(),
             Self::RunMacro(name) => format!("Run macro {name}"),
+            Self::Shortcuts => "Keyboard shortcuts".to_owned(),
         }
     }
 
@@ -280,7 +286,10 @@ pub fn groups(macros: Option<&[String]>) -> Vec<(&'static str, Vec<Function>)> {
     let mut groups = vec![
         ("Send to the host", host),
         ("Fields and cursor", keys(&FIELD_KEYS)),
-        ("Parley", vec![Function::CopyScreen, Function::Paste]),
+        (
+            "Parley",
+            vec![Function::CopyScreen, Function::Paste, Function::Shortcuts],
+        ),
     ];
     if let Some(macros) = macros {
         let mut list = vec![Function::RecordMacro];
@@ -329,6 +338,7 @@ static BUILT_IN: LazyLock<KeyMap> = LazyLock::new(|| {
         ("Home", "home"),
         ("End", "end"),
         ("Ctrl+End", "erase-eof"),
+        ("Ctrl+Slash", "shortcuts"),
         ("ArrowUp", "up"),
         ("ArrowDown", "down"),
         ("ArrowLeft", "left"),
@@ -424,12 +434,21 @@ impl KeyMap {
             .into_iter()
             .flat_map(|(_, functions)| functions)
             .filter_map(|f| {
-                let mut keys: Vec<String> =
-                    f.system_key(mac).map(str::to_owned).into_iter().collect();
-                keys.extend(self.chords_for(&f).into_iter().map(Chord::label));
+                let keys = self.keys_for(&f, mac);
                 (!keys.is_empty()).then(|| (keys.join(", "), f.name()))
             })
             .collect()
+    }
+
+    /// Every key that does `function`, as Parley writes them: the system's own first.
+    pub fn keys_for(&self, function: &Function, mac: bool) -> Vec<String> {
+        let mut keys: Vec<String> = function
+            .system_key(mac)
+            .map(str::to_owned)
+            .into_iter()
+            .collect();
+        keys.extend(self.chords_for(function).into_iter().map(Chord::label));
+        keys
     }
 }
 

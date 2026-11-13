@@ -63,5 +63,6 @@ debugs the app and the engine tests.
 
 Licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option.
 
-Parley includes the fonts Inter, JetBrains Mono and IBM Plex Mono, each under the SIL Open Font License 1.1
-(`crates/parley-ui-egui/assets/fonts/*-LICENSE.txt`; the installers carry these files).
+Parley includes the fonts Inter, JetBrains Mono and IBM Plex Mono, each under the SIL Open Font License 1.1, and
+the Phosphor icon font under the MIT licence (`crates/parley-ui-egui/assets/fonts/*-LICENSE.txt`; the installers
+carry these files).

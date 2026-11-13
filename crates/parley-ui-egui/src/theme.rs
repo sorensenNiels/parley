@@ -19,6 +19,8 @@ use crate::fonts;
 
 /// Named font family for headings and emphasis (Inter `SemiBold`).
 pub const SEMIBOLD: &str = "semibold";
+/// The icon font's name among the fonts (R-UI-13, D17).
+const PHOSPHOR: &str = "Phosphor";
 
 /// Width of a scroll bar while the pointer is on it (floating bars are thinner otherwise).
 const SCROLL_BAR_WIDTH: f32 = 6.0;
@@ -178,6 +180,12 @@ pub fn font_definitions(terminal_font: &str) -> (FontDefinitions, Option<String>
         include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf"),
     );
 
+    // The icons (R-UI-13, D17), in a family of their own: see `icons`.
+    add(
+        PHOSPHOR,
+        include_bytes!("../assets/fonts/Phosphor-Regular.ttf"),
+    );
+
     // Keep egui's bundled fonts after ours: they hold the symbols (⏵ ⚠ 🗙 …).
     let fallbacks = fonts.families[&FontFamily::Proportional].clone();
     let with = |first: &str| [vec![first.to_owned()], fallbacks.clone()].concat();
@@ -187,6 +195,8 @@ pub fn font_definitions(terminal_font: &str) -> (FontDefinitions, Option<String>
     fonts
         .families
         .insert(FontFamily::Name(SEMIBOLD.into()), with("Inter-SemiBold"));
+    let icons = FontFamily::Name(crate::icons::FAMILY.into());
+    fonts.families.insert(icons, vec![PHOSPHOR.to_owned()]);
     let mono = fonts.families.entry(FontFamily::Monospace).or_default();
     mono.insert(0, fonts::JETBRAINS_MONO.to_owned());
 
@@ -322,6 +332,62 @@ pub fn card(ui: &Ui) -> Frame {
 pub fn bar(ui: &Ui, margin: Margin) -> Frame {
     let p = palette(ui);
     Frame::new().fill(p.chrome).inner_margin(margin)
+}
+
+/// A rounded, tinted pill (the keyboard state, "Message waiting", "REC"), as Tortuga's.
+pub fn badge(ui: &mut Ui, text: impl Into<String>, color: Color32) -> Response {
+    badge_frame(color)
+        .show(ui, |ui| {
+            ui.add(egui::Label::new(semibold(text).size(12.0).color(color)).truncate())
+        })
+        .inner
+}
+
+/// A [`badge`] with an icon before its text (R-UI-13).
+pub fn icon_badge(ui: &mut Ui, icon: &str, text: impl Into<String>, color: Color32) -> Response {
+    badge_frame(color)
+        .show(ui, |ui| {
+            let icon = crate::icons::icon(icon).size(12.0).color(color);
+            crate::icons::label(ui, icon, semibold(text).size(12.0).color(color))
+        })
+        .inner
+}
+
+fn badge_frame(color: Color32) -> Frame {
+    Frame::new()
+        .fill(color.gamma_multiply(0.14))
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(Margin::symmetric(8, 2))
+}
+
+/// The keys of a shortcut as key caps, one per key: "Ctrl+Shift+F1" is three caps.
+pub fn kbd(ui: &mut Ui, keys: &str) {
+    let p = palette(ui);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 3.0;
+        for key in key_parts(keys) {
+            Frame::new()
+                .fill(p.bg)
+                .stroke(Stroke::new(1.0, p.border))
+                .corner_radius(CornerRadius::same(4))
+                .inner_margin(Margin::symmetric(5, 1))
+                .show(ui, |ui| {
+                    let text = RichText::new(key).monospace().size(11.0).color(p.muted);
+                    ui.add(egui::Label::new(text).selectable(false));
+                });
+        }
+    });
+}
+
+/// The keys of a shortcut as written ("Ctrl+Shift+F1", "Ctrl++"), one by one.
+pub fn key_parts(keys: &str) -> Vec<&str> {
+    if keys == "+" {
+        return vec!["+"];
+    }
+    match keys.strip_suffix("++") {
+        Some(rest) => rest.split('+').chain(["+"]).collect(),
+        None => keys.split('+').collect(),
+    }
 }
 
 /// Adds a text field of exactly `width`. Inside a [`egui::Grid`] a plain
@@ -499,5 +565,29 @@ mod tests {
             fonts.families[&egui::FontFamily::Monospace][0],
             crate::fonts::JETBRAINS_MONO
         );
+    }
+
+    #[test]
+    fn icons_have_a_family_of_their_own_and_stay_out_of_text_r_ui_13() {
+        // D17: Inter has glyphs of its own at some of Phosphor's codepoints, and Phosphor
+        // maps a–z to blanks, so neither may stand in for the other.
+        let (fonts, _) = super::font_definitions(crate::fonts::DEFAULT_TERMINAL_FONT);
+        let icons = egui::FontFamily::Name(crate::icons::FAMILY.into());
+        assert_eq!(fonts.families[&icons], [super::PHOSPHOR]);
+        let semibold = egui::FontFamily::Name(super::SEMIBOLD.into());
+        for family in [egui::FontFamily::Proportional, semibold] {
+            assert!(!fonts.families[&family].iter().any(|f| f == super::PHOSPHOR));
+        }
+    }
+
+    #[test]
+    fn a_shortcut_splits_into_one_key_cap_per_key() {
+        // R-UI-17
+        use super::key_parts;
+        assert_eq!(key_parts("Ctrl+Shift+F1"), ["Ctrl", "Shift", "F1"]);
+        assert_eq!(key_parts("Ctrl++"), ["Ctrl", "+"]);
+        assert_eq!(key_parts("+"), ["+"]);
+        assert_eq!(key_parts("Esc"), ["Esc"]);
+        assert_eq!(key_parts("Ctrl+Page Up"), ["Ctrl", "Page Up"]);
     }
 }

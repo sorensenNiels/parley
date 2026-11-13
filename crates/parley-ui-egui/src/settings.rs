@@ -195,6 +195,12 @@ impl Dialog {
         self
     }
 
+    /// The same dialog on the Keyboard page ("Change keys…" in the shortcut sheet, R-UI-17).
+    pub fn on_keyboard_page(mut self) -> Self {
+        self.page = Page::Keyboard;
+        self
+    }
+
     /// True once after "Check now" was clicked.
     pub fn take_check_request(&mut self) -> bool {
         std::mem::take(&mut self.check_requested)

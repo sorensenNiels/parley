@@ -81,7 +81,6 @@ impl SessionConfig {
 /// The operator presses Reset to go on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperatorError {
-    ProtectedArea,
     AlphaOnly,
     NumericOnly,
     DigitsOnly,
@@ -97,7 +96,6 @@ pub enum OperatorError {
 impl OperatorError {
     pub const fn message(self) -> &'static str {
         match self {
-            Self::ProtectedArea => "The cursor is in a protected area of the screen.",
             Self::AlphaOnly => "Only letters, comma, period, minus and space are allowed here.",
             Self::NumericOnly => {
                 "Only digits, plus, minus, comma, period and space are allowed here."

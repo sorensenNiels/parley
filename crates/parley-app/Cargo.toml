@@ -45,7 +45,7 @@ icons = ["icons/32.png", "icons/64.png", "icons/128.png", "icons/256.png", "icon
 out-dir = "../../target/packages"
 binaries = [{ path = "parley", main = true }]
 # The bundled fonts' licence (SIL OFL 1.1) must travel with them.
-resources = ["../parley-ui-egui/assets/fonts/Inter-LICENSE.txt", "../parley-ui-egui/assets/fonts/JetBrainsMono-LICENSE.txt", "../parley-ui-egui/assets/fonts/IBMPlexMono-LICENSE.txt"]
+resources = ["../parley-ui-egui/assets/fonts/Inter-LICENSE.txt", "../parley-ui-egui/assets/fonts/JetBrainsMono-LICENSE.txt", "../parley-ui-egui/assets/fonts/IBMPlexMono-LICENSE.txt", "../parley-ui-egui/assets/fonts/Phosphor-LICENSE.txt"]
 
 [package.metadata.packager.deb]
 # X11 keyboard and OpenGL/EGL are loaded at run time by the window library; fontconfig by

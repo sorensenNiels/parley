@@ -195,17 +195,26 @@ fn keys_are_ignored_while_the_keyboard_is_locked() {
 }
 
 #[test]
-fn typing_in_a_protected_area_inhibits_the_keyboard_until_reset() {
+fn typing_in_a_protected_area_is_ignored_and_tab_moves_on_r_key_8() {
+    // D18: no operator error and no Reset; the screen is left as it was.
     let mut s = signed_on();
+    let before = s.screen().text(s.code_page());
     s.key(Key::MoveTo { row: 0, column: 0 });
-    s.key(Key::Char('x'));
-    assert_eq!(
-        s.keyboard(),
-        KeyboardState::Error(OperatorError::ProtectedArea)
-    );
+    for key in [
+        Key::Char('x'),
+        Key::Char('æ'),
+        Key::Delete,
+        Key::Backspace,
+        Key::EraseEof,
+        Key::FieldExit,
+    ] {
+        s.key(key);
+        assert_eq!(s.keyboard(), KeyboardState::Unlocked, "{key:?}");
+    }
+    assert_eq!(s.screen().text(s.code_page()), before);
     s.key(Key::Tab);
-    assert_eq!(s.screen().cursor, 0, "inhibited: Tab did nothing");
-    s.key(Key::Reset);
+    assert_ne!(s.screen().cursor, 0, "Tab goes to the next input field");
+    s.key(Key::Char('a'));
     assert_eq!(s.keyboard(), KeyboardState::Unlocked);
 }
 

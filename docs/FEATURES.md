@@ -29,6 +29,34 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
   shows an imported macro at once; Open folder is gone. `cargo deny` passes with the GTK crates. **Not seen:** the file window itself (it
   needs a click in the running app). **Left:** the owner imports and exports macros on Windows, macOS, Linux and
   WSL, then move R-KEY-7 to REQUIREMENTS.md.
+- **R-KEY-8** (2026-11-13): a key typed in a protected area is ignored, with no error to Reset (D18), built.
+  **Automated** (`make test`): in parley-core, a character (also `æ`), Delete, Backspace, Erase EOF and Field Exit at a
+  protected position leave the keyboard unlocked and the screen unchanged, and Tab then goes to the next input field.
+  **Left:** the owner types outside a field on a real screen on each OS.
+- **R-UI-13** (2026-11-12): icons from the bundled Phosphor font (D17), built. **Automated** (`make test`): every
+  icon in `icons::ALL` is in the icon font, which is the only font in its family and stays out of the text families
+  (Inter has glyphs of its own at some of the same codepoints). **Seen** in `--screenshot`s on PUB400's sign-on screen
+  (WSL2, light and dark). **Left:** the owner checks the menus, the Keys menu and the status bar on Windows, macOS and Linux.
+- **R-UI-14** (2026-11-12): the interactive status bar, built. **Automated** (`make test`): the state, TLS, keyboard
+  map, code page, size and cursor show, INS only in insert mode; a narrow bar drops size and code page but keeps TLS
+  and the cursor; the clock times the host from an AID key to the unlocked keyboard; the lock is noticed in the frame Enter
+  goes down, the hourglass has its own slot beside the check, which stays, and Keys does not move; the REC pill and Stop keep the
+  state pill in place (R-KEY-6); choosing a map in the chip saves it to the session. **Seen** in `--screenshot`s (WSL2,
+  light and dark: Ready, 125 ms, 24×80, CCSID 37, Default, 5, 25). **Left:** Connect again after a disconnect, the map
+  menu and the hovers, checked by the owner in the running app on each OS.
+- **R-UI-15** (2026-11-12): one header with the session pill, built. **Automated** (`make test`): menus and Help are
+  there before connecting; the pill shows host:port and its menu disconnects; Connect to another session while
+  connected closes the open one first. **Seen** in `--screenshot`s (WSL2, light and dark). **Left:** the owner opens
+  the menus (icons, keys) and switches sessions from the pill on each OS.
+- **R-UI-16** (2026-11-12, changed 2026-11-13): the 5250 keys in a Keys menu in the status bar, built. **Automated**
+  (`make test`): Attention and F15 are sent from the menu, the menu lists System Request and F24 while connected, and
+  there is no Keys button before connecting. **Seen** in a `--screenshot` (WSL2, light): Ready, Keys, then the chips.
+  **Not seen:** the open menu. **Left:** the owner uses the menu on each OS.
+- **R-UI-17** (2026-11-12): the keyboard shortcut sheet, built. **Automated** (`make test`): the Default map's keys
+  under Settings' headings, Ctrl+/ opens it from the screen and it stays open the next frame, Esc closes it (not on
+  the frame it opens), both close buttons, Change keys… opens Settings ▸ Keyboard, the filter, and the dialog keeps
+  its place. **Not seen:** the sheet itself in a screenshot. **Left:** the owner opens it with Ctrl+/ (also on a
+  Danish keyboard, where / is Shift+7) on each OS.
 
 ## Implemented
 

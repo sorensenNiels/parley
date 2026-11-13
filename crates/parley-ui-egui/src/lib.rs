@@ -7,12 +7,15 @@ mod addons;
 mod connect;
 mod dialog;
 mod fonts;
+mod icons;
 mod keymap;
+mod keys;
 mod macros;
 mod menu;
 mod profile;
 mod sessions;
 mod settings;
+mod shortcuts;
 mod status;
 mod terminal;
 mod theme;
@@ -62,7 +65,10 @@ pub struct ParleyUi {
     updates: updates::Updates,
     /// Give the terminal the keyboard focus on the next frame.
     focus_terminal: bool,
-    show_shortcuts: bool,
+    /// The keyboard shortcut sheet, while it is open (R-UI-17).
+    shortcut_sheet: Option<shortcuts::Sheet>,
+    /// The response time and the recording's length in the status bar (R-UI-14).
+    clock: status::Clock,
     /// The operator is being asked whether to close the window.
     asking_to_exit: bool,
     /// Closing is decided: the next close request goes through.
@@ -100,7 +106,8 @@ impl ParleyUi {
             logo: menu::Logo::default(),
             updates: updates::Updates::default(),
             focus_terminal: false,
-            show_shortcuts: false,
+            shortcut_sheet: None,
+            clock: status::Clock::default(),
             asking_to_exit: false,
             exit_confirmed: false,
             macros: Macros::new(Box::new(NoMacroStore)),
@@ -205,39 +212,71 @@ impl ParleyUi {
         }
     }
 
-    /// The status bar; true when its Stop (beside REC) was clicked (R-KEY-6).
+    /// The status bar (R-UI-14); what was clicked in it.
     fn status_panel(
         &self,
         ui: &mut Ui,
         frame: Frame,
         session: Option<&parley_core::Session>,
         link: Option<&LinkState>,
-    ) -> bool {
+    ) -> Option<status::StatusAction> {
+        let maps: Vec<String> = std::iter::once(KeyMap::built_in())
+            .chain(&self.settings.keyboard_maps)
+            .map(|m| m.name.clone())
+            .collect();
+        let status = status::Status {
+            session,
+            link,
+            config: self.current.as_ref().map(|p| &p.config),
+            note: self.closed.as_deref().or(self.warning.as_deref()),
+            macros: self.addon_on(AddOn::Macros),
+            can_connect_again: self.current_index().is_some(),
+            map: &self.keyboard_map().name,
+            keymap: self.keyboard_map(),
+            mac: is_mac(ui.ctx()),
+            maps: &maps,
+            clock: &self.clock,
+        };
         Panel::bottom("status_bar")
             .frame(frame)
-            .show(ui, |ui| {
-                status::status_bar(
-                    ui,
-                    session,
-                    link,
-                    self.current.as_ref().is_some_and(|p| p.config.tls),
-                    self.closed.as_deref().or(self.warning.as_deref()),
-                    self.addon_on(AddOn::Macros),
-                )
-            })
+            .show(ui, |ui| status::status_bar(ui, &status))
             .inner
     }
 
-    /// View ▸ Keyboard shortcuts: the keys of the map in use, in a side panel; true when its
-    /// close button was clicked.
-    fn shortcuts_panel(&self, ui: &mut Ui) -> bool {
-        let macro_names = self.addon_on(AddOn::Macros).then(|| self.macro_names());
-        let list = self
-            .keyboard_map()
-            .shortcuts(macro_names.as_deref(), is_mac(ui.ctx()));
-        Panel::right("shortcuts")
-            .show(ui, |ui| shortcuts(ui, &list))
-            .inner
+    /// The keys of this frame may have locked the keyboard after the status bar was drawn:
+    /// note it now, and draw again at once so the hourglass shows while the host works
+    /// (R-UI-14). Nothing else asks for a frame until the host answers.
+    fn observe_keys_taken(&mut self, ctx: &egui::Context, session: Option<&parley_core::Session>) {
+        let was_waiting = self.clock.waiting();
+        self.clock.observe(session, std::time::Instant::now());
+        if self.clock.waiting() != was_waiting {
+            ctx.request_repaint();
+        }
+    }
+
+    /// Carries out what was clicked in the status bar.
+    fn status_action(&mut self, action: status::StatusAction, actions: &mut Vec<Action>) {
+        match action {
+            status::StatusAction::StopRecording => actions.push(Action::StopRecording),
+            status::StatusAction::ConnectAgain => {
+                if let Some(index) = self.current_index() {
+                    actions.push(Action::Connect(index));
+                }
+            }
+            status::StatusAction::UseMap(name) => self.use_keyboard_map(&name),
+            status::StatusAction::Key(key) => actions.push(Action::Key(key)),
+        }
+    }
+
+    /// The session in use, and its saved copy, use the keyboard map `name` (R-KEY-2).
+    fn use_keyboard_map(&mut self, name: &str) {
+        let index = self.current_index();
+        if let Some(current) = self.current.as_mut() {
+            name.clone_into(&mut current.keyboard_map);
+        }
+        if let Some(saved) = index.and_then(|i| self.profiles.get_mut(i)) {
+            name.clone_into(&mut saved.keyboard_map);
+        }
     }
 
     /// The keyboard map of the session in use (R-KEY-2).
@@ -296,27 +335,17 @@ impl ParleyUi {
         let connection = self.connection.take();
         let link = connection.as_ref().map(Connection::state);
         let mut session = connection.as_ref().map(Connection::session);
-        let connected = session.is_some();
+        self.clock
+            .observe(session.as_deref(), std::time::Instant::now());
         let mut actions = Vec::new();
 
         // Made before the panels borrow `ui`.
         let menu_frame = theme::bar(ui, Margin::symmetric(8, 3));
-        let tool_frame = theme::bar(ui, Margin::symmetric(10, 6));
         let status_frame = theme::bar(ui, Margin::symmetric(8, 5));
-        actions.extend(self.menu_panel(ui, menu_frame, session.as_deref()));
-        Panel::top("toolbar").frame(tool_frame).show(ui, |ui| {
-            let config = self
-                .current
-                .as_ref()
-                .filter(|_| connected)
-                .map(|p| &p.config);
-            actions.extend(menu::toolbar(ui, config));
-        });
-        if self.status_panel(ui, status_frame, session.as_deref(), link.as_ref()) {
-            actions.push(Action::StopRecording);
-        }
-        if self.show_shortcuts && self.shortcuts_panel(ui) {
-            actions.push(Action::ToggleShortcuts);
+        actions.extend(self.menu_panel(ui, menu_frame, session.as_deref(), link.as_ref()));
+        if let Some(chosen) = self.status_panel(ui, status_frame, session.as_deref(), link.as_ref())
+        {
+            self.status_action(chosen, &mut actions);
         }
         let mut asked = Vec::new();
         if let Some(session) = session.as_deref_mut() {
@@ -352,6 +381,7 @@ impl ParleyUi {
         if let Some(session) = session.as_deref_mut() {
             self.carry_out_keys(asked, session);
         }
+        self.observe_keys_taken(ui.ctx(), session.as_deref());
         if let Some(session) = session.as_deref_mut() {
             self.macro_needs_password(session);
         }
@@ -371,40 +401,42 @@ impl ParleyUi {
 
         self.show_editor(ui.ctx());
         self.show_settings(ui.ctx());
+        self.show_shortcut_sheet(ui.ctx());
         self.show_macro_dialogs(ui.ctx());
         self.show_exit_question(ui.ctx());
     }
 
-    /// The menu bar; returns what was chosen from it.
+    /// The header (R-UI-15); returns what was chosen from it.
     fn menu_panel(
         &mut self,
         ui: &mut Ui,
         frame: Frame,
         session: Option<&parley_core::Session>,
+        link: Option<&LinkState>,
     ) -> Option<Action> {
         let macro_names = self.macro_names();
         let macro_menu = menu::MacroMenu {
             state: session.map(parley_core::Session::macro_state),
             names: &macro_names,
         };
-        let macros_on = self.addon_on(AddOn::Macros);
+        let logo = self.logo.texture(ui.ctx()).cloned();
+        let header = menu::Header {
+            link,
+            profiles: &self.profiles,
+            current: self.current.as_ref(),
+            logo: logo.as_ref(),
+            newer: self.updates.available(),
+            macros: self.addon_on(AddOn::Macros).then_some(&macro_menu),
+            map: self.keyboard_map(),
+            mac: is_mac(ui.ctx()),
+        };
         Panel::top("menu_bar")
             .frame(frame)
-            .show(ui, |ui| {
-                menu::menu_bar(
-                    ui,
-                    session.is_some(),
-                    self.show_shortcuts,
-                    &self.profiles,
-                    self.logo.texture(ui.ctx()),
-                    self.updates.available(),
-                    macros_on.then_some(&macro_menu),
-                )
-            })
+            .show(ui, |ui| menu::menu_bar(ui, &header))
             .inner
     }
 
-    /// Does what the menus, toolbar and start screen asked, except opening and closing the
+    /// Does what the header, key strip, status bar and start screen asked, except opening and closing the
     /// connection, which [`Self::ui`] does once the frame is done with the current one.
     fn carry_out(
         &mut self,
@@ -423,8 +455,11 @@ impl ParleyUi {
                         .or((!self.profiles.is_empty()).then_some(0));
                     self.open_editor(index);
                 }
-                Action::Connect(i) if !connected => next.connect = Some(i),
-                Action::Connect(_) => {}
+                Action::Connect(i) => {
+                    // From the session pill: the open session closes first.
+                    next.disconnect = connected;
+                    next.connect = Some(i);
+                }
                 Action::Disconnect => next.disconnect = true,
                 Action::Exit => ctx.send_viewport_cmd(ViewportCommand::Close),
                 Action::CopyScreen => {
@@ -443,7 +478,7 @@ impl ParleyUi {
                     self.settings_dialog = Some(dialog);
                     self.updates.start(ctx, updates::Check::Now);
                 }
-                Action::ToggleShortcuts => self.show_shortcuts = !self.show_shortcuts,
+                Action::Shortcuts => self.shortcut_sheet = Some(shortcuts::Sheet::default()),
                 Action::Key(key) => {
                     if let Some(s) = session.as_deref_mut() {
                         s.key(key);
@@ -534,6 +569,28 @@ impl ParleyUi {
         }
     }
 
+    /// The keyboard shortcut sheet, while it is open (R-UI-17).
+    fn show_shortcut_sheet(&mut self, ctx: &egui::Context) {
+        if self.shortcut_sheet.is_none() {
+            return;
+        }
+        let macros = self.addon_on(AddOn::Macros).then(|| self.macro_names());
+        let map = self.keyboard_map();
+        let groups = shortcuts::groups(map, macros.as_deref(), is_mac(ctx));
+        let close_keys = map.chords_for(&Function::Shortcuts);
+        let Some(sheet) = &mut self.shortcut_sheet else {
+            return;
+        };
+        match sheet.show(ctx, &groups, &close_keys) {
+            shortcuts::Outcome::Open => {}
+            shortcuts::Outcome::Close => self.shortcut_sheet = None,
+            shortcuts::Outcome::ChangeKeys => {
+                self.shortcut_sheet = None;
+                self.settings_dialog = Some(self.open_settings(ctx).on_keyboard_page());
+            }
+        }
+    }
+
     fn show_settings(&mut self, ctx: &egui::Context) {
         let Some(dialog) = &mut self.settings_dialog else {
             return;
@@ -605,6 +662,7 @@ impl ParleyUi {
                     }
                 }
                 Function::RunMacro(name) => self.play(session, &name),
+                Function::Shortcuts => self.shortcut_sheet = Some(shortcuts::Sheet::default()),
                 Function::Key(_) | Function::CopyScreen | Function::Paste => {}
             }
         }
@@ -711,23 +769,6 @@ struct Next {
     connect: Option<usize>,
 }
 
-/// The keys of the map in use, in a side panel; returns true when its close button was
-/// clicked. `list` is (keys, what they do).
-fn shortcuts(ui: &mut Ui, list: &[(String, String)]) -> bool {
-    let close = dialog::title_bar(ui, "Keyboard shortcuts");
-    ui.add_space(4.0);
-    egui::ScrollArea::vertical().show(ui, |ui| {
-        egui::Grid::new("shortcuts").striped(true).show(ui, |ui| {
-            for (keys, function) in list {
-                ui.label(keys);
-                ui.label(function);
-                ui.end_row();
-            }
-        });
-    });
-    close
-}
-
 /// Whether to name keys as macOS does (Cmd+C).
 fn is_mac(ctx: &egui::Context) -> bool {
     ctx.os() == egui::os::OperatingSystem::Mac
@@ -746,16 +787,34 @@ pub(crate) mod test_support {
 
     use crate::{MacroStore, Profile, StoredMacro};
 
+    /// Parley's fonts, once per context, for a widget tested on its own: the icons and
+    /// `theme::semibold` need them.
+    pub fn install_fonts(ui: &egui::Ui) {
+        let id = egui::Id::unique("test_support::install_fonts");
+        let done = ui
+            .ctx()
+            .data_mut(|d| std::mem::replace(d.get_temp_mut_or_default::<bool>(id), true));
+        if !done {
+            crate::theme::install(ui.ctx(), crate::fonts::DEFAULT_TERMINAL_FONT);
+        }
+    }
+
     /// A session showing "Hello" and one input field at row 2, column 2, waiting for input.
     pub fn waiting_session() -> Session {
+        let mut session = Session::new(SessionConfig::default());
+        session.receive(&waiting_screen());
+        session
+    }
+
+    /// The host's record behind [`waiting_session`]: the screen, then a read that unlocks the
+    /// keyboard.
+    pub fn waiting_screen() -> Vec<u8> {
         let mut data = vec![0x04, 0x40, 0x04, 0x11, 0x00, 0x00, 0x11, 1, 1];
         data.extend("Hello".chars().filter_map(|c| CodePage::Ccsid37.to_byte(c)));
         data.extend([
             0x11, 2, 1, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A, 0x04, 0x52, 0x00, 0x00,
         ]);
-        let mut session = Session::new(SessionConfig::default());
-        session.receive(&Telnet::frame(&record::build(0, Opcode::PutGet, &data)));
-        session
+        Telnet::frame(&record::build(0, Opcode::PutGet, &data))
     }
 
     /// Macros in memory, shared with the test so it can look inside.
@@ -845,14 +904,20 @@ pub(crate) mod test_support {
 mod tests {
     use super::*;
     use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable;
+    use egui_kittest::kittest::{By, Queryable};
 
     use test_support::profile;
+
+    /// Frames `Harness::run` may take to settle: the connection thread and the search for
+    /// installed fonts ask for repaints of their own, so a busy machine needs a few more than
+    /// kittest's default of 4.
+    const SETTLE_STEPS: u64 = 16;
 
     fn app_with(profiles: Vec<Profile>) -> Harness<'static, ParleyUi> {
         let app = ParleyUi::new(profiles);
         Harness::builder()
             .with_size(egui::vec2(1000.0, 800.0))
+            .with_max_steps(SETTLE_STEPS)
             .build_ui_state(|ui, app: &mut ParleyUi| app.ui(ui), app)
     }
 
@@ -918,14 +983,43 @@ mod tests {
     }
 
     #[test]
-    fn the_shortcuts_panel_closes_with_its_close_button() {
-        // R-UI-7
+    fn the_shortcut_sheet_closes_with_its_close_buttons_r_ui_17() {
+        // R-UI-7: the 🗙 in the title row and Close at the bottom.
+        for which in 0..2 {
+            let mut harness = app_with(Vec::new());
+            harness.state_mut().shortcut_sheet = Some(shortcuts::Sheet::default());
+            harness.run();
+            let close = harness.get_all_by_label("Close").nth(which).expect("two");
+            close.click();
+            harness.run();
+            assert!(harness.state().shortcut_sheet.is_none(), "button {which}");
+        }
+    }
+
+    #[test]
+    fn the_shortcut_sheet_closes_with_esc_but_not_on_the_frame_it_opens_r_ui_17() {
         let mut harness = app_with(Vec::new());
-        harness.state_mut().show_shortcuts = true;
+        harness.state_mut().shortcut_sheet = Some(shortcuts::Sheet::default());
+        harness.key_press(egui::Key::Escape);
         harness.run();
-        harness.get_by_label("Close").click();
+        assert!(
+            harness.state().shortcut_sheet.is_some(),
+            "the opening frame"
+        );
+        harness.key_press(egui::Key::Escape);
         harness.run();
-        assert!(!harness.state().show_shortcuts);
+        assert!(harness.state().shortcut_sheet.is_none());
+    }
+
+    #[test]
+    fn change_keys_in_the_sheet_opens_settings_on_the_keyboard_page_r_ui_17() {
+        let mut harness = app_with(Vec::new());
+        harness.state_mut().shortcut_sheet = Some(shortcuts::Sheet::default());
+        harness.run();
+        harness.get_by_label("Change keys…").click();
+        harness.run();
+        assert!(harness.state().shortcut_sheet.is_none());
+        assert!(harness.state().settings_dialog.is_some());
     }
 
     #[test]
@@ -998,6 +1092,18 @@ mod tests {
                 assert!(found, "the bundled fonts have no glyph for {symbol}");
                 ui.label(symbol);
                 ui.label(theme::semibold(symbol));
+            }
+            // R-UI-13: the icons from the icon font itself, the only font in their family.
+            let family = egui::FontFamily::Name(icons::FAMILY.into());
+            for icon in icons::ALL {
+                let font = egui::FontId::new(13.0, family.clone());
+                let found = ui.ctx().fonts_mut(|f| f.has_glyphs(&font, icon));
+                assert!(
+                    found,
+                    "the icon font has no glyph for U+{:X}",
+                    icon.chars().next().map_or(0, u32::from)
+                );
+                ui.label(icons::icon(icon));
             }
         });
         harness.run();
@@ -1340,51 +1446,119 @@ mod tests {
     }
 
     #[test]
-    fn the_menu_bar_toolbar_and_status_bar_are_there_before_connecting() {
-        // R-UI-4
-        let harness =
-            Harness::new_ui_state(|ui, app: &mut ParleyUi| app.ui(ui), ParleyUi::default());
-        for menu in ["File", "Edit", "View", "Tools"] {
+    fn the_header_and_status_bar_are_there_before_connecting_without_the_keys_menu() {
+        // R-UI-15, R-UI-16: one header row; the Keys menu only while connected.
+        let harness = app_with(Vec::new());
+        for menu in ["File", "Edit", "View", "Tools", "Help", "Offline"] {
             harness.get_by_label(menu);
         }
-        assert_eq!(
-            harness.get_all_by_label("Help").count(),
-            2,
-            "the menu and the toolbar key"
-        );
-        harness.get_by_label("Attn");
-        harness.get_by_label("Offline");
+        assert!(harness.query_by_label("Keys").is_none());
     }
 
     #[test]
-    fn the_shortcuts_panel_opens_from_the_view_menu() {
-        let mut harness =
-            Harness::new_ui_state(|ui, app: &mut ParleyUi| app.ui(ui), ParleyUi::default());
+    fn the_shortcut_sheet_opens_from_the_view_menu_r_ui_17() {
+        let mut harness = app_with(Vec::new());
         harness.get_by_label("View").click();
         harness.run();
         harness.get_by_label("Keyboard shortcuts").click();
         harness.run();
-        assert!(harness.state().show_shortcuts);
+        assert!(harness.state().shortcut_sheet.is_some());
         harness.get_by_label("Field Exit");
     }
 
+    /// The status bar for `session` on TLS, with the Default map and a clock.
+    fn status_harness(
+        session: parley_core::Session,
+        clock: status::Clock,
+        width: f32,
+    ) -> Harness<'static> {
+        let config = parley_core::SessionConfig {
+            tls: true,
+            ..parley_core::SessionConfig::default()
+        };
+        Harness::builder()
+            .with_size(egui::vec2(width, 40.0))
+            .build_ui(move |ui| {
+                test_support::install_fonts(ui);
+                let maps = ["Default".to_owned()];
+                status::status_bar(
+                    ui,
+                    &status::Status {
+                        session: Some(&session),
+                        link: Some(&LinkState::Connected),
+                        config: Some(&config),
+                        note: None,
+                        macros: true,
+                        can_connect_again: false,
+                        map: "Default",
+                        keymap: KeyMap::built_in(),
+                        mac: false,
+                        maps: &maps,
+                        clock: &clock,
+                    },
+                );
+            })
+    }
+
     #[test]
-    fn the_status_bar_shows_the_keyboard_connection_and_cursor() {
-        // R-UI-2
-        let session = test_support::waiting_session();
-        let harness = Harness::new_ui(move |ui| {
-            status::status_bar(
-                ui,
-                Some(&session),
-                Some(&LinkState::Connected),
-                true,
-                None,
-                true,
-            );
-        });
-        for text in ["Ready", "Online", "TLS", "2,2"] {
+    fn the_status_bar_shows_the_state_tls_map_code_page_size_and_cursor_r_ui_14() {
+        let harness = status_harness(
+            test_support::waiting_session(),
+            status::Clock::default(),
+            1000.0,
+        );
+        for text in ["Ready", "CCSID 37", "24×80", "2, 2"] {
             harness.get_by_label(text);
         }
+        harness.get(By::new().label_contains("TLS"));
+        assert!(
+            harness
+                .query_all(By::new().label_contains("Default"))
+                .next()
+                .is_some()
+        );
+        assert!(
+            harness.query_by_label("INS").is_none(),
+            "only in insert mode"
+        );
+    }
+
+    #[test]
+    fn the_hourglass_has_its_own_slot_beside_the_ready_icon_r_ui_14() {
+        // The check stays while the host works; the hourglass comes beside it and nothing moves.
+        use parley_core::{Aid, Key};
+        let ready = status_harness(
+            test_support::waiting_session(),
+            status::Clock::default(),
+            1000.0,
+        );
+        assert!(ready.query_by_label("X SYSTEM").is_none());
+        let check = ready.get_by_label("Ready").rect();
+        let keys = ready.get_by_label("Keys").rect();
+        let mut session = test_support::waiting_session();
+        session.key(Key::Aid(Aid::ENTER));
+        let waiting = status_harness(session, status::Clock::default(), 1000.0);
+        let hourglass = waiting.get_by_label("X SYSTEM").rect();
+        assert_eq!(
+            waiting.get_by_label("Connected").rect(),
+            check,
+            "the check stays"
+        );
+        assert!(hourglass.left() >= check.right(), "beside the check");
+        assert_eq!(waiting.get_by_label("Keys").rect(), keys);
+    }
+
+    #[test]
+    fn a_narrow_status_bar_drops_size_and_code_page_but_keeps_tls_and_the_cursor_r_ui_14() {
+        let harness = status_harness(
+            test_support::waiting_session(),
+            status::Clock::default(),
+            380.0,
+        );
+        assert!(harness.query_by_label("24×80").is_none());
+        assert!(harness.query_by_label("CCSID 37").is_none());
+        harness.get_by_label("2, 2");
+        harness.get(By::new().label_contains("TLS"));
     }
 
     #[test]
@@ -1769,13 +1943,16 @@ mod tests {
         );
         // The connection comes up on its own thread.
         for _ in 0..200 {
-            if harness.query_by_label("Online").is_some() {
+            let state = harness.state().connection.as_ref().map(Connection::state);
+            if matches!(state, Some(LinkState::Connected)) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
             harness.run();
         }
-        let online = harness.get_by_label("Online").rect();
+        harness.run();
+        // No screen yet: the keyboard waits for the host.
+        let pill = harness.get_by_label("X SYSTEM").rect();
         harness
             .state()
             .connection
@@ -1785,12 +1962,132 @@ mod tests {
             .start_recording();
         harness.run();
         // A taller box would make the bar grow and move the others.
-        assert_eq!(harness.get_by_label("Online").rect(), online);
+        assert_eq!(harness.get_by_label("X SYSTEM").rect(), pill);
         harness.get_by_label("Stop").click();
         harness.run();
         let app = harness.state();
         let session = app.connection.as_ref().expect("connected").session();
         assert_eq!(session.macro_state(), parley_core::MacroState::Off);
         assert!(app.save_macro.is_some(), "it asks for the macro's name");
+    }
+
+    /// Connected to a local listener as "Local", with "Other" saved too; waits for the link.
+    fn connected_app() -> (Harness<'static, ParleyUi>, std::net::TcpListener) {
+        let mut harness = app_with(vec![
+            profile("Local", "127.0.0.1"),
+            profile("Other", "other"),
+        ]);
+        let host = connect_locally(&mut harness, "");
+        for _ in 0..200 {
+            let state = harness.state().connection.as_ref().map(Connection::state);
+            if matches!(state, Some(LinkState::Connected)) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            harness.run();
+        }
+        harness.run();
+        (harness, host)
+    }
+
+    #[test]
+    fn the_wait_for_the_host_is_noticed_in_the_frame_enter_goes_down_r_ui_14() {
+        // The status bar is drawn before the terminal takes Enter: without a look at the
+        // keyboard after the keys, the hourglass would wait for the next input or answer.
+        let (mut harness, _host) = connected_app();
+        let connection = harness.state().connection.as_ref().expect("connected");
+        connection
+            .session()
+            .receive(&test_support::waiting_screen());
+        harness.run();
+        assert!(!harness.state().clock.waiting());
+        // Only the key going down, in one pass: nothing after it may be needed to notice.
+        harness
+            .ctx
+            .options_mut(|o| o.max_passes = std::num::NonZeroUsize::MIN);
+        harness.event(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.step();
+        assert!(harness.state().clock.waiting(), "the clock saw the lock");
+    }
+
+    #[test]
+    fn the_keys_menu_in_the_status_bar_lists_the_5250_keys_while_connected_r_ui_16() {
+        let (mut harness, _host) = connected_app();
+        harness.get_by_label("Keys").click();
+        harness.run();
+        for key in ["Attention", "System Request", "F24"] {
+            harness.get_by_label(key);
+        }
+    }
+
+    #[test]
+    fn the_session_pill_shows_the_session_and_disconnects_r_ui_15() {
+        let (mut harness, _host) = connected_app();
+        harness.get(By::new().label_contains("127.0.0.1:")).click();
+        harness.run();
+        harness.get_by_label("Edit session…");
+        harness.get_by_label("Disconnect").click();
+        harness.run();
+        assert!(harness.state().connection.is_none());
+        harness.get_by_label("Offline");
+    }
+
+    #[test]
+    fn connect_to_another_session_while_connected_closes_the_open_one_first_r_ui_15() {
+        let (mut harness, _host) = connected_app();
+        let ctx = harness.ctx.clone();
+        let app = harness.state_mut();
+        let next = app.carry_out(&ctx, vec![Action::Connect(1)], None);
+        assert!(!next.disconnect, "nothing open: only connect");
+        let connection = app.connection.take().expect("connected");
+        let next = app.carry_out(
+            &ctx,
+            vec![Action::Connect(1)],
+            Some(&mut connection.session()),
+        );
+        assert!(next.disconnect, "the open session closes first");
+        assert_eq!(next.connect, Some(1));
+    }
+
+    #[test]
+    fn choosing_a_keyboard_map_in_the_status_bar_saves_it_to_the_session_r_ui_14() {
+        let (mut harness, _host) = connected_app();
+        harness.state_mut().set_settings(with_map("Mine"));
+        harness.run();
+        harness.get(By::new().label_contains("Default")).click();
+        harness.run();
+        harness.get_by_label("Mine").click();
+        harness.run();
+        assert_eq!(harness.state().keyboard_map().name, "Mine");
+        assert_eq!(harness.state().profiles()[0].keyboard_map, "Mine");
+    }
+
+    #[test]
+    fn ctrl_slash_on_the_screen_opens_the_shortcut_sheet_r_ui_17() {
+        let (mut harness, _host) = connected_app();
+        harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::Slash);
+        harness.run();
+        assert!(harness.state().shortcut_sheet.is_some());
+        harness.run();
+        assert!(
+            harness.state().shortcut_sheet.is_some(),
+            "still open a frame later"
+        );
+    }
+
+    #[test]
+    fn the_shortcut_sheet_keeps_its_place_from_frame_to_frame_r_ui_17() {
+        let mut harness = app_with(Vec::new());
+        harness.state_mut().shortcut_sheet = Some(shortcuts::Sheet::default());
+        harness.run();
+        let before = harness.get_by_label("Change keys…").rect();
+        harness.run_steps(5);
+        assert_eq!(harness.get_by_label("Change keys…").rect(), before);
     }
 }

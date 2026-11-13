@@ -1,6 +1,7 @@
 //! The terminal's font (R-UI-6): one of the bundled monospace fonts or one installed on the
 //! system, chosen in the settings. The UI's own fonts are set up in [`crate::theme`]. The
-//! bundled fonts are under the SIL Open Font License (`assets/fonts/*-LICENSE.txt`).
+//! bundled text fonts are under the SIL Open Font License, the icon font under MIT
+//! (`assets/fonts/*-LICENSE.txt`).
 
 use std::sync::{Arc, Mutex, PoisonError};
 

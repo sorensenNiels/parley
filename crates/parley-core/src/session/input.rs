@@ -97,7 +97,10 @@ impl Session {
             Key::FieldMinus => self.field_exit(true),
             Key::Delete => self.delete(),
             Key::Backspace => self.backspace(),
-            Key::EraseEof => self.erase_eof(),
+            Key::EraseEof => {
+                self.erase_eof();
+                Ok(())
+            }
             Key::ToggleInsert => {
                 self.insert = !self.insert;
                 Ok(())
@@ -139,11 +142,13 @@ impl Session {
         self.lock();
     }
 
-    fn input_field_at_cursor(&self) -> Result<usize, OperatorError> {
+    /// The input field the cursor is in. `None` at a protected position: an editing key does
+    /// nothing there, with no operator error to Reset (R-KEY-8, D18; a real 5250 inhibits the
+    /// keyboard, IBM 5250 Functions Reference, operator error 0005). Tab still moves on.
+    fn input_field_at_cursor(&self) -> Option<usize> {
         self.screen
             .field_at(self.screen.cursor)
             .filter(|&i| self.screen.field(i).is_some_and(Field::is_input))
-            .ok_or(OperatorError::ProtectedArea)
     }
 
     fn mark_modified(&mut self, index: usize) {
@@ -153,7 +158,9 @@ impl Session {
     }
 
     fn type_char(&mut self, c: char) -> Result<(), OperatorError> {
-        let index = self.input_field_at_cursor()?;
+        let Some(index) = self.input_field_at_cursor() else {
+            return Ok(());
+        };
         let Some(field) = self.screen.field(index).copied() else {
             return Ok(());
         };
@@ -220,7 +227,9 @@ impl Session {
     /// Field Exit, Field+ and Field-: nulls the rest of the field, adjusts it, sets the sign,
     /// and goes to the next field (or sends Enter in an auto-enter field).
     fn field_exit(&mut self, minus: bool) -> Result<(), OperatorError> {
-        let index = self.input_field_at_cursor()?;
+        let Some(index) = self.input_field_at_cursor() else {
+            return Ok(());
+        };
         let Some(field) = self.screen.field(index).copied() else {
             return Ok(());
         };
@@ -279,7 +288,9 @@ impl Session {
     }
 
     fn delete(&mut self) -> Result<(), OperatorError> {
-        let index = self.input_field_at_cursor()?;
+        let Some(index) = self.input_field_at_cursor() else {
+            return Ok(());
+        };
         let Some(field) = self.screen.field(index).copied() else {
             return Ok(());
         };
@@ -301,7 +312,6 @@ impl Session {
         let cursor = self.screen.cursor;
         let in_field = self
             .input_field_at_cursor()
-            .ok()
             .and_then(|i| self.screen.field(i));
         match in_field {
             Some(field) if cursor > field.start => {
@@ -315,17 +325,18 @@ impl Session {
         }
     }
 
-    fn erase_eof(&mut self) -> Result<(), OperatorError> {
-        let index = self.input_field_at_cursor()?;
+    fn erase_eof(&mut self) {
+        let Some(index) = self.input_field_at_cursor() else {
+            return;
+        };
         let Some(field) = self.screen.field(index).copied() else {
-            return Ok(());
+            return;
         };
         if self.screen.cursor < field.data_end() {
             self.screen
                 .fill(self.screen.cursor, field.data_end() - 1, 0);
         }
         self.mark_modified(index);
-        Ok(())
     }
 
     /// The cursor to the next input field after the one starting at `start`; it stays if there
