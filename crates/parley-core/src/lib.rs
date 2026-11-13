@@ -6,6 +6,7 @@
 
 pub mod ebcdic;
 pub mod error;
+pub mod hostserver;
 pub mod macros;
 pub mod net;
 pub mod password;

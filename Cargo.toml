@@ -13,6 +13,9 @@ authors = ["Niels P. Sørensen <niels.p.sorensen@softdesign.dk>"]
 [workspace.dependencies]
 parley-core = { path = "crates/parley-core" }
 parley-ui-egui = { path = "crates/parley-ui-egui" }
+des = "0.8"
+sha1 = "0.10"
+getrandom = "0.3"
 
 # Bundled fonts, including the emoji fonts that hold symbols the UI may use.
 egui = { version = "0.37", features = ["default_fonts", "monochrome_emoji_fonts"] }

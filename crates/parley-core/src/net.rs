@@ -3,6 +3,7 @@
 //! The thread owns the socket. It feeds what arrives into the session and sends what the
 //! session queued; the UI locks the session to draw it and to pass it keys.
 
+pub mod hostserver;
 mod tls;
 
 use std::fs::{File, OpenOptions};

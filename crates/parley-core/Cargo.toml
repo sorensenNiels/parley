@@ -15,6 +15,13 @@ serde_json.workspace = true
 ureq.workspace = true
 rustls.workspace = true
 rustls-platform-verifier.workspace = true
+des.workspace = true
+sha1.workspace = true
+getrandom.workspace = true
+
+[dev-dependencies]
+# Reads the password without showing it in examples/sqlprobe.rs (R-NET-9).
+rpassword = "7"
 
 [lints]
 workspace = true

@@ -1,5 +1,5 @@
-//! A password typed for a macro's `password` step (R-KEY-4). Parley never stores one
-//! (R-NET-7): it lives only as long as the step that asked for it.
+//! A password typed for a macro's `password` step (R-KEY-4) or the SQL window's sign-on
+//! (R-SQL-2). Parley never stores one (R-NET-7): it lives only as long as what asked for it.
 
 /// A password. Its `Debug` hides it, so it cannot reach a log or an error by accident.
 #[derive(Clone, Default, PartialEq, Eq)]

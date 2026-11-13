@@ -19,6 +19,15 @@ pub enum Error {
         source: io::Error,
     },
 
+    /// A record from an IBM i host server is not valid (R-SQL-1).
+    #[error("invalid data from the IBM i host server: {what}")]
+    HostServer { what: String },
+
+    /// A sign-on that cannot be sent, or that the host refused (R-SQL-2): a sentence for the
+    /// operator. Never holds the password.
+    #[error("{0}")]
+    SignOn(String),
+
     #[error("TLS: {0}")]
     Tls(String),
 
@@ -40,6 +49,10 @@ pub enum Error {
 impl Error {
     pub(crate) fn data(what: impl Into<String>) -> Self {
         Self::DataStream { what: what.into() }
+    }
+
+    pub(crate) fn host_server(what: impl Into<String>) -> Self {
+        Self::HostServer { what: what.into() }
     }
 
     pub(crate) fn unsupported(what: impl Into<String>) -> Self {

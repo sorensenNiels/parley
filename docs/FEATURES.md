@@ -29,6 +29,29 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
   shows an imported macro at once; Open folder is gone. `cargo deny` passes with the GTK crates. **Not seen:** the file window itself (it
   needs a click in the running app). **Left:** the owner imports and exports macros on Windows, macOS, Linux and
   WSL, then move R-KEY-7 to REQUIREMENTS.md.
+- **R-SQL-1** (2026-11-13): host-server records and the port mapper, built (`parley_core::hostserver`,
+  `net::hostserver`). **Automated** (`make test`): the sign-on replies recorded from the owner's IBM i and PUB400 read
+  into their parameters; a record encodes and decodes to itself (`æøå` in a parameter); broken records (empty, short,
+  wrong length, a template or parameter past the end, an unknown server) are errors; the port mapper is asked by name
+  and its port used, `-` is "not known", odd replies are errors; with no port mapper the caller falls back. **Seen:**
+  `make probe-sql` now uses this code and reads PUB400 as before. **Left:** nothing to see in the app until R-SQL-6.
+- **R-SQL-2** (2026-11-13): sign-on to the sign-on server, built (`hostserver::signon`, `hostserver::substitute`,
+  `net::hostserver::sign_on`). The RFC 4777 substitute (DES, SHA-1) is restored from R-NET-7 with its RFC test
+  vectors; the request layouts and return codes are Manticore's (D19). **Automated** (`make test`): the exchange of
+  attributes is byte for byte the request both hosts answered; the recorded replies give release, seed, password
+  level and job; DES and SHA-1 sign-ons carry type 1 or 3, CCSID 13488, the substitute and the user, never the
+  password; user names fold Danish letters onto `# @ $`; a password the level cannot carry is refused before
+  sending; refusals are sentences (wrong password, the next one disables, expired, …); against a fake sign-on
+  server on a local port a sign-on is attempted once and never retried, and the transcript keeps no substitute and
+  no seeds. **Real host** (2026-11-13): the owner signed on to their IBM i (7.3, password level 0, DES, no TLS)
+  with `make probe-sql … ARGS="--sign-on USER"` at the first attempt; the request is now a fixture the encoder must
+  match byte for byte, and the reply (signed on, CCSID 277) another. **Not verified:** SHA-1 against a real host and
+  a sign-on over TLS (no PUB400 user to be had); the TLS handshake and exchange of attributes over TLS were seen on
+  PUB400 (R-NET-8), and SHA-1 rests on the RFC 4777 test vector. **Left:** the SQL window (R-SQL-6) for the app.
+- **R-NET-8** (2026-11-13): `make probe-sql`, built and run against the owner's IBM i and PUB400 (WSL2): the port
+  mapper, the sign-on server's attributes (release, password level), the database host server, DRDA's EXCSAT, Mapepire
+  and SSH were each identified or reported unreachable, with no sign-on. **Left:** the owner's review, then move
+  R-NET-8 to REQUIREMENTS.md.
 - **R-KEY-8** (2026-11-13): a key typed in a protected area is ignored, with no error to Reset (D18), built.
   **Automated** (`make test`): in parley-core, a character (also `æ`), Delete, Backspace, Erase EOF and Field Exit at a
   protected position leave the keyboard unlocked and the screen unchanged, and Tab then goes to the next input field.
