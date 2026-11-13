@@ -82,6 +82,14 @@ jobs:
           bin=target/${{ matrix.target && format('{0}/', matrix.target) || '' }}release/parley
           "$bin" --version
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: The SQL helper and JTOpen (R-SQL-13)
+        shell: bash
+        run: bash scripts/build-helper.sh target/helpers
+
       - name: Package
         shell: bash
         env:

@@ -11,16 +11,19 @@ use serde::{Deserialize, Serialize};
 pub enum AddOn {
     /// Recording and playing keyboard macros (R-KEY-3, R-KEY-4, R-ADD-2). On by default.
     Macros,
+    /// The SQL window over a Java helper with `JTOpen` (R-SQL-10, D20). Off by default.
+    Sql,
 }
 
 impl AddOn {
     /// Every add-on, in the order Settings lists them.
-    pub const ALL: [Self; 1] = [Self::Macros];
+    pub const ALL: [Self; 2] = [Self::Macros, Self::Sql];
 
     /// The name the settings keep it under.
     pub const fn id(self) -> &'static str {
         match self {
             Self::Macros => "macros",
+            Self::Sql => "sql",
         }
     }
 
@@ -28,6 +31,7 @@ impl AddOn {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Macros => "Macros",
+            Self::Sql => "SQL",
         }
     }
 
@@ -35,6 +39,9 @@ impl AddOn {
     pub const fn about(self) -> &'static str {
         match self {
             Self::Macros => "Record keystrokes and play them back, also when a session connects.",
+            Self::Sql => {
+                "Run SQL on the session's host in a window of its own. Needs Java 11 or later."
+            }
         }
     }
 
@@ -42,6 +49,7 @@ impl AddOn {
     pub const fn on_by_default(self) -> bool {
         match self {
             Self::Macros => true,
+            Self::Sql => false,
         }
     }
 }
@@ -94,6 +102,10 @@ mod tests {
             assert_eq!(settings.enabled(addon), addon.on_by_default());
         }
         assert!(settings.enabled(AddOn::Macros));
+        assert!(
+            !settings.enabled(AddOn::Sql),
+            "SQL is off until turned on (R-SQL-10)"
+        );
     }
 
     /// R-ADD-1: only a change from the default is kept, and turning it back forgets it.

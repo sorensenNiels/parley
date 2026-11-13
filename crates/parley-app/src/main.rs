@@ -12,6 +12,7 @@
 )]
 
 mod desktop;
+mod helpers;
 mod keychain;
 mod macros;
 mod screenshot;

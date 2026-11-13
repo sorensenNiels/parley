@@ -93,8 +93,8 @@ impl Sheet {
 
 /// The functions with keys in `map`, under the headings Settings uses; `macros` as for
 /// [`crate::keymap::groups`].
-pub fn groups(map: &KeyMap, macros: Option<&[String]>, mac: bool) -> Vec<Group> {
-    crate::keymap::groups(macros)
+pub fn groups(map: &KeyMap, macros: Option<&[String]>, sql: bool, mac: bool) -> Vec<Group> {
+    crate::keymap::groups(macros, sql)
         .into_iter()
         .map(|(heading, functions)| {
             let lines = functions
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn the_sheet_lists_the_default_maps_keys_under_settings_headings_r_ui_17() {
-        let groups = groups(KeyMap::built_in(), None, false);
+        let groups = groups(KeyMap::built_in(), None, false, false);
         let headings: Vec<_> = groups.iter().map(|(h, _)| *h).collect();
         assert_eq!(
             headings,

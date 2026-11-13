@@ -18,8 +18,10 @@ pub const CARET_DOWN: &str = "\u{E136}";
 pub const CHECK_CIRCLE: &str = "\u{E184}";
 pub const CLIPBOARD: &str = "\u{E196}";
 pub const COPY: &str = "\u{E1CA}";
+pub const DATABASE: &str = "\u{E1DE}";
 pub const ENVELOPE: &str = "\u{E218}";
 pub const ERASER: &str = "\u{E21E}";
+pub const EXPORT: &str = "\u{EAF0}";
 pub const GEAR: &str = "\u{E272}";
 pub const HOURGLASS: &str = "\u{E2B8}";
 pub const INFO: &str = "\u{E2CE}";
@@ -44,7 +46,7 @@ pub const TERMINAL: &str = "\u{EAE8}";
 
 /// Every icon above, for the test that the font has them.
 #[cfg(test)]
-pub const ALL: [&str; 31] = [
+pub const ALL: [&str; 33] = [
     ARROW_DOWN,
     ARROW_UP,
     ARROWS_CLOCKWISE,
@@ -53,8 +55,10 @@ pub const ALL: [&str; 31] = [
     CHECK_CIRCLE,
     CLIPBOARD,
     COPY,
+    DATABASE,
     ENVELOPE,
     ERASER,
+    EXPORT,
     GEAR,
     HOURGLASS,
     INFO,

@@ -35,6 +35,35 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
   wrong length, a template or parameter past the end, an unknown server) are errors; the port mapper is asked by name
   and its port used, `-` is "not known", odd replies are errors; with no port mapper the caller falls back. **Seen:**
   `make probe-sql` now uses this code and reads PUB400 as before. **Left:** nothing to see in the app until R-SQL-6.
+- **R-SQL-13** (2026-11-13): JTOpen checked, fetched and shipped, built. JTOpen's licence (IBM Public License 1.0,
+  read from `jt400.jar` 21.0.7) allows shipping the unmodified jar with the notices (D20); `scripts/fetch-jt400.sh`
+  fetches 21.0.7 from Maven Central and checks its SHA-256; the installers carry `helpers/` (the helper, JTOpen,
+  `NOTICE.txt`, `JTOpen-LICENSE.html`) and the release workflow builds them with Java; Settings ▸ About and README.md
+  name IBM's copyright; `make verify` builds the helper (JDK in the setup scripts, a Java job in CI). **Seen:** a
+  Linux `.deb` holds them in `/usr/lib/parley/helpers`, where the app looks (WSL2). **Left:** the Windows and macOS
+  installers, checked by the owner.
+- **R-SQL-12** (2026-11-13): Java found or explained, built (`sql::java`, Settings ▸ Add-ons). A path named in
+  the settings is used alone (a wrong one is named, not passed over), else `JAVA_HOME`, then `PATH`; version 11 or
+  later. **Automated:** versions read from `java -version` (1.8, 11, 21, early access); with SQL on, Add-ons shows
+  the Java field, what was found and the helper's folder, and hides them again when off; the dialog keeps its place;
+  without the helper or with a Java that does not run, Tools ▸ SQL… explains and links to Eclipse Temurin.
+- **R-SQL-6..10** (2026-11-13): the SQL window, built (`sql`, `sql/grid` in the UI; `sql::text` and
+  `sql::runner` in the engine). Its own OS window (egui viewport); sign-on asked each time, the password taken out of
+  its field at once; Run (selection or statement under the cursor), Run all, Cancel; results in a grid (numbers
+  right-aligned, NULL apart, sort, Fetch more, Copy as tab-separated text, Export… as CSV); Messages; Autocommit,
+  Commit, Rollback, and a question when closing with changes not committed; a confirmation before DELETE or UPDATE
+  without WHERE, DROP, TRUNCATE and ALTER; history kept per saved session (last 100); a warning line without TLS; the
+  SQL add-on, off by default; Tools ▸ SQL… and the `sql` function. **Automated:** statement splitting and the
+  guard against strings, names and comments; the runner with the real helper; the window's logic from answers as
+  the helper gives them; the sign-in form and the ready window drawn (kittest), the Run button keeping its place.
+  **Left:** the owner's use against their IBM i on each OS, then these requirements to REQUIREMENTS.md.
+- **R-SQL-11** (2026-11-13): the SQL helper and its protocol, built (`helpers/sql`, `sql::protocol`,
+  `sql::helper`). **Automated:** `make helper` compiles it with warnings as errors, runs its self-test (JSON both
+  ways, broken JSON, hex, times with seconds) and Rust tests that start it (hello in protocol 1; a statement before
+  connecting is an SQL error); the protocol is tested sans-I/O with answers the helper gave. **Seen:** a connect to a
+  host where nothing listens answers SQLSTATE 08001 after the 30 s login timeout (5 s in the test), every request
+  is answered before the helper ends, and the password is in neither its output nor its errors. **Left:** the
+  owner's run of `make probe-sql HOST=… ARGS="--sql USER"` against their IBM i (R-SQL-3, R-SQL-4).
 - **R-SQL-2** (2026-11-13): sign-on to the sign-on server, built (`hostserver::signon`, `hostserver::substitute`,
   `net::hostserver::sign_on`). The RFC 4777 substitute (DES, SHA-1) is restored from R-NET-7 with its RFC test
   vectors; the request layouts and return codes are Manticore's (D19). **Automated** (`make test`): the exchange of

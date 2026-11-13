@@ -23,7 +23,7 @@ endif
 RUN_ENV := $(if $(IS_WSL),GALLIUM_DRIVER=$${GALLIUM_DRIVER:-d3d12} ,)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup run probe probe-sql build release package icons test test-core test-ui lint \
+.PHONY: help setup run probe probe-sql jt400 helper build release package icons test test-core test-ui lint \
         fmt fmt-check deny verify doc clean outdated update upgrade \
         release-patch release-minor release-major
 
@@ -35,6 +35,8 @@ help:
 	@echo "    run           Run the desktop app (HOST=name connects at once)"
 	@echo "    probe         Connect to HOST without the UI, press KEYS, print each screen"
 	@echo "    probe-sql     Ask HOST which SQL routes it offers, without signing on (R-NET-8)"
+	@echo "    jt400         Fetch JTOpen (pinned, checked) for the SQL helper into target/helpers"
+	@echo "    helper        Build and check the SQL helper (needs a JDK 11+)"
 	@echo ""
 	@echo "  Quality"
 	@echo "    verify        Everything CI checks: fmt-check, lint, test, deny"
@@ -85,6 +87,18 @@ run:
 probe:
 	cargo run -p $(CORE) --example probe -- $(HOST) $(ARGS) $(if $(KEYS),--keys $(KEYS),)
 
+# JTOpen for the SQL helper, pinned and checked (R-SQL-13, D20)
+HELPERS := target/helpers
+jt400:
+	scripts/fetch-jt400.sh $(HELPERS)
+
+# The SQL helper (R-SQL-11, D20): needs a JDK 11 or later (and bash: Git Bash on Windows). Builds
+# it into target/helpers, runs its self-test, then the Rust tests that start it.
+helper:
+	bash scripts/build-helper.sh $(HELPERS)
+	cargo test -q -p $(CORE) sql:: -- --ignored
+	cargo test -q -p $(UI) sql -- --ignored
+
 # make probe-sql HOST=myibmi.example.com: which SQL routes the host offers, without signing on (R-NET-8)
 # make probe-sql HOST=... ARGS="--sign-on USER [--tls] [--ccsid 277]": one recorded sign-on (R-NET-9)
 probe-sql:
@@ -103,7 +117,7 @@ PACKAGE_FORMATS_linux := deb,appimage
 PACKAGE_FORMATS_windows := wix
 PACKAGE_FORMATS_macos := dmg
 
-package: release
+package: release helper
 	cargo packager -p $(APP) --release -f $(PACKAGE_FORMATS_$(PLATFORM))
 
 icons:
@@ -138,7 +152,7 @@ lint:
 deny:
 	cargo deny check
 
-verify: fmt-check lint test deny
+verify: fmt-check lint test deny helper
 
 # ---------------------------------------------------------------- releasing
 

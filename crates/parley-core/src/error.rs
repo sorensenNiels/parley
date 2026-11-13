@@ -28,6 +28,18 @@ pub enum Error {
     #[error("{0}")]
     SignOn(String),
 
+    /// An SQL statement or connection the host refused (R-SQL-4): its message and SQLSTATE.
+    #[error("{0}")]
+    Sql(crate::sql::protocol::SqlError),
+
+    /// The SQL helper could not be run or talked to (R-SQL-11).
+    #[error("{0}")]
+    SqlHelper(String),
+
+    /// No usable Java for the SQL helper (R-SQL-12): a sentence for the operator.
+    #[error("{0}")]
+    Java(String),
+
     #[error("TLS: {0}")]
     Tls(String),
 

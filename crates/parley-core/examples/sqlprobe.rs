@@ -7,6 +7,9 @@
 //! cargo run -p parley-core --example sqlprobe -- HOST --sign-on USER [--tls] [--ccsid 277]
 //! ```
 //!
+//! `--sql USER` instead runs a few read-only statements through the SQL helper (R-SQL-11, D20;
+//! build it first with `make helper`): one sign-on through `JTOpen`, never retried.
+//!
 //! `--sign-on USER` instead signs on once to the sign-on server (R-SQL-2, R-NET-9): it asks for
 //! the password without showing it, makes exactly one attempt and never retries, and writes
 //! what passed both ways to `target/sqlprobe-signon-HOST.txt` with the password substitute and
@@ -62,6 +65,9 @@ fn main() {
             .and_then(|i| args.get(i + 1))
             .cloned()
     };
+    if let Some(user) = value("--sql") {
+        std::process::exit(sql(&host, &user, flag("--tls")));
+    }
     if let Some(user) = value("--sign-on") {
         let ccsid = value("--ccsid").map_or(Some(CodePage::Ccsid37), |n| {
             CodePage::ALL
@@ -665,4 +671,193 @@ fn sign_on(host: &str, user: &str, tls: bool, code_page: CodePage) -> i32 {
             1
         }
     }
+}
+
+// ---------------------------------------------------------------- SQL through the helper
+
+/// Statements that between them show each kind of value, a fetch in blocks and an error.
+const STATEMENTS: [(&str, u32); 6] = [
+    ("VALUES CURRENT SERVER", 10),
+    (
+        "SELECT CURRENT USER, CURRENT DATE, CURRENT TIME, CURRENT TIMESTAMP FROM SYSIBM.SYSDUMMY1",
+        10,
+    ),
+    (
+        "VALUES (CAST(12345678901234567890.123456 AS DECIMAL(31, 6)), CAST(-0.5 AS DECIMAL(5, 2)), \
+         CAST(-12 AS NUMERIC(5, 0)), CAST(9223372036854775807 AS BIGINT), CAST(1.5E0 AS DOUBLE), \
+         CAST('æøå ÆØÅ' AS VARCHAR(20)), CAST('' AS VARCHAR(5)), CAST(NULL AS INTEGER), \
+         CAST(X'00C17F' AS VARBINARY(3)))",
+        10,
+    ),
+    (
+        "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM QSYS2.SYSTABLES \
+         WHERE TABLE_SCHEMA = 'QSYS2' FETCH FIRST 12 ROWS ONLY",
+        5,
+    ),
+    ("SELECT * FROM PARLEY_NO_SUCH_TABLE_42704", 10),
+    ("VALUES CURRENT SERVER", 10),
+];
+
+/// Signs on once through the helper and runs [`STATEMENTS`]; the exit code: 0 all ran as
+/// expected, 1 not.
+fn sql(host: &str, user: &str, tls: bool) -> i32 {
+    let Some(mut helper) = connect(host, user, tls) else {
+        return 1;
+    };
+    let mut as_expected = true;
+    for (statement, max_rows) in STATEMENTS {
+        println!(
+            "> {}",
+            statement.split_whitespace().collect::<Vec<_>>().join(" ")
+        );
+        let ran = run_statement(&mut helper, statement, max_rows);
+        if !ran && !statement.contains("NO_SUCH_TABLE") {
+            as_expected = false;
+        }
+        println!();
+    }
+    helper.close();
+    if as_expected {
+        println!("All statements ran as expected.");
+        0
+    } else {
+        println!("Some statements did not run as expected.");
+        1
+    }
+}
+
+/// Sends `request` and waits for its answer, read as `T`.
+fn call<T: for<'de> serde::Deserialize<'de>>(
+    helper: &mut parley_core::sql::helper::Helper,
+    request: &parley_core::sql::protocol::Request,
+) -> parley_core::Result<T> {
+    helper
+        .call(request)?
+        .ok_or_else(|| parley_core::Error::SqlHelper("no answer".to_owned()))?
+        .into_result()
+}
+
+/// Starts the helper and connects once; `None` after saying why not.
+fn connect(host: &str, user: &str, tls: bool) -> Option<parley_core::sql::helper::Helper> {
+    use parley_core::password::Password;
+    use parley_core::sql::helper::{Helper, HelperFiles};
+    use parley_core::sql::protocol::{Connect, Connected, Hello, Request};
+
+    let java = parley_core::sql::java::find(None)
+        .map_err(|e| eprintln!("parley: {e}"))
+        .ok()?;
+    let files = HelperFiles::in_folder(std::path::Path::new("target/helpers"));
+    let mut helper = Helper::start(&java.path, &files)
+        .map_err(|e| eprintln!("parley: {e} (run make helper first)"))
+        .ok()?;
+    let hello: Hello = call(&mut helper, &Request::Hello)
+        .map_err(|e| eprintln!("parley: {e}"))
+        .ok()?;
+    println!(
+        "Helper: protocol {}, Java {}, {}",
+        hello.protocol, hello.java, hello.jtopen
+    );
+    let how = if tls {
+        "over TLS"
+    } else {
+        "WITHOUT TLS: the session is not encrypted"
+    };
+    println!("Connecting to {host} as {user}, {how}");
+    println!("One attempt only: a refusal is not retried.\n");
+    let prompt = format!("Password for {user} on {host} (not shown): ");
+    let password = rpassword::prompt_password(prompt)
+        .map_err(|e| eprintln!("parley: cannot read the password: {e}"))
+        .ok()?;
+    let request = Request::Connect(Connect {
+        host: host.to_owned(),
+        tls,
+        user: user.to_owned(),
+        password: Password::new(password),
+        ca_file: String::new(),
+    });
+    match call::<Connected>(&mut helper, &request) {
+        Ok(c) => {
+            println!(
+                "Connected: job {}, release {}, user {}\n",
+                c.job, c.release, c.user
+            );
+            Some(helper)
+        }
+        Err(e) => {
+            println!("Not connected: {e}");
+            println!(
+                "Not retried. Check the user and password before running again: each failed \
+                 sign-on counts towards QMAXSIGN."
+            );
+            None
+        }
+    }
+}
+
+/// Runs one statement, fetching all its rows in blocks of `max_rows`, and prints what came;
+/// false when it failed.
+fn run_statement(
+    helper: &mut parley_core::sql::helper::Helper,
+    statement: &str,
+    max_rows: u32,
+) -> bool {
+    use parley_core::sql::protocol::{MoreRows, Outcome, Request};
+
+    let run = Request::Run {
+        sql: statement.to_owned(),
+        max_rows,
+    };
+    let (cursor, columns, mut rows, mut more) = match call::<Outcome>(helper, &run) {
+        Ok(Outcome::Count { count }) => {
+            println!("  {count} rows changed");
+            return true;
+        }
+        Ok(Outcome::Rows {
+            cursor,
+            columns,
+            rows,
+            more,
+        }) => (cursor, columns, rows, more),
+        Err(e) => {
+            println!("  error: {e}");
+            return false;
+        }
+    };
+    let heading: Vec<String> = columns
+        .iter()
+        .map(|c| {
+            let align = if c.numeric { " right" } else { "" };
+            format!(
+                "{} {}({},{}){align}",
+                c.name, c.type_name, c.length, c.scale
+            )
+        })
+        .collect();
+    println!("  columns: {}", heading.join(" | "));
+    let mut blocks = 1;
+    while more {
+        match call::<MoreRows>(helper, &Request::Fetch { cursor, max_rows }) {
+            Ok(next) => {
+                rows.extend(next.rows);
+                more = next.more;
+                blocks += 1;
+            }
+            Err(e) => {
+                println!("  fetch failed: {e}");
+                return false;
+            }
+        }
+    }
+    for row in &rows {
+        let cells: Vec<String> = row
+            .iter()
+            .map(|v| {
+                v.as_ref()
+                    .map_or_else(|| "NULL".to_owned(), |t| format!("{t:?}"))
+            })
+            .collect();
+        println!("  {}", cells.join(" | "));
+    }
+    println!("  {} rows in {blocks} block(s)", rows.len());
+    true
 }

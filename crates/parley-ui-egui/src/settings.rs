@@ -45,6 +45,10 @@ pub struct Settings {
     pub addons: AddOnSettings,
     /// The operator's keyboard maps; the Default map is built in, not kept (R-KEY-2).
     pub keyboard_maps: Vec<KeyMap>,
+    /// The Java the SQL add-on runs its helper with; empty: `JAVA_HOME`, then `PATH` (R-SQL-12).
+    pub java_path: String,
+    /// The statements run in the SQL window, by saved session, oldest first (R-SQL-7).
+    pub sql_history: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 impl Default for Settings {
@@ -57,6 +61,8 @@ impl Default for Settings {
             check_for_updates: true,
             addons: AddOnSettings::default(),
             keyboard_maps: Vec::new(),
+            java_path: String::new(),
+            sql_history: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -120,7 +126,10 @@ impl Page {
             Self::Terminal => settings.terminal_font = defaults.terminal_font,
             // The map shown gets the Default map's keys: see `keyboard::Page::restore`.
             Self::Keyboard => {}
-            Self::AddOns => settings.addons = defaults.addons,
+            Self::AddOns => {
+                settings.addons = defaults.addons;
+                settings.java_path = defaults.java_path;
+            }
             Self::About => settings.check_for_updates = defaults.check_for_updates,
         }
     }
@@ -153,6 +162,10 @@ pub struct Dialog {
     /// What was last copied, to say so.
     copied: Option<String>,
     keyboard: keyboard::Page,
+    /// The folder of the SQL helper's jars, if this installation has one (R-SQL-13).
+    sql_helpers: Option<std::path::PathBuf>,
+    /// The Java path last checked and what was found, so it is not looked for every frame.
+    java_found: Option<(String, std::result::Result<String, String>)>,
 }
 
 /// How the dialog closed.
@@ -172,14 +185,22 @@ impl Dialog {
             page: Page::Appearance,
             check_requested: false,
             copied: None,
-            keyboard: keyboard::Page::new(crate::keymap::DEFAULT_MAP, None),
+            keyboard: keyboard::Page::new(crate::keymap::DEFAULT_MAP, None, false),
+            sql_helpers: None,
+            java_found: None,
         }
+    }
+
+    /// The folder of the SQL helper's jars, for the SQL add-on's rows (R-SQL-12).
+    pub fn with_sql_helpers(mut self, folder: Option<std::path::PathBuf>) -> Self {
+        self.sql_helpers = folder;
+        self
     }
 
     /// Shows the keyboard map `map` on the Keyboard page, with a key for each of `macros`
     /// (`None` while the Macros add-on is off).
-    pub fn with_keyboard(mut self, map: &str, macros: Option<Vec<String>>) -> Self {
-        self.keyboard = keyboard::Page::new(map, macros);
+    pub fn with_keyboard(mut self, map: &str, macros: Option<Vec<String>>, sql: bool) -> Self {
+        self.keyboard = keyboard::Page::new(map, macros, sql);
         self
     }
 
@@ -271,9 +292,82 @@ impl Dialog {
             Page::Appearance => appearance_page(ui, settings),
             Page::Terminal => self.terminal_page(ui, settings),
             Page::Keyboard => self.keyboard.show(ui, settings),
-            Page::AddOns => addons_page(ui, &mut settings.addons),
+            Page::AddOns => self.addons_page(ui, settings),
             Page::About => self.about_page(ui, settings, updates),
         }
+    }
+
+    /// A switch per add-on (R-ADD-1), as Tortuga's Settings → Add-ons; then, while SQL is on,
+    /// which Java runs its helper (R-SQL-12).
+    fn addons_page(&mut self, ui: &mut Ui, settings: &mut Settings) {
+        let note = (
+            "An add-on that is off is not loaded. Changes take effect when you save.",
+            "Add-ons are parts of Parley not everyone needs. Turning one on adds its menu items; \
+             turning it off removes them and stops what it is doing.",
+        );
+        group(ui, "Add-ons", Some(note), |rows| {
+            for addon in AddOn::ALL {
+                let mut on = settings.addons.enabled(addon);
+                rows.switch(addon.name(), Some(addon.about()), &mut on);
+                settings.addons.set_enabled(addon, on);
+            }
+        });
+        if settings.addons.enabled(AddOn::Sql) {
+            self.sql_group(ui, settings);
+        }
+    }
+
+    /// The Java for the SQL helper, what was found, and whether the helper is installed.
+    fn sql_group(&mut self, ui: &mut Ui, settings: &mut Settings) {
+        let note = (
+            "The SQL window runs its work in Java, with IBM's JTOpen.",
+            "Parley does not include Java. Install Java 11 or later, for example the free \
+             Eclipse Temurin from adoptium.net, or name the java program here.",
+        );
+        let found = self.java_for(&settings.java_path).clone();
+        let helpers = self.sql_helpers.clone();
+        group(ui, "SQL", Some(note), |rows| {
+            rows.row(
+                "Java",
+                Some("Empty: JAVA_HOME, then java on the PATH."),
+                |ui, name_id| {
+                    let edit =
+                        egui::TextEdit::singleline(&mut settings.java_path).hint_text("Automatic");
+                    theme::sized_edit(ui, 260.0, edit).labelled_by(name_id);
+                },
+            );
+            rows.fact("Found", |ui| match &found {
+                Ok(text) => {
+                    ui.label(text);
+                }
+                Err(text) => theme::warning(ui, text),
+            });
+            rows.fact("SQL helper", |ui| match &helpers {
+                Some(folder) => {
+                    ui.label(folder.display().to_string());
+                }
+                None => theme::warning(
+                    ui,
+                    "Not installed with this Parley (a development build needs make helper).",
+                ),
+            });
+        });
+    }
+
+    /// What Java `path` finds, looked up only when it changed.
+    fn java_for(&mut self, path: &str) -> &std::result::Result<String, String> {
+        let stale = self
+            .java_found
+            .as_ref()
+            .is_none_or(|(checked, _)| checked != path);
+        if stale {
+            let configured = (!path.trim().is_empty()).then(|| std::path::Path::new(path.trim()));
+            let result = parley_core::sql::java::find(configured)
+                .map(|java| format!("Java {} ({})", java.version, java.path.display()))
+                .map_err(|e| e.to_string());
+            self.java_found = Some((path.to_owned(), result));
+        }
+        &self.java_found.as_ref().expect("set just above").1
     }
 
     /// What this build is, and looking for a new version (R-UI-11), on Linux with the
@@ -323,6 +417,16 @@ impl Dialog {
         if let Some(copied) = &self.copied {
             theme::hint(ui, copied);
         }
+        // R-SQL-13, D20: the IBM Public License asks for IBM's copyright in plain view.
+        group(ui, "Includes", None, |rows| {
+            rows.fact("JTOpen 21.0.7", |ui| {
+                ui.label(
+                    "For the SQL add-on. Copyright © 1997-2026 International Business Machines \
+                     Corporation and others. All Rights Reserved. IBM Public License 1.0.",
+                );
+                ui.hyperlink_to("Its source", "https://github.com/IBM/JTOpen");
+            });
+        });
     }
 
     /// "Check now" and what the last check found.
@@ -572,22 +676,6 @@ impl Rows<'_> {
             .painter()
             .hline(rect.x_range(), y, Stroke::new(1.0, p.border));
     }
-}
-
-/// A switch per add-on (R-ADD-1), as Tortuga's Settings → Add-ons.
-fn addons_page(ui: &mut Ui, addons: &mut AddOnSettings) {
-    let note = (
-        "An add-on that is off is not loaded. Changes take effect when you save.",
-        "Add-ons are parts of Parley not everyone needs. Turning one on adds its menu items; \
-         turning it off removes them and stops what it is doing.",
-    );
-    group(ui, "Add-ons", Some(note), |rows| {
-        for addon in AddOn::ALL {
-            let mut on = addons.enabled(addon);
-            rows.switch(addon.name(), Some(addon.about()), &mut on);
-            addons.set_enabled(addon, on);
-        }
-    });
 }
 
 /// Theme, text size and density.

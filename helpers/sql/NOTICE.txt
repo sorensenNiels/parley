@@ -1,0 +1,16 @@
+Parley's SQL add-on runs its database work through JTOpen (IBM Toolbox for Java), shipped
+unmodified as jt400.jar (decision D20 in docs/ROADMAP.md).
+
+JTOpen 21.0.7
+Copyright © 1997-2026, International Business Machines Corporation and others. All Rights Reserved.
+(JTOpen states "Copyright (C) 1997-2026 International Business Machines Corporation and others."; 21.0.7 was built 2026-07-31.)
+Licensed under the IBM Public License Version 1.0: see JTOpen-LICENSE.html.
+Its source code is available at https://github.com/IBM/JTOpen (release 21.0.7).
+
+JTOpen is provided "AS IS", without warranties or conditions of any kind; IBM and the other
+contributors have no liability for damages, as JTOpen-LICENSE.html sets out. Any terms of Parley's
+own licences that differ from the IBM Public License are offered by Parley's authors alone, not by
+IBM or JTOpen's other contributors.
+
+Parley's own code, the helper in this folder included, is not part of JTOpen and is licensed
+under MIT or Apache-2.0 (see LICENSE-MIT and LICENSE-APACHE).

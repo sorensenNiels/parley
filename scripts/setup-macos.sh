@@ -8,4 +8,14 @@ if ! xcode-select -p >/dev/null 2>&1; then
   exit 0
 fi
 
+if ! /usr/libexec/java_home -v 11+ >/dev/null 2>&1; then
+  echo "==> Installing a JDK for the SQL helper (D20)"
+  if command -v brew >/dev/null; then
+    brew install --cask temurin@17
+  else
+    echo "Install a JDK 11 or later (https://adoptium.net), then re-run this script." >&2
+    exit 1
+  fi
+fi
+
 "$(dirname "$0")/setup-rust.sh"

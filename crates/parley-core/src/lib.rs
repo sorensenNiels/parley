@@ -13,6 +13,7 @@ pub mod password;
 pub mod record;
 pub mod screen;
 pub mod session;
+pub mod sql;
 pub mod telnet;
 pub mod update;
 

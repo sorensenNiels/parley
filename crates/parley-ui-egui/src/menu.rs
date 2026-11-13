@@ -25,6 +25,8 @@ pub enum Action {
     Paste,
     /// The keyboard shortcut sheet (R-UI-17).
     Shortcuts,
+    /// Tools ▸ SQL… (R-SQL-6).
+    Sql,
     Settings,
     /// Help ▸ Check for updates…: Settings on the About page, checking (R-UI-11).
     CheckForUpdates,
@@ -58,6 +60,8 @@ pub struct Header<'a> {
     pub newer: Option<&'a parley_core::update::Release>,
     /// `None` while the Macros add-on is off (R-ADD-2).
     pub macros: Option<&'a MacroMenu<'a>>,
+    /// The SQL add-on is on (R-SQL-10).
+    pub sql: bool,
     /// The keyboard map in use, for the keys the menus show.
     pub map: &'a KeyMap,
     pub mac: bool,
@@ -221,6 +225,14 @@ fn tools_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     ui.menu_button("Tools", |ui| {
         if let Some(macros) = header.macros {
             action = macro_items(ui, header, macros);
+            ui.separator();
+        }
+        // R-SQL-6: for the connected session's host.
+        if header.sql {
+            let sql = (icons::DATABASE, "SQL…");
+            if item(ui, header, header.connected(), sql, Some(&Function::Sql)) {
+                action = Some(Action::Sql);
+            }
             ui.separator();
         }
         if item(ui, header, true, (icons::GEAR, "Settings…"), None) {

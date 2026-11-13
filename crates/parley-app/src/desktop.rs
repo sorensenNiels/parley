@@ -75,6 +75,8 @@ pub fn run() -> eframe::Result {
             if let Some(settings) = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)) {
                 ui.set_settings(settings);
             }
+            ui.set_sql_helpers(crate::helpers::sql_helpers());
+            ui.set_file_saver(Box::new(crate::helpers::CsvSaver));
             match crate::macros::MacroFolder::beside_settings() {
                 Some(folder) => ui.set_macro_store(Box::new(folder)),
                 None => eprintln!("parley: no folder for macros on this system"),

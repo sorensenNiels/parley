@@ -13,6 +13,11 @@ if (-not (Have 'make')) {
   winget install --id ezwinports.make --silent --accept-package-agreements --accept-source-agreements
 }
 
+if (-not (Have 'javac')) {
+  Write-Host '==> JDK for the SQL helper (D20; make helper also needs bash: Git Bash)'
+  winget install --id EclipseAdoptium.Temurin.17.JDK --silent --accept-package-agreements --accept-source-agreements
+}
+
 if (-not (Have 'rustup')) {
   Write-Host '==> Installing rustup'
   winget install --id Rustlang.Rustup --silent --accept-package-agreements --accept-source-agreements

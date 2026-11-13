@@ -44,8 +44,18 @@ license-file = "../../LICENSE-MIT"
 icons = ["icons/32.png", "icons/64.png", "icons/128.png", "icons/256.png", "icons/512.png", "icons/parley.ico"]
 out-dir = "../../target/packages"
 binaries = [{ path = "parley", main = true }]
-# The bundled fonts' licence (SIL OFL 1.1) must travel with them.
-resources = ["../parley-ui-egui/assets/fonts/Inter-LICENSE.txt", "../parley-ui-egui/assets/fonts/JetBrainsMono-LICENSE.txt", "../parley-ui-egui/assets/fonts/IBMPlexMono-LICENSE.txt", "../parley-ui-egui/assets/fonts/Phosphor-LICENSE.txt"]
+# The bundled fonts' licence (SIL OFL 1.1) must travel with them; so must the SQL helper, JTOpen and
+# their notices (R-SQL-13, D20), built into target/helpers by `make helper` before packaging.
+resources = [
+  "../parley-ui-egui/assets/fonts/Inter-LICENSE.txt",
+  "../parley-ui-egui/assets/fonts/JetBrainsMono-LICENSE.txt",
+  "../parley-ui-egui/assets/fonts/IBMPlexMono-LICENSE.txt",
+  "../parley-ui-egui/assets/fonts/Phosphor-LICENSE.txt",
+  { src = "../../target/helpers/parley-sql.jar", target = "helpers/parley-sql.jar" },
+  { src = "../../target/helpers/jt400.jar", target = "helpers/jt400.jar" },
+  { src = "../../helpers/sql/NOTICE.txt", target = "helpers/NOTICE.txt" },
+  { src = "../../helpers/sql/JTOpen-LICENSE.html", target = "helpers/JTOpen-LICENSE.html" },
+]
 
 [package.metadata.packager.deb]
 # X11 keyboard and OpenGL/EGL are loaded at run time by the window library; fontconfig by

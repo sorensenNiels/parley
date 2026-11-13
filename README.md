@@ -66,3 +66,7 @@ Licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-M
 Parley includes the fonts Inter, JetBrains Mono and IBM Plex Mono, each under the SIL Open Font License 1.1, and
 the Phosphor icon font under the MIT licence (`crates/parley-ui-egui/assets/fonts/*-LICENSE.txt`; the installers
 carry these files).
+
+The SQL add-on ships IBM's JTOpen (`jt400.jar`, unmodified) under the IBM Public License 1.0: Copyright © 1997-2026,
+International Business Machines Corporation and others. All Rights Reserved. Its source is at
+[github.com/IBM/JTOpen](https://github.com/IBM/JTOpen); see `helpers/sql/NOTICE.txt` and `helpers/sql/JTOpen-LICENSE.html`.

@@ -16,6 +16,7 @@ mod profile;
 mod sessions;
 mod settings;
 mod shortcuts;
+mod sql;
 mod status;
 mod terminal;
 mod theme;
@@ -32,6 +33,7 @@ use menu::Action;
 pub use profile::Profile;
 use sessions::{Editor, Outcome};
 pub use settings::{Settings, Theme};
+pub use sql::FileSaver;
 pub use theme::Density;
 pub use updates::Checker;
 
@@ -79,6 +81,16 @@ pub struct ParleyUi {
     /// Asking for the password a running macro needs (R-KEY-4).
     macro_password: Option<macros::PasswordDialog>,
     macro_manager: Option<macros::Manager>,
+    /// The folder of the SQL helper's jars, if this installation has one (R-SQL-13).
+    sql_helpers: Option<std::path::PathBuf>,
+    /// The SQL window, while open (R-SQL-6).
+    sql_window: Option<sql::SqlWindow>,
+    /// The user last typed in the SQL window, by session, for this run of Parley only.
+    sql_users: std::collections::BTreeMap<String, String>,
+    /// Why the SQL window cannot open (no Java, no helper), while that is shown (R-SQL-12).
+    sql_notice: Option<String>,
+    /// Saves an exported result where the operator chooses (R-SQL-8).
+    file_saver: Option<Box<dyn sql::FileSaver>>,
 }
 
 impl Default for ParleyUi {
@@ -114,6 +126,11 @@ impl ParleyUi {
             save_macro: None,
             macro_password: None,
             macro_manager: None,
+            sql_helpers: None,
+            sql_window: None,
+            sql_users: std::collections::BTreeMap::new(),
+            sql_notice: None,
+            file_saver: None,
         }
     }
 
@@ -130,6 +147,16 @@ impl ParleyUi {
     /// The app icon to show before the name in the menu bar (the launcher has it as a PNG).
     pub fn set_logo(&mut self, image: egui::ColorImage) {
         self.logo = menu::Logo::new(image);
+    }
+
+    /// How the SQL window's Export… saves a file (R-SQL-8); without one, there is no Export….
+    pub fn set_file_saver(&mut self, saver: Box<dyn sql::FileSaver>) {
+        self.file_saver = Some(saver);
+    }
+
+    /// Where the SQL helper's jars are (R-SQL-13); `None` when this installation has none.
+    pub fn set_sql_helpers(&mut self, folder: Option<std::path::PathBuf>) {
+        self.sql_helpers = folder;
     }
 
     /// How to ask for the latest release (R-UI-11). Without one, Parley doesn't look for
@@ -291,7 +318,9 @@ impl ParleyUi {
     /// The settings dialog, showing the session's keyboard map and the macros it can bind.
     fn open_settings(&self, ctx: &egui::Context) -> settings::Dialog {
         let macros = self.addon_on(AddOn::Macros).then(|| self.macro_names());
-        settings::Dialog::open(ctx, &self.settings).with_keyboard(&self.keyboard_map().name, macros)
+        settings::Dialog::open(ctx, &self.settings)
+            .with_keyboard(&self.keyboard_map().name, macros, self.addon_on(AddOn::Sql))
+            .with_sql_helpers(self.sql_helpers.clone())
     }
 
     /// Sessions that used the map `old` use it under its new name.
@@ -391,6 +420,10 @@ impl ParleyUi {
                 self.end_recording(&mut connection.session());
                 connection.close();
                 self.closed = Some("Disconnected.".to_owned());
+                // R-SQL-6: the SQL window goes with its session, asking first under R-SQL-5.
+                if let Some(window) = &mut self.sql_window {
+                    window.request_close();
+                }
             }
             other => self.connection = other,
         }
@@ -401,6 +434,7 @@ impl ParleyUi {
 
         self.show_editor(ui.ctx());
         self.show_settings(ui.ctx());
+        self.show_sql_window(ui.ctx());
         self.show_shortcut_sheet(ui.ctx());
         self.show_macro_dialogs(ui.ctx());
         self.show_exit_question(ui.ctx());
@@ -427,6 +461,7 @@ impl ParleyUi {
             logo: logo.as_ref(),
             newer: self.updates.available(),
             macros: self.addon_on(AddOn::Macros).then_some(&macro_menu),
+            sql: self.addon_on(AddOn::Sql),
             map: self.keyboard_map(),
             mac: is_mac(ui.ctx()),
         };
@@ -479,6 +514,7 @@ impl ParleyUi {
                     self.updates.start(ctx, updates::Check::Now);
                 }
                 Action::Shortcuts => self.shortcut_sheet = Some(shortcuts::Sheet::default()),
+                Action::Sql => self.open_sql_window(connected),
                 Action::Key(key) => {
                     if let Some(s) = session.as_deref_mut() {
                         s.key(key);
@@ -569,6 +605,91 @@ impl ParleyUi {
         }
     }
 
+    /// Tools ▸ SQL… (R-SQL-6): the window for the session in use, or why it cannot open.
+    /// `connected` comes from the caller: during a frame the connection is out of its field.
+    fn open_sql_window(&mut self, connected: bool) {
+        if !connected || !self.addon_on(AddOn::Sql) || self.sql_window.is_some() {
+            return;
+        }
+        let Some(profile) = self.current.as_ref() else {
+            return;
+        };
+        let Some(folder) = &self.sql_helpers else {
+            self.sql_notice = Some(
+                "This Parley was installed without the SQL helper, so the SQL window cannot open."
+                    .to_owned(),
+            );
+            return;
+        };
+        let configured = (!self.settings.java_path.trim().is_empty())
+            .then(|| std::path::PathBuf::from(self.settings.java_path.trim()));
+        match parley_core::sql::java::find(configured.as_deref()) {
+            Ok(java) => {
+                let user = self.sql_users.get(&profile.name).map_or("", String::as_str);
+                self.sql_window = Some(sql::SqlWindow::open(
+                    &profile.name,
+                    &profile.config,
+                    java.path,
+                    parley_core::sql::helper::HelperFiles::in_folder(folder),
+                    user,
+                ));
+            }
+            Err(e) => self.sql_notice = Some(e.to_string()),
+        }
+    }
+
+    /// The SQL window while open, its statements into the history (R-SQL-7), and the notice
+    /// when it could not open.
+    fn show_sql_window(&mut self, ctx: &egui::Context) {
+        if let Some(window) = &mut self.sql_window {
+            let session = self
+                .current
+                .as_ref()
+                .map_or_else(String::new, |p| p.name.clone());
+            let history = self
+                .settings
+                .sql_history
+                .get(&session)
+                .cloned()
+                .unwrap_or_default();
+            let open = window.show(ctx, &history, self.file_saver.as_deref());
+            let ran = window.take_ran();
+            if !window.user.trim().is_empty() {
+                self.sql_users
+                    .insert(session.clone(), window.user.trim().to_owned());
+            }
+            add_to_history(self.settings.sql_history.entry(session).or_default(), ran);
+            if !open {
+                self.sql_window = None;
+            }
+        }
+        if let Some(notice) = self.sql_notice.clone() {
+            let (close, ok) = dialog::dialog(
+                ctx,
+                "sql-notice",
+                "The SQL window cannot open",
+                440.0,
+                |ui| {
+                    ui.label(&notice);
+                    ui.add_space(6.0);
+                    ui.hyperlink_to(
+                        "A free Java: Eclipse Temurin (adoptium.net)",
+                        "https://adoptium.net",
+                    );
+                    theme::hint(
+                        ui,
+                        "Then name it on the Add-ons page of Settings, or set JAVA_HOME.",
+                    );
+                    ui.add_space(12.0);
+                    theme::button_row(ui, |ui| ui.add(theme::primary_button(ui, "OK")).clicked())
+                },
+            );
+            if close || ok {
+                self.sql_notice = None;
+            }
+        }
+    }
+
     /// The keyboard shortcut sheet, while it is open (R-UI-17).
     fn show_shortcut_sheet(&mut self, ctx: &egui::Context) {
         if self.shortcut_sheet.is_none() {
@@ -576,7 +697,12 @@ impl ParleyUi {
         }
         let macros = self.addon_on(AddOn::Macros).then(|| self.macro_names());
         let map = self.keyboard_map();
-        let groups = shortcuts::groups(map, macros.as_deref(), is_mac(ctx));
+        let groups = shortcuts::groups(
+            map,
+            macros.as_deref(),
+            self.addon_on(AddOn::Sql),
+            is_mac(ctx),
+        );
         let close_keys = map.chords_for(&Function::Shortcuts);
         let Some(sheet) = &mut self.shortcut_sheet else {
             return;
@@ -663,6 +789,8 @@ impl ParleyUi {
                 }
                 Function::RunMacro(name) => self.play(session, &name),
                 Function::Shortcuts => self.shortcut_sheet = Some(shortcuts::Sheet::default()),
+                // The terminal took the key, so a session is connected.
+                Function::Sql => self.open_sql_window(true),
                 Function::Key(_) | Function::CopyScreen | Function::Paste => {}
             }
         }
@@ -767,6 +895,20 @@ struct Next {
     disconnect: bool,
     /// Connect to the saved session at this index.
     connect: Option<usize>,
+}
+
+/// The statements of the SQL window kept per session (R-SQL-7).
+const HISTORY: usize = 100;
+
+/// Adds `ran` to `history`, oldest first: a statement run again moves to the end, and only the
+/// last [`HISTORY`] are kept.
+fn add_to_history(history: &mut Vec<String>, ran: Vec<String>) {
+    for statement in ran {
+        history.retain(|s| *s != statement);
+        history.push(statement);
+    }
+    let excess = history.len().saturating_sub(HISTORY);
+    history.drain(..excess);
 }
 
 /// Whether to name keys as macOS does (Cmd+C).
@@ -1084,7 +1226,7 @@ mod tests {
     fn bundled_fonts_have_every_symbol_the_ui_uses() {
         let mut harness = Harness::new_ui(|ui| {
             theme::install(ui.ctx(), fonts::DEFAULT_TERMINAL_FONT);
-            for symbol in ["⏵", "⏷", "🗙", "·", "×", "…", "–"] {
+            for symbol in ["⏵", "⏷", "🗙", "·", "×", "…", "–", "©"] {
                 // A missing glyph would draw as an empty box.
                 let found = ui
                     .ctx()
@@ -1641,6 +1783,11 @@ mod tests {
 
     /// Settings ▸ Add-ons, then the Macros switch.
     fn switch_macros_in_settings(harness: &mut Harness<'static, ParleyUi>) {
+        switch_add_on_in_settings(harness, "Macros");
+    }
+
+    /// Settings ▸ Add-ons, then the switch named `name`.
+    fn switch_add_on_in_settings(harness: &mut Harness<'static, ParleyUi>, name: &str) {
         harness.get_by_label("Tools").click();
         harness.run();
         harness.get_by_label("Settings…").click();
@@ -1648,9 +1795,40 @@ mod tests {
         harness.get_by_label("Add-ons").click();
         harness.run();
         harness
-            .get_by_role_and_label(egui::accesskit::Role::CheckBox, "Macros")
+            .get_by_role_and_label(egui::accesskit::Role::CheckBox, name)
             .click();
         harness.run();
+    }
+
+    #[test]
+    fn turning_sql_on_shows_its_java_and_helper_and_off_hides_them_r_sql_12() {
+        let mut harness = app_with(Vec::new());
+        assert!(
+            !harness.state().addon_on(AddOn::Sql),
+            "off by default (R-SQL-10)"
+        );
+        harness.state_mut().set_sql_helpers(None);
+        switch_add_on_in_settings(&mut harness, "SQL");
+        harness.get_by_label("Found");
+        harness.get_by_label_contains("Not installed with this Parley");
+        // A Java that is not there is named, not looked for again every frame.
+        type_into(&mut harness, "Java", "/no/such/java");
+        harness.run_steps(3);
+        harness.get_by_label_contains("needs Java 11 or later");
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::CheckBox, "SQL")
+            .click();
+        harness.run();
+        assert!(harness.query_by_label("Found").is_none());
+    }
+
+    #[test]
+    fn the_settings_dialog_keeps_its_place_with_the_sql_rows_r_sql_12() {
+        let mut harness = app_with(Vec::new());
+        switch_add_on_in_settings(&mut harness, "SQL");
+        let before = harness.get_by_label("Save").rect();
+        harness.run_steps(5);
+        assert_eq!(harness.get_by_label("Save").rect(), before);
     }
 
     #[test]
@@ -2089,5 +2267,97 @@ mod tests {
         let before = harness.get_by_label("Change keys…").rect();
         harness.run_steps(5);
         assert_eq!(harness.get_by_label("Change keys…").rect(), before);
+    }
+
+    #[test]
+    fn the_history_keeps_a_statement_once_and_only_the_last_hundred_r_sql_7() {
+        let mut history = vec!["A".to_owned(), "B".to_owned()];
+        add_to_history(&mut history, vec!["A".to_owned(), "C".to_owned()]);
+        assert_eq!(history, ["B", "A", "C"], "run again: moved to the end");
+        add_to_history(&mut history, (0..150).map(|n| format!("S{n}")).collect());
+        assert_eq!(history.len(), 100);
+        assert_eq!(history.last().map(String::as_str), Some("S149"));
+    }
+
+    #[test]
+    fn tools_sql_is_there_only_while_the_add_on_is_on_r_sql_10() {
+        let (mut harness, _host) = connected_app();
+        harness.get_by_label("Tools").click();
+        harness.run();
+        assert!(harness.query_by_label("SQL…").is_none());
+        harness.get_by_label("Tools").click(); // closes the menu again
+        harness.run();
+        let mut settings = Settings::default();
+        settings.addons.set_enabled(AddOn::Sql, true);
+        harness.state_mut().set_settings(settings);
+        harness.run();
+        harness.get_by_label("Tools").click();
+        harness.run();
+        harness.get_by_label("SQL…");
+    }
+
+    #[test]
+    fn without_the_helper_or_a_working_java_the_sql_window_explains_r_sql_12() {
+        let (mut harness, _host) = connected_app();
+        let mut settings = Settings::default();
+        settings.addons.set_enabled(AddOn::Sql, true);
+        harness.state_mut().set_settings(settings.clone());
+        harness.state_mut().open_sql_window(true);
+        harness.run();
+        harness.get_by_label_contains("installed without the SQL helper");
+        assert!(harness.state().sql_window.is_none());
+        harness.get_by_label("OK").click();
+        harness.run();
+
+        settings.java_path = "/no/such/java".to_owned();
+        harness.state_mut().set_settings(settings);
+        harness
+            .state_mut()
+            .set_sql_helpers(Some(std::path::PathBuf::from("/some/helpers")));
+        harness.state_mut().open_sql_window(true);
+        harness.run();
+        harness.get_by_label_contains("needs Java 11 or later");
+        harness.get_by_label_contains("Eclipse Temurin");
+        assert!(harness.state().sql_window.is_none());
+    }
+
+    #[test]
+    fn tools_sql_opens_from_the_menu_while_connected_r_sql_6() {
+        // The bug: the menu's action ran while the frame held the connection, so the window
+        // found no connection and did nothing.
+        let (mut harness, _host) = connected_app();
+        let mut settings = Settings::default();
+        settings.addons.set_enabled(AddOn::Sql, true);
+        settings.java_path = "/no/such/java".to_owned();
+        harness.state_mut().set_settings(settings);
+        harness
+            .state_mut()
+            .set_sql_helpers(Some(std::path::PathBuf::from("/some/helpers")));
+        harness.run();
+        harness.get_by_label("Tools").click();
+        harness.run();
+        harness.get_by_label("SQL…").click();
+        harness.run();
+        // Something answers: here, why the window cannot open with this Java.
+        harness.get_by_label_contains("needs Java 11 or later");
+    }
+
+    #[test]
+    #[ignore = "needs Java and the jars from make helper"]
+    fn with_java_and_the_helper_tools_sql_shows_the_sign_on_r_sql_6() {
+        let (mut harness, _host) = connected_app();
+        let mut settings = Settings::default();
+        settings.addons.set_enabled(AddOn::Sql, true);
+        harness.state_mut().set_settings(settings);
+        let helpers = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/helpers");
+        harness.state_mut().set_sql_helpers(Some(helpers));
+        harness.run();
+        harness.get_by_label("Tools").click();
+        harness.run();
+        harness.get_by_label("SQL…").click();
+        harness.run();
+        assert!(harness.state().sql_window.is_some(), "the window is open");
+        harness.get_by_label("Password");
+        harness.get_by_label("Connect");
     }
 }

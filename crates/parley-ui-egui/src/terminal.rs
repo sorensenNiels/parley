@@ -75,7 +75,10 @@ pub fn show(
                 Function::Paste => ui
                     .ctx()
                     .send_viewport_cmd(egui::ViewportCommand::RequestPaste),
-                other @ (Function::RecordMacro | Function::RunMacro(_) | Function::Shortcuts) => {
+                other @ (Function::RecordMacro
+                | Function::RunMacro(_)
+                | Function::Shortcuts
+                | Function::Sql) => {
                     asked.push(other);
                 }
             }
