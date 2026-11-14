@@ -44,7 +44,7 @@ library list, `LABEL ON` headings) in a fast desktop window.
 
 - Bundling a Java runtime: Java 11+ is installed by the user (R-SQL-12, D20).
 - Export to Excel (R-SQL-17 dropped: CSV only).
-- Several connections at once in Parley SQL (D26); the add-on's Run on… covers several systems (R-SQL-43).
+- Several connections at once in Parley SQL (D26); Run on… (R-SQL-43) went with Parley's own SQL window (R-SQL-70).
 
 ## 5. What Parley SQL does
 
@@ -56,9 +56,11 @@ library list, `LABEL ON` headings) in a fast desktop window.
 | The database | Schema browser, DDL, completion, names on hover | R-SQL-33..37 | Verified |
 | IBM i tools | `CL:` commands, message help and job log, library list and schema | R-SQL-30..32 | Verified |
 | Reuse | Snippets with placeholders, starters from IBM i Services; parameter markers | R-SQL-24..27, R-SQL-40 | Verified |
-| Several systems | One read-only statement on several saved sessions (the add-on only) | R-SQL-43 | Verified |
+| Several systems | One read-only statement on several saved sessions; removed with Parley's SQL window (R-SQL-70) | R-SQL-43 | Removed |
 | Assistant | Plain words to SQL, names only, from Anthropic, OpenAI, Gemini, Mistral or a local llama.cpp | R-SQL-44, R-SQL-48, R-ADD-3 | Verified |
 | Parley SQL | The program on its own: saved connections, its own settings | R-SQL-45..47 | Verified |
+| From Parley | Parley's Tools ▸ SQL… starts Parley SQL on the session's host | R-SQL-70 | Verified |
+| Data transfer | Every row to CSV or Excel; a CSV file into a table, all or nothing | R-SQL-71..73 | Planned |
 | Layout | Results below or beside the editor, the editor's height, the side panel folded | R-SQL-49..51 | Verified |
 | Editing | Comment, indent, move and duplicate lines, pairs, matching bracket, go to line, keyword case, zoom | R-SQL-52..59 | Verified |
 | Editor, deeper | Gutter with line numbers, ▶ and outcomes; completion on Ctrl+Space and with snippets; a routine's parameters; the word under the cursor, Ctrl+D; trailing blanks trimmed (D28) | R-SQL-61..68 | Verified |

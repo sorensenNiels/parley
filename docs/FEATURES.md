@@ -69,6 +69,11 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## Implemented
 
+- **R-UI-18** (2026-11-14): Settings from a gear, no Help menu, built. **Automated** (`make test`): the menu bar
+  starts with the app and ends with the gear, with no Help menu; Settings opens from the gear and not from Tools;
+  Tools is not there while macros and SQL are both off; Check for updates runs from Settings ▸ About. **Checked in
+  the running app** by the owner, Linux under WSL (2026-11-14).
+
 ### Phase 1: connect and show a screen (2026-11-12) — R-NET-1..3, R-DS-1..4, R-EBC-1, R-KEY-1, R-UI-1..4, R-NF-1
 
 Verified by the owner in the running app on Windows, macOS, Linux and WSL2 (2026-11-12).

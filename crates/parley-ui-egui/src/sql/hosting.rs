@@ -35,7 +35,6 @@ pub fn open(
     let scripts = settings.sql_scripts.get(name).cloned().unwrap_or_default();
     let pinned = settings.sql_pinned.get(name).cloned().unwrap_or_default();
     Ok(SqlWindow::open(
-        name,
         config,
         java.path,
         HelperFiles::in_folder(folder),

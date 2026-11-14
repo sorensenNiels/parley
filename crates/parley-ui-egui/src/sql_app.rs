@@ -283,7 +283,6 @@ impl ParleySqlUi {
             snippets: self.snippets.as_deref(),
             shared: &self.settings.sql_snippets_shared,
             // One connection at a time: no Run on… (D26).
-            systems: None,
             results: self.settings.sql_results,
             close_pairs: self.settings.sql_close_pairs,
             keys: Some(&keys),
@@ -587,7 +586,6 @@ mod tests {
     /// The SQL window on Prod, embedded, as Connect opens it.
     fn prod_window() -> SqlWindow {
         SqlWindow::open(
-            "Prod",
             &prod().config(),
             std::path::PathBuf::from("java"),
             parley_core::sql::helper::HelperFiles::in_folder(std::path::Path::new("/none")),

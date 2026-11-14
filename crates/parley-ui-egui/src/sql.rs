@@ -15,7 +15,6 @@ pub mod layout;
 mod parameters;
 pub mod results;
 pub mod snippets;
-mod systems;
 mod tools;
 
 use std::collections::VecDeque;
@@ -64,9 +63,6 @@ pub struct Around<'a> {
     pub snippets: Option<&'a dyn snippets::SnippetStore>,
     /// The shared snippet folder; empty for none (R-SQL-24).
     pub shared: &'a str,
-    /// The saved sessions, by name, that "Run on…" offers (R-SQL-43); `None` for no Run on…
-    /// at all, as in Parley SQL (D26).
-    pub systems: Option<&'a [(String, SessionConfig)]>,
     /// Where the results go: below the editor, beside it, or beside it when there is room
     /// (R-SQL-49).
     pub results: layout::ResultsPlace,
@@ -170,8 +166,6 @@ enum Waiting {
     JobLog,
     /// The current schema and library list (R-SQL-32).
     Job,
-    /// A statement run here and on other systems: its tab is named after this system (R-SQL-43).
-    RunHere(String),
 }
 
 /// Results or messages under the editor.
@@ -195,7 +189,6 @@ enum Closing {
 /// The SQL window for one session.
 #[derive(Debug)]
 pub struct SqlWindow {
-    session: String,
     config: SessionConfig,
     java: PathBuf,
     files: HelperFiles,
@@ -240,8 +233,6 @@ pub struct SqlWindow {
     param_values: std::collections::BTreeMap<String, Vec<parameters::Value>>,
     /// The second connection, for the catalog (R-SQL-33, D21).
     database: database::Database,
-    /// Other systems a statement that reads also runs on (R-SQL-43, D24).
-    systems: systems::Systems,
     /// The SQL assistant (R-SQL-44), shown while its add-on is on (R-ADD-3).
     assistant: assistant::Assistant,
     /// The same sign-on for it, held until the first has signed on, then sent or dropped.
@@ -264,10 +255,9 @@ pub struct SqlWindow {
 }
 
 impl SqlWindow {
-    /// The window for `session` on `config`'s host, run with `java` and the helper in `files`;
-    /// `user` is the one typed last for this session in this run of Parley.
+    /// The window on `config`'s host, run with `java` and the helper in `files`; `user` is the
+    /// one signed on with last.
     pub fn open(
-        session: &str,
         config: &SessionConfig,
         java: PathBuf,
         files: HelperFiles,
@@ -275,7 +265,6 @@ impl SqlWindow {
         scripts: &[editor::SavedScript],
     ) -> Self {
         Self {
-            session: session.to_owned(),
             config: config.clone(),
             java,
             files,
@@ -308,7 +297,6 @@ impl SqlWindow {
             database: database::Database::default(),
             pending_catalog: None,
             parameters: None,
-            systems: systems::Systems::default(),
             assistant: assistant::Assistant::default(),
             param_values: std::collections::BTreeMap::new(),
             header: grid::HeaderMode::default(),
@@ -480,8 +468,6 @@ impl SqlWindow {
         }
         self.confirm_dialog(ui.ctx());
         self.parameters_dialog(ui.ctx());
-        self.systems
-            .sign_on_dialog(ui.ctx(), &self.java, &self.files);
         self.closing_dialog(ui.ctx());
     }
 
@@ -934,7 +920,7 @@ impl SqlWindow {
         }
         let shown = self.scripts.show(ui, height, around.files);
         ui.add_space(6.0);
-        self.run_buttons(ui, around.systems);
+        self.run_buttons(ui);
         if let Some(error) = &self.error_line {
             theme::error(ui, error);
         }
@@ -968,7 +954,7 @@ impl SqlWindow {
         }
     }
 
-    fn run_buttons(&mut self, ui: &mut Ui, systems: Option<&[(String, SessionConfig)]>) {
+    fn run_buttons(&mut self, ui: &mut Ui) {
         let idle = self.waiting.is_none() && self.queue.is_empty();
         ui.horizontal(|ui| {
             // R-SQL-28: says what Run does now.
@@ -988,24 +974,7 @@ impl SqlWindow {
             if icons::add_named(ui, !idle, cancel, "Cancel").clicked() {
                 self.cancel();
             }
-            // R-SQL-43: the same statement on other systems.
-            if let Some(systems) = systems {
-                self.systems_menu(ui, systems);
-            }
-            if self.systems.ready() > 0 {
-                let label = format!("Run on all ({})", self.systems.ready() + 1);
-                let everywhere = icons::add_named(
-                    ui,
-                    idle && !self.systems.busy(),
-                    icons::button(icons::PLAY, label.as_str()),
-                    "Run on all",
-                )
-                .on_hover_text("The statement under the cursor, here and on every system ticked");
-                if everywhere.clicked() {
-                    self.run_everywhere();
-                }
-            }
-            if !idle || self.systems.busy() {
+            if !idle {
                 ui.spinner();
                 theme::hint(ui, "Running…");
             }
@@ -1022,90 +991,6 @@ impl SqlWindow {
                 }
             });
         });
-    }
-
-    /// "Run on…": the other saved sessions, ticked to sign on to them (R-SQL-43).
-    fn systems_menu(&mut self, ui: &mut Ui, systems: &[(String, SessionConfig)]) {
-        let others: Vec<&(String, SessionConfig)> = systems
-            .iter()
-            .filter(|(name, _)| *name != self.session)
-            .collect();
-        ui.menu_button("Run on…", |ui| {
-            if others.is_empty() {
-                theme::hint(ui, "No other saved session.");
-            }
-            for (name, config) in others {
-                let mut on = self.systems.has(name);
-                if ui.checkbox(&mut on, name.as_str()).changed() {
-                    self.systems.toggle(name, config, &self.user);
-                }
-                let state = self
-                    .systems
-                    .list
-                    .iter()
-                    .find(|s| s.name == *name)
-                    .map(|s| &s.state);
-                match state {
-                    Some(systems::State::Ready { job }) => {
-                        theme::hint(ui, format!("signed on, {job}"));
-                    }
-                    Some(systems::State::Connecting) => theme::hint(ui, "signing on…"),
-                    Some(systems::State::Failed(why)) => theme::error(ui, why),
-                    Some(systems::State::SignIn) | None => {}
-                }
-            }
-        });
-    }
-
-    /// The statement under the cursor here and on every system signed on, if it only reads
-    /// (R-SQL-43, D24); each system's rows in a tab of its own.
-    fn run_everywhere(&mut self) {
-        if self.waiting.is_some() || !self.queue.is_empty() || self.systems.busy() {
-            return;
-        }
-        let Some(statement) = self.scripts.current_statement() else {
-            return;
-        };
-        if !text::reads_only(&statement) {
-            self.error_line = Some(
-                "Only one statement that reads (SELECT, VALUES, WITH) runs on several systems."
-                    .to_owned(),
-            );
-            return;
-        }
-        if params::markers(&statement).is_some() {
-            self.error_line =
-                Some("A statement with parameter markers runs on this system only.".to_owned());
-            return;
-        }
-        self.error_line = None;
-        let run = self.run_request(&statement);
-        self.send(run, Waiting::RunHere(statement.clone()));
-        self.systems.run(&statement, self.rows, self.timeout);
-    }
-
-    /// What the other systems answered: a tab each for rows, the rest in Messages (R-SQL-43).
-    fn on_systems(&mut self, answers: Vec<systems::Answered>) {
-        for answer in answers {
-            match answer {
-                systems::Answered::Rows {
-                    system,
-                    statement,
-                    columns,
-                    rows,
-                    more,
-                } => {
-                    let more = if more { "; more not fetched" } else { "" };
-                    self.messages
-                        .push((false, format!("{system}: {} rows{more}", rows.len())));
-                    self.results
-                        .add(&statement, ResultView::new(columns, rows, false, 0));
-                    self.results.retitle_last(&system);
-                    self.tab = Tab::Results;
-                }
-                systems::Answered::Message(error, text) => self.messages.push((error, text)),
-            }
-        }
     }
 
     /// The selection, or the statement under the cursor (R-SQL-7).
@@ -1212,7 +1097,7 @@ impl SqlWindow {
     }
 
     fn send(&mut self, request: Request, waiting: Waiting) {
-        if matches!(waiting, Waiting::Run(_) | Waiting::RunHere(_)) {
+        if matches!(waiting, Waiting::Run(_)) {
             self.run_started = Some(std::time::Instant::now());
         }
         if let Some(runner) = &mut self.runner {
@@ -1243,9 +1128,6 @@ impl SqlWindow {
             self.handle(event);
         }
         self.database.read_events();
-        self.systems.read_events();
-        let answers = self.systems.take_answers();
-        self.on_systems(answers);
         for pick in self.browser.receive(self.database.take_answers()) {
             self.use_pick(pick);
         }
@@ -1263,13 +1145,6 @@ impl SqlWindow {
             Waiting::Hello => self.on_hello(event),
             Waiting::Connect => self.on_connect(event),
             Waiting::Run(statement) => self.on_run(&statement, event),
-            Waiting::RunHere(statement) => {
-                let tabs = self.results.len();
-                self.on_run(&statement, event);
-                if self.results.len() > tabs {
-                    self.results.retitle_last(&self.session);
-                }
-            }
             Waiting::Explain { index, id, file } => self.on_explain(index, &id, file, event),
             Waiting::JobLog => self.on_job_log(event),
             Waiting::Fetch(cursor) => match event
@@ -1527,7 +1402,6 @@ impl SqlWindow {
             runner.send(Request::Close);
         }
         self.database.close();
-        self.systems.close_all();
     }
 }
 
@@ -1543,7 +1417,6 @@ mod tests {
             ..SessionConfig::default()
         };
         let mut w = SqlWindow::open(
-            "Prod",
             &config,
             PathBuf::from("java"),
             HelperFiles::in_folder(std::path::Path::new("/none")),
@@ -1679,41 +1552,6 @@ mod tests {
     }
 
     #[test]
-    fn only_a_statement_that_reads_runs_everywhere_and_each_system_gets_a_tab_r_sql_43() {
-        let mut w = window();
-        w.scripts.set_text("DELETE FROM T", 0);
-        w.run_everywhere();
-        assert!(
-            w.error_line
-                .as_deref()
-                .is_some_and(|e| e.starts_with("Only one statement that reads"))
-        );
-        w.scripts.set_text("SELECT * FROM T WHERE A = ?", 0);
-        w.run_everywhere();
-        assert!(
-            w.error_line
-                .as_deref()
-                .is_some_and(|e| e.contains("parameter markers"))
-        );
-        w.on_systems(vec![
-            systems::Answered::Rows {
-                system: "Test æøå".to_owned(),
-                statement: "SELECT * FROM T".to_owned(),
-                columns: Vec::new(),
-                rows: vec![vec![Some("1".to_owned())]],
-                more: true,
-            },
-            systems::Answered::Message(true, "Prod: [SQL0204] T".to_owned()),
-        ]);
-        assert_eq!(w.results.len(), 1);
-        assert_eq!(
-            w.messages[0],
-            (false, "Test æøå: 1 rows; more not fetched".to_owned())
-        );
-        assert!(w.messages[1].0);
-    }
-
-    #[test]
     fn the_ask_row_shows_only_while_the_assistant_add_on_is_on_r_add_3() {
         use egui_kittest::kittest::Queryable;
         let mut harness = drawn(window(), Vec::new());
@@ -1726,27 +1564,6 @@ mod tests {
         harness.state_mut().set_assistant(true, &config, None);
         harness.run_steps(2);
         assert!(harness.query_by_label("Ask").is_some());
-    }
-
-    #[test]
-    fn the_sign_on_to_another_system_keeps_its_buttons_in_place_r_sql_43() {
-        use egui_kittest::kittest::Queryable;
-        let mut w = window();
-        w.systems.toggle("Test", &SessionConfig::default(), "usr");
-        let mut harness = drawn(w, Vec::new());
-        harness.run_steps(2);
-        assert!(harness.query_by_label("Sign on to Test").is_some());
-        let sign_on = harness.get_by_label("Sign on").rect();
-        harness.run_steps(5);
-        assert_eq!(harness.get_by_label("Sign on").rect(), sign_on);
-        // The dialog's Cancel is drawn after the run row's.
-        harness
-            .get_all_by_label("Cancel")
-            .last()
-            .expect("the dialog's Cancel")
-            .click();
-        harness.run_steps(2);
-        assert!(!harness.state().systems.has("Test"), "cancel unticks it");
     }
 
     #[test]
@@ -1801,14 +1618,7 @@ mod tests {
     fn the_password_leaves_its_field_even_when_the_helper_cannot_start_r_sql_6() {
         let config = SessionConfig::default();
         let files = HelperFiles::in_folder(std::path::Path::new("/none"));
-        let mut w = SqlWindow::open(
-            "Prod",
-            &config,
-            PathBuf::from("/no/such/java"),
-            files,
-            "usr",
-            &[],
-        );
+        let mut w = SqlWindow::open(&config, PathBuf::from("/no/such/java"), files, "usr", &[]);
         "TopSecret9".clone_into(&mut w.password);
         w.connect(&egui::Context::default());
         assert_eq!(w.password, "", "not kept in the field");
@@ -1889,33 +1699,6 @@ mod tests {
         let run = harness.get_by_label("Run").rect();
         harness.run_steps(5);
         assert_eq!(harness.get_by_label("Run").rect(), run);
-    }
-
-    #[test]
-    fn run_on_is_offered_only_when_the_program_gives_other_systems_r_sql_43_d26() {
-        use egui_kittest::kittest::Queryable;
-        let others = vec![("Test".to_owned(), SessionConfig::default())];
-        let mut harness = egui_kittest::Harness::builder()
-            .with_size(egui::vec2(1100.0, 760.0))
-            .with_max_steps(16)
-            .build_ui_state(
-                move |ui, w: &mut SqlWindow| {
-                    crate::test_support::install_fonts(ui);
-                    let around = Around {
-                        systems: Some(&others),
-                        ..Around::default()
-                    };
-                    w.show_in(ui, around);
-                },
-                window().signed_on_for_tests(),
-            );
-        harness.run();
-        harness.get_by_label("Run on…");
-
-        // Parley SQL gives none: one connection at a time (D26).
-        let harness = drawn(window().signed_on_for_tests(), Vec::new());
-        harness.get_by_label("Run all");
-        assert!(harness.query_by_label("Run on…").is_none());
     }
 
     /// Draws a signed-on window `width` wide with its results placed as `results` asks.

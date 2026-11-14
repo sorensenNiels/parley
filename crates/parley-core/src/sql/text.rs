@@ -231,23 +231,6 @@ pub fn may_change_job(statement: &str) -> bool {
             .is_some_and(|w| w.eq_ignore_ascii_case("SET"))
 }
 
-/// Whether `statement` only reads: one statement whose first word is `SELECT`, `VALUES` or
-/// `WITH`, and not a `CL:` command; the only kind run on several systems at once (R-SQL-43,
-/// D24). Like [`risk`], it reads the first word only.
-pub fn reads_only(statement: &str) -> bool {
-    let first = tokens(statement)
-        .into_iter()
-        .find(|(token, _)| *token == Token::Word)
-        .and_then(|(_, r)| statement.get(r));
-    cl_command(statement).is_none()
-        && statements(statement).len() == 1
-        && first.is_some_and(|w| {
-            ["SELECT", "VALUES", "WITH"]
-                .iter()
-                .any(|k| w.eq_ignore_ascii_case(k))
-        })
-}
-
 /// `name` in capitals when it is an IBM i system name (a library, R-SQL-32): 1 to 10 of A–Z,
 /// 0–9, `_`, `#`, `$`, `@`, not starting with a digit or `_`.
 pub fn system_name(name: &str) -> Option<String> {
@@ -814,27 +797,6 @@ mod tests {
                 ("/* c */", Kind::Comment),
             ]
         );
-    }
-
-    #[test]
-    fn only_one_statement_that_reads_runs_on_several_systems_r_sql_43() {
-        for sql in [
-            "SELECT * FROM T",
-            "-- æøå\nvalues 1",
-            "WITH X AS (SELECT 1 FROM T) SELECT * FROM X;",
-        ] {
-            assert!(reads_only(sql), "{sql}");
-        }
-        for sql in [
-            "DELETE FROM T",
-            "CL: DSPLIB QGPL",
-            "SELECT 1 FROM T; DELETE FROM T",
-            "'SELECT'",
-            "",
-            "CALL P",
-        ] {
-            assert!(!reads_only(sql), "{sql}");
-        }
     }
 
     #[test]

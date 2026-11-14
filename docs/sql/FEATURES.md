@@ -16,6 +16,14 @@ None.
 
 ## Implemented
 
+- **R-SQL-70** (2026-11-14): Parley's SQL… starts Parley SQL (D30), built. **Automated** (`make test`): Parley SQL's
+  command line read back from what Parley passes (name, host, TLS, CA file, CCSID; æøå in the name), a host alone
+  named after itself with TLS, bad options as errors; Parley SQL uses the saved connection to the same host and TLS
+  or saves a new one under a free name; in kittest Tools ▸ SQL… starts it once with the session's host and no user,
+  says why when it cannot start, and starts nothing without a connection. Run on… (R-SQL-43) and its code are gone.
+  Seen in a screenshot: `parley-sql --host pub400.com --name PUB400 --tls --ccsid 277` opens its sign-on. **Checked
+  in the running app** by the owner, Linux under WSL (2026-11-14).
+
 - **Checked on the owner's IBM i** (2026-11-14, 7.3, as NODEJT400 without TLS, D22, `sqlprobe`): `--sql` signs on
   through the helper and JTOpen 21.0.7 and reads every type, more rows in blocks, and SQL0204 as an error (R-SQL-3,
   R-SQL-4, R-SQL-11..13); `--tools` runs CL with CPF2103 read, message help from the job log and the message file in
