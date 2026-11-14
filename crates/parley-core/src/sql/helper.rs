@@ -246,6 +246,7 @@ mod tests {
             sql: "VALUES 1".to_owned(),
             max_rows: 10,
             timeout: 0,
+            params: Vec::new(),
         };
         let answer = helper.call(&run).expect("answered").expect("an answer");
         assert!(answer.outcome.is_err());

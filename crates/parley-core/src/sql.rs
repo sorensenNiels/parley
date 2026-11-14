@@ -3,10 +3,13 @@
 //! (D4); [`java`] finds a Java to run the helper with (R-SQL-12); [`helper`] runs it (R-SQL-11).
 
 pub mod catalog;
+pub mod compare;
 pub mod complete;
+pub mod export;
 pub mod helper;
 pub mod java;
 pub mod message;
+pub mod params;
 pub mod protocol;
 pub mod runner;
 pub mod snippet;

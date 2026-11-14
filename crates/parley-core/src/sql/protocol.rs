@@ -9,7 +9,7 @@ use crate::error::{Error, Result};
 use crate::password::Password;
 
 /// The protocol version this Parley speaks; the helper names its own in [`Hello`].
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
 
 /// Rows fetched for a query at first, and with each "Fetch more" (R-SQL-8).
 pub const FIRST_ROWS: u32 = 1000;
@@ -24,6 +24,9 @@ pub enum Request {
         sql: String,
         max_rows: u32,
         timeout: u32,
+        /// The values of its `?` markers, in order; `None` for null (R-SQL-40, D23). With any,
+        /// the helper prepares the statement and sets them.
+        params: Vec<Option<String>>,
     },
     Fetch {
         cursor: u64,
@@ -86,10 +89,14 @@ impl Request {
                 sql,
                 max_rows,
                 timeout,
+                params,
             } => {
                 put("sql", sql.clone().into());
                 put("max_rows", (*max_rows).into());
                 put("timeout", (*timeout).into());
+                if !params.is_empty() {
+                    put("params", params.clone().into());
+                }
                 "run"
             }
             Self::Fetch { cursor, max_rows } => {
@@ -264,11 +271,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parameters_go_as_a_list_with_nulls_and_only_when_there_are_some_r_sql_40() {
+        let run = |params: Vec<Option<String>>| Request::Run {
+            sql: "SELECT * FROM T WHERE A = ? AND B = ?".to_owned(),
+            max_rows: 10,
+            timeout: 0,
+            params,
+        };
+        let value: Value =
+            serde_json::from_str(&run(vec![Some("æøå".to_owned()), None]).line(1)).expect("JSON");
+        assert_eq!(value["params"], serde_json::json!(["æøå", null]));
+        let value: Value = serde_json::from_str(&run(Vec::new()).line(2)).expect("JSON");
+        assert!(value.get("params").is_none(), "a plain run as before");
+    }
+
+    #[test]
     fn requests_are_one_json_object_each_r_sql_11() {
         let run = Request::Run {
             sql: "SELECT 'æøå' FROM \"T\"\n".to_owned(),
             max_rows: 1000,
             timeout: 30,
+            params: Vec::new(),
         };
         let line = run.line(3);
         assert!(!line.contains('\n'), "one line: {line}");
@@ -303,7 +326,7 @@ mod tests {
     fn answers_the_helper_gave_are_read_r_sql_11() {
         // As the helper answered on a test run (JTOpen 21.0.7, Java 11).
         let hello = Answer::parse(
-            r#"{"id":1,"ok":{"protocol":1,"java":"11.0.33","jtopen":"Open Source Software, JTOpen 21.0.7"}}"#,
+            r#"{"id":1,"ok":{"protocol":2,"java":"11.0.33","jtopen":"Open Source Software, JTOpen 21.0.7"}}"#,
         )
         .expect("an answer");
         assert_eq!(hello.id, Some(1));

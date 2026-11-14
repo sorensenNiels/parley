@@ -853,6 +853,7 @@ fn run_statement(
         sql: statement.to_owned(),
         max_rows,
         timeout: 0,
+        params: Vec::new(),
     };
     let (cursor, columns, mut rows, mut more) = match call::<Outcome>(helper, &run) {
         Ok(Outcome::Count { count }) => {
@@ -939,6 +940,7 @@ fn snippets(host: &str, user: &str, tls: bool) -> i32 {
             sql,
             max_rows: 5,
             timeout: 60,
+            params: Vec::new(),
         };
         // Said first, so a snippet the host takes long over is named while it runs.
         println!("...     {}", snippet.title);
@@ -995,6 +997,7 @@ fn tools(host: &str, user: &str, tls: bool) -> i32 {
             sql,
             max_rows: catalog::MAX_OBJECTS + 1,
             timeout: 60,
+            params: Vec::new(),
         };
         let outcome = call::<Outcome>(&mut helper, &request).map_err(|e| e.to_string());
         match &outcome {
@@ -1066,8 +1069,50 @@ fn tools(host: &str, user: &str, tls: bool) -> i32 {
         _ => good = false,
     }
     good &= browser(&mut run, user);
+    good &= parameters(&mut helper);
     helper.close();
     i32::from(!good)
+}
+
+/// R-SQL-40: a prepared statement's values as text and null, converted by IBM i; constants only.
+fn parameters(helper: &mut parley_core::sql::helper::Helper) -> bool {
+    use parley_core::sql::params;
+    use parley_core::sql::protocol::{Outcome, Request};
+
+    let statement = "SELECT CAST(:text AS VARCHAR(10)) AS T, CAST(? AS INTEGER) + 1 AS N, \
+        CAST(:text AS VARCHAR(10)) AS AGAIN, CAST(? AS DATE) AS D FROM SYSIBM.SYSDUMMY1";
+    let Some(markers) = params::markers(statement) else {
+        return false;
+    };
+    let fields = [Some("æøå".to_owned()), Some("41".to_owned()), None];
+    let run = Request::Run {
+        sql: markers.sql.clone(),
+        max_rows: 5,
+        timeout: 60,
+        params: markers.values(&fields),
+    };
+    match call::<Outcome>(helper, &run) {
+        Ok(Outcome::Rows { rows, .. }) => {
+            let row = rows.first().cloned().unwrap_or_default();
+            let expected = vec![
+                Some("æøå".to_owned()),
+                Some("42".to_owned()),
+                Some("æøå".to_owned()),
+                None,
+            ];
+            let good = row == expected;
+            println!(
+                "{}  Parameters (text, number, the same name twice, null): {row:?}",
+                if good { "ok    " } else { "WRONG " }
+            );
+            good
+        }
+        Ok(Outcome::Count { .. }) => false,
+        Err(e) => {
+            println!("error   Parameters: {e}");
+            false
+        }
+    }
 }
 
 /// The schema browser's queries (R-SQL-34): counts per kind only, no object names.

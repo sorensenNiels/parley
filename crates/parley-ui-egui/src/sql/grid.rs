@@ -9,6 +9,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use egui::{Align, Label, Layout, RichText, ScrollArea, Sense, Ui, vec2};
+use parley_core::sql::export;
 use parley_core::sql::protocol::{Column, Row};
 
 use crate::{icons, theme};
@@ -37,6 +38,26 @@ pub fn header_text(column: &Column, mode: HeaderMode) -> String {
     }
 }
 
+/// The formats Copy as offers (R-SQL-38).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyFormat {
+    Markdown,
+    Inserts,
+    Json,
+}
+
+impl CopyFormat {
+    pub const ALL: [CopyFormat; 3] = [CopyFormat::Markdown, CopyFormat::Inserts, CopyFormat::Json];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CopyFormat::Markdown => "Markdown table",
+            CopyFormat::Inserts => "INSERT statements",
+            CopyFormat::Json => "JSON",
+        }
+    }
+}
+
 /// A query's result as the window shows it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResultView {
@@ -61,6 +82,10 @@ pub struct ResultView {
     pub detail: Option<usize>,
     /// What the headings say (R-SQL-29), as the window's choice sets it.
     pub header: HeaderMode,
+    /// Values marked as different in a comparison (R-SQL-41): (row in `rows`, column).
+    pub marked: BTreeSet<(usize, usize)>,
+    /// The chart shown instead of the grid, while it is (R-SQL-42).
+    pub chart: Option<super::chart::Chart>,
 }
 
 impl ResultView {
@@ -79,6 +104,8 @@ impl ResultView {
             widths: Vec::new(),
             detail: None,
             header: HeaderMode::default(),
+            marked: BTreeSet::new(),
+            chart: None,
         };
         view.widths = (0..view.columns.len()).map(|c| view.fit(c)).collect();
         view
@@ -164,18 +191,46 @@ impl ResultView {
             .map(|c| clean(&header_text(c, self.header)))
             .collect::<Vec<_>>()
             .join("\t");
-        let all = !self.shown().any(|(i, _)| self.selected.contains(&i));
-        for (i, row) in self.shown() {
-            if all || self.selected.contains(&i) {
-                out.push('\n');
-                let cells: Vec<String> = row
-                    .iter()
-                    .map(|v| clean(v.as_deref().unwrap_or("")))
-                    .collect();
-                out.push_str(&cells.join("\t"));
-            }
+        for row in self.chosen() {
+            out.push('\n');
+            let cells: Vec<String> = row
+                .iter()
+                .map(|v| clean(v.as_deref().unwrap_or("")))
+                .collect();
+            out.push_str(&cells.join("\t"));
         }
         out
+    }
+
+    /// The rows shown, in their order: what a chart draws.
+    pub fn shown_rows(&self) -> Vec<&Row> {
+        self.shown().map(|(_, row)| row).collect()
+    }
+
+    /// The selected rows shown, or all rows shown when none is: what Copy copies.
+    fn chosen(&self) -> Vec<&Row> {
+        let all = !self.shown().any(|(i, _)| self.selected.contains(&i));
+        self.shown()
+            .filter(|(i, _)| all || self.selected.contains(i))
+            .map(|(_, row)| row)
+            .collect()
+    }
+
+    /// What Copy copies, as a Markdown table, `INSERT` statements or JSON (R-SQL-38).
+    pub fn copy_as(&self, format: CopyFormat) -> String {
+        let rows = self.chosen();
+        match format {
+            CopyFormat::Markdown => {
+                let names: Vec<String> = self
+                    .columns
+                    .iter()
+                    .map(|c| header_text(c, self.header))
+                    .collect();
+                export::markdown(&names, &self.columns, &rows)
+            }
+            CopyFormat::Inserts => export::inserts(&self.columns, &rows),
+            CopyFormat::Json => export::json(&self.columns, &rows),
+        }
     }
 
     /// The rows shown as CSV (RFC 4180, UTF-8 with a byte-order mark so spreadsheets read
@@ -328,6 +383,14 @@ impl ResultView {
                     for (c, value) in row.iter().enumerate() {
                         let numeric = self.columns.get(c).is_some_and(|col| col.numeric);
                         let width = self.widths.get(c).copied().unwrap_or(120.0);
+                        if self.marked.contains(&(index, c)) {
+                            let at = egui::Rect::from_min_size(
+                                ui.cursor().min,
+                                vec2(width - 2.0, ROW_HEIGHT - 2.0),
+                            );
+                            ui.painter()
+                                .rect_filled(at, 2.0, p.warning_text.gamma_multiply(0.2));
+                        }
                         cell(ui, width, value.as_deref(), numeric);
                     }
                 }
@@ -569,6 +632,32 @@ mod tests {
         assert_eq!(v.tsv(), "AMOUNT\tNAME\n10.5\tæøå\n-2\t\n\ttab here\n9\t");
         v.selected.insert(1);
         assert_eq!(v.tsv(), "AMOUNT\tNAME\n-2\t", "only the selected rows");
+    }
+
+    #[test]
+    fn copy_as_takes_the_selected_rows_or_all_shown_r_sql_38() {
+        let mut v = ResultView::new(
+            vec![column("N", true), column("NAVN", false)],
+            vec![
+                vec![Some("1".to_owned()), Some("æøå".to_owned())],
+                vec![Some("2".to_owned()), None],
+            ],
+            false,
+            0,
+        );
+        assert_eq!(
+            v.copy_as(CopyFormat::Json),
+            "[\n  {\"N\": 1, \"NAVN\": \"æøå\"},\n  {\"N\": 2, \"NAVN\": null}\n]"
+        );
+        v.selected.insert(1);
+        assert_eq!(
+            v.copy_as(CopyFormat::Markdown),
+            "| N | NAVN |\n| ---: | --- |\n| 2 |  |"
+        );
+        assert!(
+            v.copy_as(CopyFormat::Inserts)
+                .ends_with("VALUES (2, NULL);")
+        );
     }
 
     #[test]

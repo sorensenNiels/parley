@@ -105,6 +105,7 @@ impl SqlWindow {
             sql,
             max_rows,
             timeout: TIMEOUT,
+            params: Vec::new(),
         };
         self.send(run, waiting);
     }

@@ -21,6 +21,8 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.ParameterMetaData;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
@@ -38,7 +40,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 public final class Helper {
     /** The protocol's version; Parley checks it in the answer to hello. */
-    static final int PROTOCOL = 1;
+    static final int PROTOCOL = 2;
 
     /** Seconds to give up connecting (R-SQL-3); a property so tests can shorten it. */
     private static final int LOGIN_TIMEOUT = Integer.getInteger("parley.sql.loginTimeout", 30);
@@ -150,7 +152,8 @@ public final class Helper {
             case "connect":
                 return connect(request);
             case "run":
-                return run(text(request, "sql"), maxRows(request), seconds(request, "timeout"));
+                return run(text(request, "sql"), maxRows(request), seconds(request, "timeout"),
+                        params(request));
             case "fetch":
                 return fetch(number(request, "cursor"), maxRows(request));
             case "close_cursor":
@@ -246,14 +249,25 @@ public final class Helper {
         }
     }
 
-    private Map<String, Object> run(String sql, int maxRows, int timeout) throws SQLException {
-        Statement statement = connected().createStatement();
+    private Map<String, Object> run(String sql, int maxRows, int timeout, List<String> params)
+            throws SQLException {
+        // R-SQL-40, D23: with values for its markers, the statement is prepared and they are
+        // set as text; IBM i converts each to its parameter's type.
+        Statement statement = params.isEmpty()
+                ? connected().createStatement()
+                : connected().prepareStatement(sql);
         running = statement;
         boolean query;
         try {
             statement.setFetchSize(BLOCK);
             statement.setQueryTimeout(timeout); // 0: none (R-SQL-18)
-            query = statement.execute(sql);
+            if (params.isEmpty()) {
+                query = statement.execute(sql);
+            } else {
+                PreparedStatement prepared = (PreparedStatement) statement;
+                setParams(prepared, params);
+                query = prepared.execute();
+            }
         } catch (SQLException e) {
             statement.close();
             if (timeout > 0 && (e instanceof SQLTimeoutException || "57014".equals(e.getSQLState()))) {
@@ -516,6 +530,45 @@ public final class Helper {
         Object value = request.get(name);
         long seconds = value instanceof Long ? (Long) value : 0;
         return (int) Math.max(0, Math.min(seconds, 86_400));
+    }
+
+    /** The values of a run's markers, in order; null for SQL null. */
+    private static List<String> params(Map<String, Object> request) {
+        Object value = request.get("params");
+        List<String> params = new ArrayList<>();
+        if (value instanceof List) {
+            for (Object item : (List<?>) value) {
+                if (item != null && !(item instanceof String)) {
+                    throw new IllegalArgumentException("\"params\" holds text or null only");
+                }
+                params.add((String) item);
+            }
+        }
+        return params;
+    }
+
+    /** Sets each value as text; a null with its parameter's type, when IBM i says it. */
+    private static void setParams(PreparedStatement prepared, List<String> params)
+            throws SQLException {
+        ParameterMetaData meta = prepared.getParameterMetaData();
+        if (meta.getParameterCount() != params.size()) {
+            throw new SQLException("The statement has " + meta.getParameterCount()
+                    + " parameter markers, but " + params.size() + " values were given.");
+        }
+        for (int i = 0; i < params.size(); i++) {
+            String value = params.get(i);
+            if (value == null) {
+                int type;
+                try {
+                    type = meta.getParameterType(i + 1);
+                } catch (SQLException e) {
+                    type = Types.VARCHAR; // IBM i did not say: VARCHAR converts to most types.
+                }
+                prepared.setNull(i + 1, type);
+            } else {
+                prepared.setString(i + 1, value);
+            }
+        }
     }
 
     private static int maxRows(Map<String, Object> request) {

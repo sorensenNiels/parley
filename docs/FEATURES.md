@@ -88,6 +88,28 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
   browser's cache; what is missing is asked on the second connection and offered when answered. **Automated:**
   the name typed and its qualifier (not in text or comments, `æøå`), tables and aliases from FROM/JOIN, what is
   offered from the cache, replacing the typed part, and the keys in a kittest. **Left:** the owner tries it.
+- **R-SQL-38, R-SQL-39** (2026-11-14): Copy as and binary values, built. Beside Copy, "Copy as" copies the selected
+  rows (or all shown) as a Markdown table, `INSERT` statements (into the table the columns come from, else
+  `TABLE_NAME`) or JSON; numbers unquoted, nulls kept, text escaped per format. In the row detail a `FOR BIT DATA`
+  or `BINARY` value shows as hex in groups of four beside its EBCDIC text, in the session's code page or another
+  chosen. **Automated:** each format's escaping, numbers and nulls (`æøå`, `O'Brien`, `|`); the dump's lines and
+  unprintable bytes; Copy as takes the selection. **Checked:** JTOpen's type names for both on the owner's 7.3
+  (`CHAR () FOR BIT DATA`, `BINARY`), `'Æble'` arriving as `7B829385`. **Left:** the owner tries both in the app.
+- **R-SQL-40** (2026-11-14): a form for parameter markers, built. A statement with `?` or `:name` markers (not in
+  strings, names or comments, never in `CL:`) opens a form first, a field per `?` and per name, each with a NULL
+  switch; Run sends it prepared with the values (helper protocol 2, D23), the history keeps the markers, and the
+  values come back next time for the same statement in that window; Cancel stops what was queued. **Automated:**
+  markers and their slots (`:name` twice, `æøå`, quotes, comments, `12:30`), the request's `params`, the form's
+  buttons in place and its values, the window waiting for it. **Checked:** `sqlprobe --tools` on the owner's 7.3
+  as NODEJT400: text, a number, a name used twice and null came back right. **Left:** the owner tries it.
+- **R-SQL-41, R-SQL-42** (2026-11-14): compare and charts, built. "Compare with…" over the result tabs ticks the key
+  columns (the first by default) and lists the other results with the same column names; the comparison opens as
+  a result of its own: rows only in the first, only in the second, and pairs that differ with the differing values
+  marked; how many were the same is said. "Table | Chart" shows the rows shown as bars or lines (`egui_plot` 0.38,
+  D23): the first text or date column along the bottom, up to four numeric columns at first, others under
+  Columns. **Automated:** matching by key in any row and column order, several keys, duplicates, mismatched
+  columns or keys (`æøå`); the comparison tab and its marks; chart data (labels, gaps, row numbers) and a kittest
+  switching Table, Chart, Lines. **Left:** the owner tries both, in light and dark.
 - **R-SQL-37** (2026-11-13): names on hover, built. Hovering a table or view name in the editor (or its alias)
   shows its qualified name, kind, text and up to 25 columns with type and heading, from the browser's cache (read
   when missing). **Automated:** the name and library under the pointer (not in comments, `æøå`), aliases, columns

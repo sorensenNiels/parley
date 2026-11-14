@@ -6,7 +6,11 @@ use egui::{Panel, RichText, ScrollArea, Ui};
 use parley_core::sql::protocol::Row;
 
 use super::SqlFiles;
-use super::grid::{HeaderMode, ResultView};
+use parley_core::ebcdic::CodePage;
+use parley_core::sql::{compare, export};
+
+use super::chart;
+use super::grid::{CopyFormat, HeaderMode, ResultView};
 use crate::{icons, theme};
 
 /// Result tabs kept; the oldest closes first.
@@ -28,6 +32,10 @@ pub struct Results {
     shown: usize,
     /// Said in the bar after Copy or Export.
     note: Option<String>,
+    /// The code page binary values are read in, in the row detail (R-SQL-39).
+    pub code_page: CodePage,
+    /// The key columns a comparison matches rows by, by name; empty for the first (R-SQL-41).
+    compare_keys: Vec<String>,
 }
 
 /// What the results area asks of the window.
@@ -38,6 +46,14 @@ pub enum Ask {
 }
 
 impl Results {
+    /// No results yet; binary values are read in `code_page`, the session's (R-SQL-39).
+    pub fn reading(code_page: CodePage) -> Self {
+        Self {
+            code_page,
+            ..Self::default()
+        }
+    }
+
     /// A new tab for `statement`'s result, shown at once (R-SQL-14).
     pub fn add(&mut self, statement: &str, view: ResultView) {
         if self.tabs.len() == MAX_TABS {
@@ -101,6 +117,11 @@ impl Results {
                 .on_hover_text("Rows that hold this text in any column, ignoring case");
             // R-SQL-29: what the column headings say.
             theme::button_row(ui, |ui| {
+                // R-SQL-42: the rows as a chart instead of the grid.
+                let mut charted = view.chart.is_some();
+                if theme::segmented(ui, &mut charted, &[(false, "Table"), (true, "Chart")]) {
+                    view.chart = charted.then(|| chart::Chart::new(&view.columns));
+                }
                 theme::segmented(
                     ui,
                     header,
@@ -117,11 +138,20 @@ impl Results {
         Panel::bottom("sql-grid-actions").show(ui, |ui| {
             ask = bar(ui, view, idle, saver, note);
         });
+        if let Some(mut shown) = view.chart.take() {
+            {
+                let rows = view.shown_rows();
+                chart::show(ui, &mut shown, &view.columns, &rows);
+            }
+            view.chart = Some(shown);
+            return ask;
+        }
         if view.detail.is_some() {
+            let page = &mut self.code_page;
             Panel::right("sql-detail")
                 .resizable(true)
                 .default_size(320.0)
-                .show(ui, |ui| detail(ui, view));
+                .show(ui, |ui| detail(ui, view, page));
         }
         view.show(ui);
         ask
@@ -141,7 +171,8 @@ impl Results {
             .collect();
         let mut close = false;
         ui.horizontal(|ui| {
-            let width = ui.available_width() - 30.0;
+            // Room for "Compare with…" and the close button.
+            let width = (ui.available_width() - 150.0).max(120.0);
             ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
                 ScrollArea::horizontal()
                     .id_salt("sql-result-tabs")
@@ -149,11 +180,97 @@ impl Results {
                         theme::tabs(ui, &mut self.shown, &items);
                     });
             });
+            self.compare_menu(ui);
             let button = theme::icon_button(ui, "🗙");
             close = ui.add(button).on_hover_text("Close this result").clicked();
         });
         if close {
             self.close(self.shown);
+        }
+    }
+
+    /// "Compare with…": the key columns, then the other results with the same columns; the
+    /// comparison opens as a result of its own (R-SQL-41).
+    fn compare_menu(&mut self, ui: &mut Ui) {
+        let Some(shown) = self.tabs.get(self.shown) else {
+            return;
+        };
+        let names: Vec<String> = shown.view.columns.iter().map(|c| c.name.clone()).collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        let others: Vec<(usize, String)> = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter(|&(i, t)| {
+                let mut theirs: Vec<&String> = t.view.columns.iter().map(|c| &c.name).collect();
+                theirs.sort();
+                i != self.shown && theirs.into_iter().eq(sorted.iter())
+            })
+            .map(|(i, t)| (i, t.title.clone()))
+            .collect();
+        self.compare_keys.retain(|k| names.contains(k));
+        let mut chosen = None;
+        ui.menu_button("Compare with…", |ui| {
+            theme::section_label(ui, "Key columns");
+            for name in &names {
+                let first = self.compare_keys.is_empty() && names.first() == Some(name);
+                let mut on = first || self.compare_keys.contains(name);
+                // Ticking another column replaces the first as the default key.
+                if ui.checkbox(&mut on, name.as_str()).changed() {
+                    if on {
+                        self.compare_keys.push(name.clone());
+                    } else {
+                        self.compare_keys.retain(|k| k != name);
+                    }
+                    self.compare_keys.dedup();
+                }
+            }
+            ui.separator();
+            theme::section_label(ui, "With");
+            if others.is_empty() {
+                theme::hint(ui, "No other result has the same columns.");
+            }
+            for (i, title) in &others {
+                if ui.button(title.as_str()).clicked() {
+                    chosen = Some(*i);
+                    ui.close();
+                }
+            }
+        });
+        if let Some(other) = chosen {
+            self.compare_with(other);
+        }
+    }
+
+    /// The shown result compared with result `other`, as a result of its own.
+    fn compare_with(&mut self, other: usize) {
+        let (Some(first), Some(second)) = (self.tabs.get(self.shown), self.tabs.get(other)) else {
+            return;
+        };
+        let compared = compare::compare(
+            (&first.view.columns, &first.view.rows),
+            (&second.view.columns, &second.view.rows),
+            &self.compare_keys,
+        );
+        let title = format!("{} vs {}", first.title, second.title);
+        match compared {
+            Ok(c) => {
+                let (same, differ) = (c.same, c.rows.len());
+                let mut view = ResultView::new(c.columns, c.rows, false, 0);
+                view.marked = c.marked.into_iter().collect();
+                self.add("", view);
+                if let Some(tab) = self.tabs.last_mut() {
+                    tab.title = title;
+                }
+                self.note = Some(format!("{same} rows the same, {differ} rows listed."));
+            }
+            Err(compare::Mismatch::Columns) => {
+                self.note = Some("The results have different columns.".to_owned());
+            }
+            Err(compare::Mismatch::Key) => {
+                self.note = Some("Choose a key column the results have.".to_owned());
+            }
         }
     }
 }
@@ -214,6 +331,16 @@ fn bar(
                 ui.ctx().copy_text(view.tsv());
                 *note = Some("Copied.".to_owned());
             }
+            // R-SQL-38: the same rows in other formats.
+            ui.menu_button("Copy as", |ui| {
+                for format in CopyFormat::ALL {
+                    if ui.button(format.label()).clicked() {
+                        ui.ctx().copy_text(view.copy_as(format));
+                        *note = Some(format!("Copied as {}.", format.label()));
+                        ui.close();
+                    }
+                }
+            });
             if let Some(text) = note.as_deref().filter(|n| !n.is_empty()) {
                 theme::hint(ui, text);
             }
@@ -224,7 +351,7 @@ fn bar(
 
 /// One row's values one under another (R-SQL-15): name, type and the whole value, each with
 /// Copy; Up and Down step through the rows shown.
-fn detail(ui: &mut Ui, view: &mut ResultView) {
+fn detail(ui: &mut Ui, view: &mut ResultView, page: &mut CodePage) {
     let p = theme::palette(ui);
     let (shown, _) = view.counts();
     let mut step = 0;
@@ -247,6 +374,22 @@ fn detail(ui: &mut Ui, view: &mut ResultView) {
             }
         });
     });
+    let binary = view.detail_row().is_some_and(|(row, _)| {
+        view.columns
+            .iter()
+            .zip(row)
+            .any(|(c, v)| v.is_some() && export::is_binary(c))
+    });
+    if binary {
+        // R-SQL-39: the code page the bytes are read in.
+        egui::ComboBox::from_id_salt("sql-detail-ccsid")
+            .selected_text(format!("EBCDIC {}", page.label()))
+            .show_ui(ui, |ui| {
+                for choice in CodePage::ALL {
+                    ui.selectable_value(page, choice, choice.label());
+                }
+            });
+    }
     ui.separator();
     if let Some((row, _)) = view.detail_row() {
         let row = row.clone();
@@ -269,7 +412,14 @@ fn detail(ui: &mut Ui, view: &mut ResultView) {
                             }
                         });
                     });
+                    let dump = value
+                        .as_deref()
+                        .filter(|_| export::is_binary(column))
+                        .and_then(|hex| export::binary_dump(hex, *page));
                     match value {
+                        Some(_) if let Some(dump) = dump => {
+                            ui.add(egui::Label::new(RichText::new(dump).monospace()).extend());
+                        }
                         Some(text) => {
                             ui.add(egui::Label::new(RichText::new(text).monospace()).wrap());
                         }
@@ -371,5 +521,101 @@ mod tests {
             "SELECT verylongcolumnname1, ver…"
         );
         assert_eq!(title(""), "");
+    }
+
+    #[test]
+    fn comparing_two_results_opens_a_result_with_the_differences_marked_r_sql_41() {
+        let view = |rows: &[(&str, &str)]| {
+            let column = |name: &str| parley_core::sql::protocol::Column {
+                name: name.to_owned(),
+                type_name: "VARCHAR".to_owned(),
+                length: 10,
+                scale: 0,
+                nullable: true,
+                numeric: false,
+                field: None,
+                schema: None,
+                table: None,
+                heading: None,
+                text: None,
+            };
+            let rows = rows
+                .iter()
+                .map(|(a, b)| vec![Some((*a).to_owned()), Some((*b).to_owned())])
+                .collect();
+            ResultView::new(vec![column("ID"), column("NAVN")], rows, false, 0)
+        };
+        let mut results = Results::default();
+        results.add("SELECT * FROM A", view(&[("1", "æøå"), ("2", "to")]));
+        results.add("SELECT * FROM B", view(&[("1", "æøå"), ("2", "TO")]));
+        results.compare_with(0);
+        assert_eq!(results.tabs.len(), 3);
+        let tab = &results.tabs[2];
+        assert_eq!(tab.title, "SELECT * FROM B vs SELECT * FROM A");
+        assert_eq!(tab.view.rows.len(), 2, "the pair that differs");
+        assert!(tab.view.marked.contains(&(0, 2)) && tab.view.marked.contains(&(1, 2)));
+        assert_eq!(
+            results.note.as_deref(),
+            Some("1 rows the same, 2 rows listed.")
+        );
+        results.compare_keys = vec!["NOPE".to_owned()];
+        results.shown = 0;
+        results.compare_with(1);
+        assert_eq!(results.tabs.len(), 3, "nothing opened");
+        assert_eq!(
+            results.note.as_deref(),
+            Some("Choose a key column the results have.")
+        );
+    }
+
+    #[test]
+    fn a_result_shows_as_a_chart_and_back_as_a_table_r_sql_42() {
+        use egui_kittest::kittest::Queryable;
+
+        let column = |name: &str, numeric: bool| parley_core::sql::protocol::Column {
+            name: name.to_owned(),
+            type_name: "X".to_owned(),
+            length: 10,
+            scale: 0,
+            nullable: true,
+            numeric,
+            field: None,
+            schema: None,
+            table: None,
+            heading: None,
+            text: None,
+        };
+        let rows = vec![
+            vec![Some("Århus".to_owned()), Some("3".to_owned())],
+            vec![Some("Odense".to_owned()), Some("5".to_owned())],
+        ];
+        let mut results = Results::default();
+        results.add(
+            "SELECT BY, N FROM T",
+            ResultView::new(vec![column("BY", false), column("N", true)], rows, false, 0),
+        );
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(900.0, 500.0))
+            .build_ui_state(
+                |ui, r: &mut Results| {
+                    crate::test_support::install_fonts(ui);
+                    let mut header = HeaderMode::default();
+                    r.show(ui, true, &mut header, None);
+                },
+                results,
+            );
+        harness.run();
+        harness.get_by_label("Chart").click();
+        harness.run_steps(3);
+        assert!(
+            harness.query_by_label("Bars").is_some(),
+            "the chart's controls"
+        );
+        assert!(harness.state().tabs[0].view.chart.is_some());
+        harness.get_by_label("Lines").click();
+        harness.run_steps(3);
+        harness.get_by_label("Table").click();
+        harness.run_steps(2);
+        assert!(harness.state().tabs[0].view.chart.is_none());
     }
 }

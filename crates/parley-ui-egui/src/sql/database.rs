@@ -152,6 +152,7 @@ impl Database {
             // Above every FETCH FIRST in the catalog queries, so no cursor stays open.
             max_rows: 10_000,
             timeout: TIMEOUT,
+            params: Vec::new(),
         };
         self.waiting = Some((runner.send(run), Some(ask)));
     }

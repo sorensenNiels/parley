@@ -19,6 +19,7 @@ getrandom = "0.3"
 
 # Bundled fonts, including the emoji fonts that hold symbols the UI may use.
 egui = { version = "0.37", features = ["default_fonts", "monochrome_emoji_fonts"] }
+egui_plot = "0.38"
 # OpenGL (glow) instead of the default wgpu: smaller, faster to build, and works under WSLg.
 # `persistence`: the last connection's settings are remembered between runs.
 eframe = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "glow", "persistence", "wayland", "x11"] }

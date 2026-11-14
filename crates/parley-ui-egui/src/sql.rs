@@ -4,9 +4,11 @@
 //! never waits for the host.
 
 mod browser;
+mod chart;
 mod database;
 pub mod editor;
 pub mod grid;
+mod parameters;
 pub mod results;
 pub mod snippets;
 mod tools;
@@ -21,6 +23,7 @@ use egui::{
 use parley_core::SessionConfig;
 use parley_core::password::Password;
 use parley_core::sql::helper::HelperFiles;
+use parley_core::sql::params;
 use parley_core::sql::protocol::{
     self, Connect, Connected, Done, Hello, MoreRows, Outcome, Request,
 };
@@ -158,6 +161,10 @@ pub struct SqlWindow {
     ran: Vec<String>,
     /// The sign-on, sent once the helper's hello is read; it holds the password until then.
     pending_connect: Option<Request>,
+    /// The form for a statement's parameter markers while it is open (R-SQL-40).
+    parameters: Option<parameters::ParamForm>,
+    /// The values given for each statement's markers, by its text, for this window.
+    param_values: std::collections::BTreeMap<String, Vec<parameters::Value>>,
     /// The second connection, for the catalog (R-SQL-33, D21).
     database: database::Database,
     /// The same sign-on for it, held until the first has signed on, then sent or dropped.
@@ -193,7 +200,7 @@ impl SqlWindow {
             scripts: editor::Scripts::restore(scripts),
             queue: VecDeque::new(),
             waiting: None,
-            results: results::Results::default(),
+            results: results::Results::reading(config.code_page),
             tab: Tab::Results,
             side: Side::History,
             snippets: snippets::SnippetPanel::default(),
@@ -212,6 +219,8 @@ impl SqlWindow {
             pending_connect: None,
             database: database::Database::default(),
             pending_catalog: None,
+            parameters: None,
+            param_values: std::collections::BTreeMap::new(),
             header: grid::HeaderMode::default(),
             rows: protocol::FIRST_ROWS,
             timeout: 0,
@@ -327,6 +336,7 @@ impl SqlWindow {
             self.use_snippet(used);
         }
         self.confirm_dialog(ui.ctx());
+        self.parameters_dialog(ui.ctx());
         self.closing_dialog(ui.ctx());
     }
 
@@ -734,7 +744,7 @@ impl SqlWindow {
 
     /// Runs the next statement queued, after asking when it changes much (R-SQL-9).
     fn next_statement(&mut self) {
-        if self.waiting.is_some() || self.confirm.is_some() {
+        if self.waiting.is_some() || self.confirm.is_some() || self.parameters.is_some() {
             return;
         }
         let Some(statement) = self.queue.pop_front() else {
@@ -747,8 +757,16 @@ impl SqlWindow {
         self.start(statement);
     }
 
+    /// Runs `statement`, after asking for its markers' values when it has any (R-SQL-40).
     fn start(&mut self, statement: String) {
         self.error_line = None;
+        if text::cl_command(&statement).is_none()
+            && let Some(markers) = params::markers(&statement)
+        {
+            let remembered = self.param_values.get(&statement);
+            self.parameters = Some(parameters::ParamForm::new(statement, markers, remembered));
+            return;
+        }
         let run = self.run_request(&statement);
         self.send(run, Waiting::Run(statement));
     }
@@ -761,6 +779,35 @@ impl SqlWindow {
             sql,
             max_rows: self.rows,
             timeout: self.timeout,
+            params: Vec::new(),
+        }
+    }
+
+    /// The parameter form while open: Run sends the marked statement with the values given
+    /// and remembers them; Cancel stops what was queued (R-SQL-40).
+    fn parameters_dialog(&mut self, ctx: &egui::Context) {
+        let Some(form) = &mut self.parameters else {
+            return;
+        };
+        let Some(outcome) = form.show(ctx) else {
+            return;
+        };
+        let Some(form) = self.parameters.take() else {
+            return;
+        };
+        match outcome {
+            parameters::Outcome::Run(values) => {
+                self.param_values
+                    .insert(form.statement.clone(), form.values.clone());
+                let run = Request::Run {
+                    sql: form.markers.sql,
+                    max_rows: self.rows,
+                    timeout: self.timeout,
+                    params: values,
+                };
+                self.send(run, Waiting::Run(form.statement));
+            }
+            parameters::Outcome::Cancel => self.queue.clear(),
         }
     }
 
@@ -1165,6 +1212,27 @@ mod tests {
     }
 
     #[test]
+    fn a_statement_with_markers_asks_for_values_before_it_runs_r_sql_40() {
+        let mut w = window();
+        w.scripts
+            .set_text("SELECT * FROM T WHERE A = :navn; VALUES 'æøå'", 0);
+        w.run_all();
+        assert!(
+            w.waiting.is_none(),
+            "nothing sent before the values are given"
+        );
+        let form = w.parameters.as_ref().expect("the form");
+        assert_eq!(form.markers.sql, "SELECT * FROM T WHERE A = ?");
+        assert_eq!(w.queue, ["VALUES 'æøå'"], "the next waits for the form");
+        w.next_statement();
+        assert_eq!(w.queue.len(), 1, "still waiting while the form is open");
+        // A CL command is never read for markers.
+        let mut w = window();
+        w.start("CL: SNDMSG MSG('?') TOUSR(:X)".to_owned());
+        assert!(w.parameters.is_none());
+    }
+
+    #[test]
     fn run_all_queues_every_statement_in_order_r_sql_7() {
         let mut w = window();
         w.scripts.set_text("VALUES 1;\nVALUES 'æøå';\n", 0);
@@ -1338,6 +1406,7 @@ mod tests {
                 sql: "CALL QSYS2.QCMDEXC('SNDMSG MSG(''æøå'') TOUSR(QSYSOPR)')".to_owned(),
                 max_rows: protocol::FIRST_ROWS,
                 timeout: 0,
+                params: Vec::new(),
             }
         );
         w.autocommit = false;
@@ -1360,6 +1429,7 @@ mod tests {
                 sql: "VALUES 1".to_owned(),
                 max_rows: 250,
                 timeout: 15,
+                params: Vec::new(),
             }
         );
         let plain = window();
@@ -1369,6 +1439,7 @@ mod tests {
                 sql: "VALUES 1".to_owned(),
                 max_rows: protocol::FIRST_ROWS,
                 timeout: 0,
+                params: Vec::new(),
             },
             "the defaults: 1000 rows, no timeout"
         );
