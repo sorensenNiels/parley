@@ -1,7 +1,8 @@
 # Parley architecture
 
-> How Parley is built, with pictures. The why behind each choice is a decision in [ROADMAP.md](ROADMAP.md) §7
-> (`D1`…); the product view is [PRD.md](PRD.md).
+> How Parley is built, with pictures. The why behind each choice is a decision in [ROADMAP.md](ROADMAP.md) §7 (D1–D18) or
+> [sql/ROADMAP.md](sql/ROADMAP.md) §6 (D19–D27, the SQL window); the
+> product view is [PRD.md](PRD.md) and [sql/PRD.md](sql/PRD.md).
 
 ## Crates
 

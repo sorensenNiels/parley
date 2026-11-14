@@ -48,10 +48,12 @@ pub enum KeySource {
     None,
 }
 
-/// The key to ask with: the environment variable, then the keychain (D27).
+/// The key to ask with: the environment variable, then the keychain (D27). A provider that
+/// needs no key (llama.cpp, a server of one's own) works without a keychain: on a system
+/// without one (WSL) it is asked without a key.
 ///
 /// # Errors
-/// When the keychain cannot be read.
+/// When the keychain cannot be read and the provider needs a key.
 pub fn find_key(
     provider: Provider,
     keys: Option<&dyn ApiKeys>,
@@ -61,7 +63,11 @@ pub fn find_key(
         return Ok((KeySource::Environment(variable), Some(Password::new(key))));
     }
     let saved = match keys {
-        Some(keys) => keys.get(provider)?,
+        Some(keys) => match keys.get(provider) {
+            Ok(saved) => saved,
+            Err(_) if !provider.needs_key() => None,
+            Err(e) => return Err(e),
+        },
         None => None,
     };
     Ok(match saved.filter(|k| !k.trim().is_empty()) {
@@ -374,6 +380,39 @@ mod tests {
             "{:?}",
             a.note
         );
+    }
+
+    /// A system without a keychain, as WSL.
+    #[derive(Debug)]
+    struct NoKeychain;
+
+    impl ApiKeys for NoKeychain {
+        fn get(&self, _: Provider) -> Result<Option<String>, String> {
+            Err("this system has no keychain".to_owned())
+        }
+        fn set(&self, _: Provider, _: &str) -> Result<(), String> {
+            Err("this system has no keychain".to_owned())
+        }
+        fn delete(&self, _: Provider) -> Result<(), String> {
+            Err("this system has no keychain".to_owned())
+        }
+    }
+
+    /// R-SQL-48 (a fix): without a keychain, llama.cpp is asked without a key instead of
+    /// failing; a provider that needs a key still says the keychain cannot be read.
+    #[test]
+    fn a_provider_without_a_key_works_on_a_system_without_a_keychain_r_sql_48() {
+        assert_eq!(
+            find_key(Provider::LlamaCpp, Some(&NoKeychain)),
+            Ok((KeySource::None, None))
+        );
+        assert_eq!(
+            find_key(Provider::Custom, Some(&NoKeychain)),
+            Ok((KeySource::None, None))
+        );
+        if assistant::key_from_environment(Provider::Anthropic).is_none() {
+            assert!(find_key(Provider::Anthropic, Some(&NoKeychain)).is_err());
+        }
     }
 
     #[test]

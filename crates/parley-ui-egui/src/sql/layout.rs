@@ -54,13 +54,74 @@ pub(super) fn editor_width(share: f32, available: f32) -> f32 {
         .max(MIN_COLUMN_WIDTH)
 }
 
-/// The divider in `rect`, after an editor `left` wide of `available` in all. Returns the
-/// editor's new share when it was dragged or double-clicked.
-pub(super) fn divider(ui: &Ui, rect: Rect, left: f32, available: f32) -> Option<f32> {
-    let id = ui.make_persistent_id("sql-results-divider");
+/// Below: the least height of the editor's text, and of the results under it (R-SQL-50).
+const MIN_TEXT_HEIGHT: f32 = 90.0;
+const MIN_RESULTS_HEIGHT: f32 = 120.0;
+
+/// How high the editor's text is drawn: at least `least`, and scrolled past `most`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TextHeight {
+    pub least: f32,
+    pub most: f32,
+}
+
+/// Below: the height of the editor's text in a work area `available` tall (R-SQL-50). Until
+/// the divider is dragged (`chosen` is `None`) the text is as high as it needs, up to a share
+/// of the area; once dragged, the `chosen` height, leaving the results their least height.
+/// `below_text` is what the editor needs under its text: the tab strip, the Run buttons and a
+/// line of error.
+pub(super) fn editor_height(chosen: Option<f32>, available: f32, below_text: f32) -> TextHeight {
+    let room = (available - below_text - DIVIDER - MIN_RESULTS_HEIGHT).max(MIN_TEXT_HEIGHT);
+    match chosen {
+        None => TextHeight {
+            least: 0.0,
+            most: (available * 0.38).clamp(MIN_TEXT_HEIGHT, 320.0).min(room),
+        },
+        Some(chosen) => {
+            let height = chosen.min(room).max(MIN_TEXT_HEIGHT);
+            TextHeight {
+                least: height,
+                most: height,
+            }
+        }
+    }
+}
+
+/// Which way a divider lies between editor and results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Axis {
+    /// A vertical line between the editor on the left and the results on the right.
+    Columns,
+    /// A horizontal line between the editor above and the results below.
+    Rows,
+}
+
+/// What was done to a divider this frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum Drag {
+    /// Dragged by this many points, right or down.
+    Moved(f32),
+    /// Double-clicked: back to the usual size.
+    Reset,
+}
+
+/// The divider in `rect` between editor and results (R-SQL-49, R-SQL-50).
+pub(super) fn divider(ui: &Ui, rect: Rect, axis: Axis) -> Option<Drag> {
+    let (salt, hint, cursor) = match axis {
+        Axis::Columns => (
+            "sql-results-divider",
+            "Drag to change the widths; double-click to share them equally.",
+            egui::CursorIcon::ResizeHorizontal,
+        ),
+        Axis::Rows => (
+            "sql-editor-height-divider",
+            "Drag to change the editor's height; double-click for the usual height.",
+            egui::CursorIcon::ResizeVertical,
+        ),
+    };
     let response = ui
-        .interact(rect, id, Sense::click_and_drag())
-        .on_hover_text("Drag to change the widths; double-click to share them equally.");
+        .interact(rect, ui.make_persistent_id(salt), Sense::click_and_drag())
+        .on_hover_text(hint);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::accesskit::Role::Splitter,
@@ -75,14 +136,25 @@ pub(super) fn divider(ui: &Ui, rect: Rect, left: f32, available: f32) -> Option<
     } else {
         egui::Stroke::new(1.0, p.border)
     };
-    ui.painter().vline(rect.center().x, rect.y_range(), stroke);
+    match axis {
+        Axis::Columns => {
+            ui.painter().vline(rect.center().x, rect.y_range(), stroke);
+        }
+        Axis::Rows => {
+            ui.painter().hline(rect.x_range(), rect.center().y, stroke);
+        }
+    }
     if active {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        ui.ctx().set_cursor_icon(cursor);
     }
     if response.double_clicked() {
-        Some(DEFAULT_SHARE)
-    } else if response.dragged() && available > 0.0 {
-        Some(((left + response.drag_delta().x) / available).clamp(0.0, 1.0))
+        Some(Drag::Reset)
+    } else if response.dragged() {
+        let delta = response.drag_delta();
+        Some(Drag::Moved(match axis {
+            Axis::Columns => delta.x,
+            Axis::Rows => delta.y,
+        }))
     } else {
         None
     }
@@ -123,6 +195,27 @@ mod tests {
         let most = 1000.0 - MIN_COLUMN_WIDTH - DIVIDER;
         assert!((editor_width(0.99, 1000.0) - most).abs() < f32::EPSILON);
         assert!((editor_width(0.5, 400.0) - MIN_COLUMN_WIDTH).abs() < f32::EPSILON);
+    }
+
+    /// R-SQL-50: below, the editor's text is as high as it needs until the divider is dragged,
+    /// then the dragged height, leaving the results their least height; a small window keeps
+    /// the editor's least height.
+    #[test]
+    fn the_editor_height_follows_the_divider_within_its_limits() {
+        let exactly = |h: f32| TextHeight { least: h, most: h };
+        let usual = editor_height(None, 600.0, 110.0);
+        assert!(usual.least.abs() < 0.01 && (usual.most - 228.0).abs() < 0.01);
+        assert_eq!(editor_height(Some(300.0), 600.0, 110.0), exactly(300.0));
+        assert_eq!(
+            editor_height(Some(10.0), 600.0, 110.0),
+            exactly(MIN_TEXT_HEIGHT)
+        );
+        let room = 600.0 - 110.0 - DIVIDER - MIN_RESULTS_HEIGHT;
+        assert_eq!(editor_height(Some(900.0), 600.0, 110.0), exactly(room));
+        assert_eq!(
+            editor_height(Some(200.0), 200.0, 110.0),
+            exactly(MIN_TEXT_HEIGHT)
+        );
     }
 
     /// The setting is kept by name, and old settings without it read as Below.

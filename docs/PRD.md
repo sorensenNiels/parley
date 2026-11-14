@@ -3,7 +3,8 @@
 > What Parley is, who it is for and why, in one place. It summarises the plan; it does not replace it.
 > The detailed, binding text is in [ROADMAP.md](ROADMAP.md) (open requirements and decisions) and
 > [REQUIREMENTS.md](REQUIREMENTS.md) (done ones), and [FEATURES.md](FEATURES.md) says how each was verified.
-> Requirement IDs (`R-NET-7`) and decisions (`D16`) below point there.
+> Requirement IDs (`R-NET-7`) and decisions (`D16`) below point there. SQL on IBM i (Parley's SQL add-on and the
+> program Parley SQL) has a summary of its own: [sql/PRD.md](sql/PRD.md).
 
 **Status:** draft, written 2026-11-12 from the state after Phase 2 (release 0.2.1) with Phase 3 under way.
 
@@ -14,7 +15,8 @@
 Parley is a TN5250 terminal emulator for IBM i: a desktop app for Windows, macOS and Linux, written in Rust. It
 connects to an IBM i over telnet or TLS, shows the 5250 "green screen" and sends what the user types, as IBM's own
 emulators do. It aims to be fast, small and correct, with a modern take on everything around the screen: saved
-sessions, keyboard maps, macros and, later, data from the host — and no password kept on the computer.
+sessions, keyboard maps, macros and, as an add-on, SQL against the host ([sql/PRD.md](sql/PRD.md)) — and no password
+kept on the computer.
 
 ## 2. Problem
 
@@ -33,7 +35,7 @@ tested against recorded host traffic.
 | Who | What they need |
 |---|---|
 | **Operators and business users** | Sign on fast, work all day from the keyboard with the keys they know, never lose what they typed. |
-| **IBM i developers and administrators** | Several systems (production, test), sessions saved per system, wide 27×132 screens, macros for repeated steps, later SQL against the same host. |
+| **IBM i developers and administrators** | Several systems (production, test), sessions saved per system, wide 27×132 screens, macros for repeated steps, SQL against the same host (the SQL add-on, [sql/PRD.md](sql/PRD.md)). |
 | **Support and new users** | An emulator that installs without a Java runtime, explains connection and sign-on errors in words, and can import settings from the emulator they used before (IDEA-17). |
 
 ## 4. Goals and non-goals
@@ -131,8 +133,8 @@ More on the design: [ARCHITECTURE.md](ARCHITECTURE.md).
   R-KEY-4) and add-ons (R-ADD-1, R-ADD-2), verified on Windows, macOS and Linux. Auto sign-on was removed as a
   security risk (R-NET-7, D16).
 - **Next:** not planned yet; the next phase is picked from the ideas below.
-- **Later, to be planned:** printer sessions (IDEA-18), SQL against the session's host (IDEA-13) and what builds on
-  it (IDEA-25, IDEA-26), tabs (IDEA-15), reconnect (IDEA-16), importing sessions from other emulators (IDEA-17),
+- **SQL:** Phases 5–12 built the SQL window and Parley SQL; their plan is [sql/ROADMAP.md](sql/ROADMAP.md).
+- **Later, to be planned:** printer sessions (IDEA-18), tabs (IDEA-15), reconnect (IDEA-16), importing sessions from other emulators (IDEA-17),
   hotspots and better copy (IDEA-19, IDEA-20). See [IDEAS.md](IDEAS.md).
 
 ## 10. Measures of success (proposed)
@@ -150,5 +152,4 @@ More on the design: [ARCHITECTURE.md](ARCHITECTURE.md).
 | Testing needs real hosts, but `cargo test` must not use one. | Recorded traffic and hand-built records in tests; PUB400.COM for the sign-on screen by hand. |
 | Signing on by hand each time costs operators time. | Accepted for security (D16); a macro can type the user and ask for the password. |
 | Installers are unsigned, so macOS and Windows warn on first start. | Documented in RELEASING.md (D10); signing needs certificates. |
-| The SQL idea (IDEA-13) needs the IBM i host-server protocol, documented mainly by JTOpen's source. | First step when picked: check what can be built from public documentation; a decision next to D4/D6. |
 | One session per window may hold back heavy users. | Tabs are IDEA-15. |

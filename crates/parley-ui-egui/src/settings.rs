@@ -6,6 +6,7 @@
 
 mod assistant;
 mod keyboard;
+mod sql_keys;
 
 use egui::{Align, ComboBox, CornerRadius, Frame, Id, Layout, Margin, RichText, Stroke, Ui, vec2};
 use serde::{Deserialize, Serialize};
@@ -57,6 +58,10 @@ pub struct Settings {
     pub sql_header: crate::sql::grid::HeaderMode,
     /// Where the SQL window's results go: below the editor, beside it, or automatic (R-SQL-49).
     pub sql_results: crate::sql::layout::ResultsPlace,
+    /// Brackets and quotes close themselves in the SQL editor (R-SQL-55).
+    pub sql_close_pairs: bool,
+    /// Parley SQL's shortcuts that differ from their own keys, by action (R-SQL-60).
+    pub sql_keys: crate::sql::keys::Overrides,
     /// A folder of snippets shared with others, besides the operator's own; empty for none (R-SQL-24).
     pub sql_snippets_shared: String,
     /// The statements run in the SQL window, by saved session, oldest first (R-SQL-7).
@@ -84,6 +89,8 @@ impl Default for Settings {
             sql_timeout: 0,
             sql_header: crate::sql::grid::HeaderMode::default(),
             sql_results: crate::sql::layout::ResultsPlace::default(),
+            sql_close_pairs: true,
+            sql_keys: crate::sql::keys::Overrides::new(),
             sql_snippets_shared: String::new(),
             sql_history: std::collections::BTreeMap::new(),
             sql_scripts: std::collections::BTreeMap::new(),
@@ -130,6 +137,8 @@ pub enum Page {
     Sql,
     /// The SQL assistant: on or off, the provider and its key (R-SQL-48).
     Assistant,
+    /// Parley SQL's shortcuts (R-SQL-60).
+    Shortcuts,
     About,
 }
 
@@ -142,6 +151,7 @@ impl Page {
             Self::AddOns => "Add-ons",
             Self::Sql => "SQL",
             Self::Assistant => "SQL assistant",
+            Self::Shortcuts => "Shortcuts",
             Self::About => "About",
         }
     }
@@ -154,10 +164,13 @@ impl Page {
                 settings.theme = defaults.theme;
                 settings.text_size = defaults.text_size;
                 settings.density = defaults.density;
+                settings.sql_results = defaults.sql_results;
+                settings.sql_close_pairs = defaults.sql_close_pairs;
             }
             Self::Terminal => settings.terminal_font = defaults.terminal_font,
             // The map shown gets the Default map's keys: see `keyboard::Page::restore`.
             Self::Keyboard => {}
+            Self::Shortcuts => settings.sql_keys = defaults.sql_keys,
             Self::AddOns => {
                 for addon in AddOn::ON_ADDONS_PAGE {
                     settings.addons.set_enabled(addon, addon.on_by_default());
@@ -165,14 +178,12 @@ impl Page {
                 settings.java_path = defaults.java_path;
                 settings.sql_rows = defaults.sql_rows;
                 settings.sql_timeout = defaults.sql_timeout;
-                settings.sql_results = defaults.sql_results;
             }
             Self::Sql => {
                 settings.java_path = defaults.java_path;
                 settings.sql_rows = defaults.sql_rows;
                 settings.sql_timeout = defaults.sql_timeout;
                 settings.sql_snippets_shared = defaults.sql_snippets_shared;
-                settings.sql_results = defaults.sql_results;
             }
             Self::Assistant => assistant::restore_defaults(settings),
             Self::About => settings.check_for_updates = defaults.check_for_updates,
@@ -192,9 +203,10 @@ const SECTIONS: Sections = &[
     ("App", &[Page::AddOns, Page::Assistant, Page::About]),
 ];
 
-/// Parley SQL's pages (R-SQL-47): no terminal, keyboard maps or add-on list.
+/// Parley SQL's pages (R-SQL-47): no terminal, keyboard maps or add-on list; its own
+/// shortcuts (R-SQL-60).
 const SQL_SECTIONS: Sections = &[
-    ("General", &[Page::Appearance]),
+    ("General", &[Page::Appearance, Page::Shortcuts]),
     ("App", &[Page::Sql, Page::Assistant, Page::About]),
 ];
 
@@ -216,6 +228,7 @@ pub struct Dialog {
     /// What was last copied, to say so.
     copied: Option<String>,
     keyboard: keyboard::Page,
+    sql_keys: sql_keys::Page,
     /// The folder of the SQL helper's jars, if this installation has one (R-SQL-13).
     sql_helpers: Option<std::path::PathBuf>,
     /// The Java path last checked and what was found, so it is not looked for every frame.
@@ -244,6 +257,7 @@ impl Dialog {
             check_requested: false,
             copied: None,
             keyboard: keyboard::Page::new(crate::keymap::DEFAULT_MAP, None, false),
+            sql_keys: sql_keys::Page::default(),
             sql_helpers: None,
             java_found: None,
             program: Program::Parley,
@@ -348,6 +362,8 @@ impl Dialog {
                 {
                     if self.page == Page::Keyboard {
                         self.keyboard.restore(settings);
+                    } else if self.page == Page::Shortcuts {
+                        self.sql_keys.restore(settings);
                     } else {
                         self.page.restore_defaults(settings);
                     }
@@ -370,9 +386,13 @@ impl Dialog {
 
     fn page_content(&mut self, ui: &mut Ui, settings: &mut Settings, updates: &UpdateStatus) {
         match self.page {
-            Page::Appearance => appearance_page(ui, settings),
+            Page::Appearance => {
+                let sql = self.program == Program::ParleySql || settings.addons.enabled(AddOn::Sql);
+                appearance_page(ui, settings, sql);
+            }
             Page::Terminal => self.terminal_page(ui, settings),
             Page::Keyboard => self.keyboard.show(ui, settings),
+            Page::Shortcuts => self.sql_keys.show(ui, settings),
             Page::AddOns => self.addons_page(ui, settings),
             Page::Sql => self.sql_page(ui, settings),
             Page::Assistant => {
@@ -427,22 +447,6 @@ impl Dialog {
                     let edit =
                         egui::TextEdit::singleline(&mut settings.java_path).hint_text("Automatic");
                     theme::sized_edit(ui, 260.0, edit).labelled_by(name_id);
-                },
-            );
-            rows.row(
-                "Results",
-                Some("Beside the editor, or below it; Automatic: beside when the window is wide."),
-                |ui, _| {
-                    use crate::sql::layout::ResultsPlace;
-                    theme::segmented(
-                        ui,
-                        &mut settings.sql_results,
-                        &[
-                            (ResultsPlace::Below, "Below"),
-                            (ResultsPlace::Beside, "Beside"),
-                            (ResultsPlace::Automatic, "Automatic"),
-                        ],
-                    );
                 },
             );
             rows.row(
@@ -817,8 +821,8 @@ impl Rows<'_> {
     }
 }
 
-/// Theme, text size and density.
-fn appearance_page(ui: &mut Ui, settings: &mut Settings) {
+/// Theme, text size and density; with `sql`, where the SQL window's results go (R-SQL-49).
+fn appearance_page(ui: &mut Ui, settings: &mut Settings, sql: bool) {
     group(ui, "Theme", None, |rows| {
         rows.row("Theme", None, |ui, _| {
             theme::segmented(
@@ -855,6 +859,31 @@ fn appearance_page(ui: &mut Ui, settings: &mut Settings) {
             },
         );
     });
+    if sql {
+        group(ui, "SQL window", None, |rows| {
+            rows.row(
+                "Results",
+                Some("Beside the editor, or below it; Automatic: beside when the window is wide."),
+                |ui, _| {
+                    use crate::sql::layout::ResultsPlace;
+                    theme::segmented(
+                        ui,
+                        &mut settings.sql_results,
+                        &[
+                            (ResultsPlace::Below, "Below"),
+                            (ResultsPlace::Beside, "Beside"),
+                            (ResultsPlace::Automatic, "Automatic"),
+                        ],
+                    );
+                },
+            );
+            rows.switch(
+                "Close brackets and quotes",
+                Some("Typing ( ' or \" in the editor puts in the closing one too."),
+                &mut settings.sql_close_pairs,
+            );
+        });
+    }
 }
 
 /// The text sizes, with `value` in the list even when it isn't one of them.

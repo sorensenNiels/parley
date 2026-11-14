@@ -683,6 +683,9 @@ impl ParleyUi {
                 shared: &self.settings.sql_snippets_shared,
                 systems: Some(&systems),
                 results: self.settings.sql_results,
+                close_pairs: self.settings.sql_close_pairs,
+                // Parley's SQL add-on keeps the default keys (R-SQL-60).
+                keys: None,
             };
             window.set_assistant(
                 assistant_on,

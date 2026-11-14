@@ -38,8 +38,28 @@ impl Chord {
         }
     }
 
+    /// `key` pressed with `modifiers`, Shift kept also for a key that types a character: the
+    /// SQL window tells Ctrl+F from Ctrl+Shift+F (R-SQL-60).
+    pub fn exact(key: PcKey, modifiers: Modifiers) -> Self {
+        Self::Press {
+            key,
+            ctrl: modifiers.ctrl || modifiers.command,
+            alt: modifiers.alt,
+            shift: modifiers.shift,
+        }
+    }
+
     /// Reads [`Chord::text`]: `"Ctrl+Shift+F1"`, `"Ctrl+Plus"`, `"Ctrl"`.
     pub fn parse(text: &str) -> Option<Self> {
+        Self::parse_with(text, Self::press)
+    }
+
+    /// Reads [`Chord::text`] as [`Chord::exact`] makes it.
+    pub fn parse_exact(text: &str) -> Option<Self> {
+        Self::parse_with(text, Self::exact)
+    }
+
+    fn parse_with(text: &str, make: fn(PcKey, Modifiers) -> Self) -> Option<Self> {
         if text == "Ctrl" {
             return Some(Self::CtrlAlone);
         }
@@ -56,7 +76,7 @@ impl Chord {
                 _ => return None,
             });
         }
-        Some(Self::press(PcKey::from_name(key)?, m))
+        Some(make(PcKey::from_name(key)?, m))
     }
 
     /// How the settings keep it, with egui's key names.

@@ -6,6 +6,7 @@ pub mod assistant;
 pub mod catalog;
 pub mod compare;
 pub mod complete;
+pub mod edit;
 pub mod export;
 pub mod helper;
 pub mod java;

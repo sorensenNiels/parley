@@ -4,19 +4,20 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
-use egui::{Color32, Key, Modifiers, ScrollArea, TextEdit, Ui};
-use parley_core::sql::text::{self, Kind};
+use crate::sql::keys::SqlAction;
+use egui::text::{CCursor, CCursorRange};
+use egui::{Key, Modifiers, ScrollArea, TextEdit, Ui};
+use parley_core::sql::text;
 use serde::{Deserialize, Serialize};
 
 use super::SqlFiles;
+use super::layout::TextHeight;
 use crate::{dialog, icons, theme};
 
+mod colour;
 mod complete;
+mod editing;
 pub use complete::{Item, MAX_ITEMS};
-
-/// Text longer than this is not coloured while it is edited: it would be scanned every frame.
-const MAX_COLOURED: usize = 200_000;
 
 /// A script as the settings keep it between runs of Parley (R-SQL-20).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +101,22 @@ pub struct Scripts {
     pointed: Option<(Name, usize)>,
     /// What the window said about a name, shown while the pointer is on it.
     described: Option<(Name, String)>,
+    /// The Go to line bar (R-SQL-57).
+    go_to: Option<editing::GoTo>,
+    /// The editor's text size in percent, while the window is open (R-SQL-59).
+    zoom: u16,
+    /// Ctrl and the wheel since the last step of zoom.
+    pinch: f32,
+    /// Scroll the cursor into view on the next frame.
+    reveal: bool,
+    /// Brackets and quotes close themselves (R-SQL-55); from the settings.
+    pub close_pairs: bool,
+    /// The window's shortcuts (R-SQL-60); from the settings.
+    pub keys: crate::sql::keys::SqlKeys,
+    /// The shown script's text field's id last frame, to know whether it has the focus.
+    field: Option<egui::Id>,
+    /// The tab the completion list and selection belong to.
+    shown_number: Option<u32>,
 }
 
 /// A name in the text, and the name before a `.` in front of it.
@@ -121,6 +138,14 @@ impl Scripts {
             popup: None,
             pointed: None,
             described: None,
+            go_to: None,
+            zoom: 100,
+            pinch: 1.0,
+            reveal: false,
+            close_pairs: true,
+            keys: crate::sql::keys::SqlKeys::default(),
+            field: None,
+            shown_number: None,
         };
         for s in saved {
             let number = scripts.take_number();
@@ -135,6 +160,7 @@ impl Scripts {
         if scripts.tabs.is_empty() {
             scripts.new_tab();
         }
+        scripts.shown_number = scripts.tabs.get(scripts.shown).map(|t| t.number);
         scripts
     }
 
@@ -175,12 +201,14 @@ impl Scripts {
     }
 
     /// A new script tab named `title` holding `text`, shown (R-SQL-35).
+    /// The new tab gets the keyboard, with the cursor at the end (an assistant's answer).
     pub fn open_new(&mut self, title: &str, text: &str) {
         self.new_tab();
         if let Some(tab) = self.tabs.last_mut() {
             title.clone_into(&mut tab.title);
             text.clone_into(&mut tab.text);
         }
+        self.select_range((text.len(), text.len()));
     }
 
     /// The shown script's text.
@@ -261,7 +289,9 @@ impl Scripts {
     /// Whether the editor takes Esc, for the find bar or the completion list (the window's
     /// Cancel does otherwise).
     pub fn takes_escape(&self) -> bool {
-        self.find.is_some() || self.popup.as_ref().is_some_and(|p| !p.items.is_empty())
+        self.find.is_some()
+            || self.go_to.is_some()
+            || self.popup.as_ref().is_some_and(|p| !p.items.is_empty())
     }
 
     /// The name being typed and the statement it is in, while completion is wanted (R-SQL-36).
@@ -332,14 +362,20 @@ impl Scripts {
         }
     }
 
-    /// The tabs, the actions and the editor, `height` high for the text.
-    pub fn show(&mut self, ui: &mut Ui, height: f32, files: Option<&dyn SqlFiles>) {
-        self.keys(ui, files);
+    /// The tabs, the actions and the editor, with the text `height` high; returns how high the
+    /// text was drawn.
+    pub fn show(&mut self, ui: &mut Ui, height: TextHeight, files: Option<&dyn SqlFiles>) -> f32 {
+        self.follow_tab();
+        self.keys(ui);
         self.tab_strip(ui, files);
+        self.follow_tab();
         if self.find.is_some() {
             self.find_bar(ui);
         }
-        self.text_field(ui, height);
+        if self.go_to.is_some() {
+            self.go_to_bar(ui);
+        }
+        let shown = self.text_field(ui, height);
         if let Some(index) = self.popup.as_ref().and_then(|p| p.show(ui)) {
             self.accept(index);
         }
@@ -347,61 +383,35 @@ impl Scripts {
             theme::hint(ui, note);
         }
         self.closing_dialog(ui.ctx(), files);
+        shown
     }
 
     // ---------------------------------------------------------------- keys and actions
 
-    fn keys(&mut self, ui: &Ui, files: Option<&dyn SqlFiles>) {
-        // R-SQL-36: the list takes its keys before the text field and the window see them.
-        let action = self.popup.as_mut().map(|p| (p.keys(ui), p.chosen));
+    fn keys(&mut self, ui: &Ui) {
+        // R-SQL-36: the list takes its keys before the text field and the window see them, and
+        // only while the text has the keyboard.
+        let focused = self.has_focus(ui.ctx());
+        let action = self
+            .popup
+            .as_mut()
+            .filter(|_| focused)
+            .map(|p| (p.keys(ui), p.chosen));
         match action {
             Some((complete::KeyAction::Accept, chosen)) => self.accept(chosen),
             Some((complete::KeyAction::Close, _)) => self.popup = None,
             Some((complete::KeyAction::None, _)) | None => {}
         }
-        let command = Modifiers::COMMAND;
-        let shift = Modifiers::COMMAND | Modifiers::SHIFT;
-        let (new, close, next, open, save, format, find, replace) = ui.input_mut(|i| {
-            (
-                i.consume_key(command, Key::T),
-                i.consume_key(command, Key::W),
-                i.consume_key(Modifiers::CTRL, Key::Tab),
-                i.consume_key(command, Key::O),
-                i.consume_key(command, Key::S),
-                i.consume_key(shift, Key::F),
-                i.consume_key(command, Key::F),
-                i.consume_key(command, Key::H),
-            )
-        });
-        if new {
-            self.new_tab();
+        if self.has_focus(ui.ctx()) {
+            self.editing_keys(ui);
         }
-        if close {
-            self.close_tab(self.shown);
-        }
-        if next && !self.tabs.is_empty() {
-            self.shown = (self.shown + 1) % self.tabs.len();
-        }
-        if open && let Some(files) = files {
-            self.open(files);
-        }
-        if save && let Some(files) = files {
-            self.save(files, false);
-        }
-        if format {
-            self.format();
-        }
-        if find || replace {
-            let mut bar = self.find.take().unwrap_or_default();
-            bar.replacing = replace || bar.replacing;
-            bar.focus = true;
-            if let Some(selected) = self.selected_text().filter(|s| !s.contains('\n')) {
-                bar.query = selected;
+        if (self.find.is_some() || self.go_to.is_some())
+            && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
+        {
+            // The Go to line bar is the newer of the two when both are open.
+            if self.go_to.take().is_none() {
+                self.find = None;
             }
-            self.find = Some(bar);
-        }
-        if self.find.is_some() && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
-            self.find = None;
         }
     }
 
@@ -413,7 +423,7 @@ impl Scripts {
             .map(|(i, t)| (i, t.title.clone(), t.changed().then(|| "·".to_owned())))
             .collect();
         ui.horizontal(|ui| {
-            let width = (ui.available_width() - 320.0).max(120.0);
+            let width = (ui.available_width() - 380.0).max(120.0);
             ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
                 ScrollArea::horizontal()
                     .id_salt("sql-script-tabs")
@@ -423,14 +433,14 @@ impl Scripts {
             });
             let new = icons::button(icons::PLUS, "").small();
             if icons::add_named(ui, true, new, "New script")
-                .on_hover_text("New script (Ctrl+T)")
+                .on_hover_text(self.keys.hint("New script", SqlAction::NewScript))
                 .clicked()
             {
                 self.new_tab();
             }
             if ui
                 .add(theme::icon_button(ui, "🗙"))
-                .on_hover_text("Close this script (Ctrl+W)")
+                .on_hover_text(self.keys.hint("Close this script", SqlAction::CloseScript))
                 .clicked()
             {
                 self.close_tab(self.shown);
@@ -440,16 +450,19 @@ impl Scripts {
                     if ui.small_button("Save as…").clicked() {
                         self.save(files, true);
                     }
-                    if ui.small_button("Save").on_hover_text("Ctrl+S").clicked() {
+                    let save = self.keys.hint("Save", SqlAction::Save);
+                    if ui.small_button("Save").on_hover_text(save).clicked() {
                         self.save(files, false);
                     }
-                    if ui.small_button("Open…").on_hover_text("Ctrl+O").clicked() {
+                    let open = self.keys.hint("Open a file", SqlAction::Open);
+                    if ui.small_button("Open…").on_hover_text(open).clicked() {
                         self.open(files);
                     }
                 }
+                self.case_menu(ui);
                 if ui
                     .small_button("Format")
-                    .on_hover_text("Ctrl+Shift+F")
+                    .on_hover_text(self.keys.hint("Format", SqlAction::Format))
                     .clicked()
                 {
                     self.format();
@@ -574,14 +587,53 @@ impl Scripts {
 
     // ---------------------------------------------------------------- the text
 
-    fn text_field(&mut self, ui: &mut Ui, height: f32) {
-        let Some(tab) = self.tabs.get_mut(self.shown) else {
-            return;
+    /// The shown script's text field's id.
+    fn field_id(&self, ui: &Ui) -> Option<egui::Id> {
+        let tab = self.tabs.get(self.shown)?;
+        Some(ui.make_persistent_id(("sql-script", tab.number)))
+    }
+
+    /// When another tab is shown, the completion list and the selection of the one before
+    /// go: the list would take the arrows in a text it was not opened for.
+    fn follow_tab(&mut self) {
+        let number = self.tabs.get(self.shown).map(|t| t.number);
+        if number != self.shown_number {
+            self.shown_number = number;
+            self.popup = None;
+            if self.select_next.is_none() {
+                self.selection = (0, 0);
+            }
+        }
+    }
+
+    /// Whether the shown script's text has the keyboard (as of last frame's field).
+    pub fn has_focus(&self, ctx: &egui::Context) -> bool {
+        self.field.is_some_and(|id| ctx.memory(|m| m.has_focus(id)))
+    }
+
+    /// Opens the find bar with the focus in it, with Replace when `replacing` (R-SQL-23);
+    /// a selection on one line is what it looks for.
+    fn open_find(&mut self, replacing: bool) {
+        let mut bar = self.find.take().unwrap_or_default();
+        bar.replacing = replacing || bar.replacing;
+        bar.focus = true;
+        if let Some(selected) = self.selected_text().filter(|s| !s.contains('\n')) {
+            bar.query = selected;
+        }
+        self.find = Some(bar);
+    }
+
+    fn text_field(&mut self, ui: &mut Ui, height: TextHeight) -> f32 {
+        let Some(id) = self.field_id(ui) else {
+            return 0.0;
         };
-        let id = ui.make_persistent_id(("sql-script", tab.number));
-        if let Some((start, end)) = self.select_next.take()
-            && let Some(mut state) = TextEdit::load_state(ui.ctx(), id)
-        {
+        self.field = Some(id);
+        let Some(tab) = self.tabs.get_mut(self.shown) else {
+            return 0.0;
+        };
+        if let Some((start, end)) = self.select_next.take() {
+            // A tab never shown has no state yet: it gets one.
+            let mut state = TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
             state.cursor.set_char_range(Some(CCursorRange::two(
                 CCursor::new(start),
                 CCursor::new(end),
@@ -589,21 +641,18 @@ impl Scripts {
             state.store(ui.ctx(), id);
             ui.memory_mut(|m| m.request_focus(id));
         }
-        // R-SQL-28: without a selection, the statement Run would execute is shown faintly.
-        let (start, end) = self.selection;
-        let current = if start < end {
-            None
-        } else {
-            text::statement_at(&tab.text, start)
+        let marks = colour::Marks::at(&tab.text, self.selection);
+        let font = {
+            let base = egui::TextStyle::Monospace.resolve(ui.style());
+            egui::FontId::new(base.size * f32::from(self.zoom) / 100.0, base.family)
         };
         let mut layouter =
             |ui: &Ui, buffer: &dyn egui::TextBuffer, wrap_width: f32| -> Arc<egui::Galley> {
-                let text = buffer.as_str();
-                // Only while the text is the one the range was found in.
-                let current = current.as_ref().filter(|r| r.end <= text.len());
-                let job = coloured(ui, text, wrap_width, current);
+                let job = colour::coloured(ui, buffer.as_str(), &font, wrap_width, &marks);
                 ui.fonts_mut(|f| f.layout_job(job))
             };
+        let reveal = std::mem::take(&mut self.reveal);
+        let mut hovered = false;
         let before = tab.text.len();
         let mut changed = false;
         let mut cursor_at = None;
@@ -613,21 +662,25 @@ impl Scripts {
                 .as_ref()
                 .is_some_and(|(pointed, _)| pointed == name)
         });
-        ScrollArea::vertical()
+        let shown = ScrollArea::vertical()
             .id_salt(("sql-editor", tab.number))
-            .max_height(height)
-            .min_scrolled_height(height)
+            .max_height(height.most)
+            .min_scrolled_height(height.most)
             .show(ui, |ui| {
                 let output = TextEdit::multiline(&mut tab.text)
                     .id(id)
                     .code_editor()
+                    .font(font.clone())
                     .layouter(&mut layouter)
                     .desired_width(f32::INFINITY)
                     .desired_rows(8)
+                    // As high as the divider was dragged to (R-SQL-50).
+                    .min_size(egui::vec2(0.0, height.least))
                     .hint_text("SELECT * FROM QSYS2.SYSTABLES FETCH FIRST 10 ROWS ONLY")
                     .show(ui);
                 changed = output.response.changed();
                 let response = &output.response.response;
+                hovered = response.hovered();
                 if response.hovered()
                     && let Some(pos) = response.hover_pos()
                 {
@@ -638,12 +691,19 @@ impl Scripts {
                     }
                 }
                 if let Some(range) = output.cursor_range {
-                    let below = output.galley.pos_from_cursor(range.primary).left_bottom();
+                    let cursor = output.galley.pos_from_cursor(range.primary);
+                    let below = cursor.left_bottom();
                     cursor_at = Some(output.galley_pos + below.to_vec2());
+                    if reveal {
+                        let rect = cursor.translate(output.galley_pos.to_vec2());
+                        ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                    }
                     let (a, b) = (range.primary.index.0, range.secondary.index.0);
                     self.selection = (byte_at(&tab.text, a.min(b)), byte_at(&tab.text, a.max(b)));
                 }
             });
+        // The text's own height, or the area's when it scrolls.
+        let shown = shown.content_size.y.min(shown.inner_rect.height());
         let changed = changed || tab.text.len() != before;
         if changed {
             self.generation += 1;
@@ -653,6 +713,10 @@ impl Scripts {
             let name = parley_core::sql::complete::name_at(self.text(), at)?;
             Some((name, at))
         });
+        if hovered {
+            self.wheel_zoom(ui);
+        }
+        shown
     }
 
     // ---------------------------------------------------------------- find and replace
@@ -676,8 +740,12 @@ impl Scripts {
                 if std::mem::take(&mut bar.focus) {
                     field.request_focus();
                 }
-                if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                    go = Some(!ui.input(|i| i.modifiers.shift));
+                // Taken, so it does not also reach the editor that gets the focus now.
+                if field.lost_focus() {
+                    let shift = ui.input(|i| i.modifiers.shift);
+                    if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) {
+                        go = Some(!shift);
+                    }
                 }
                 if ui.small_button("Previous").clicked() {
                     go = Some(false);
@@ -745,9 +813,7 @@ impl Scripts {
                 .or_else(|| find_previous(text, &bar.query, text.len(), bar.match_case))
         };
         if let Some(range) = found {
-            let chars = (char_at(text, range.start), char_at(text, range.end));
-            self.selection = (range.start, range.end);
-            self.select_next = Some(chars);
+            self.select_range((range.start, range.end));
         }
     }
 
@@ -810,60 +876,6 @@ impl Scripts {
             None => {}
         }
     }
-}
-
-/// `text` laid out for the editor, in colour unless it is very long (R-SQL-19), as Tortuga's
-/// code colours.
-fn coloured(ui: &Ui, text: &str, wrap_width: f32, current: Option<&Range<usize>>) -> LayoutJob {
-    let p = theme::palette(ui);
-    let plain = ui.visuals().text_color();
-    let font = egui::TextStyle::Monospace.resolve(ui.style());
-    let spans = if text.len() <= MAX_COLOURED {
-        text::highlight(text)
-    } else {
-        Vec::new()
-    };
-    let mut job = LayoutJob::default();
-    // Appends `range` of `text` in `color`, the part inside `current` on a faint background.
-    let mut append = |range: Range<usize>, color: Color32| {
-        let cuts = current.map_or(vec![range.clone()], |c| {
-            let a = c.start.clamp(range.start, range.end);
-            let b = c.end.clamp(range.start, range.end);
-            vec![range.start..a, a..b, b..range.end]
-        });
-        for cut in cuts.into_iter().filter(|c| !c.is_empty()) {
-            let Some(piece) = text.get(cut.clone()) else {
-                continue;
-            };
-            let mut format = TextFormat::simple(font.clone(), color);
-            if current
-                .as_ref()
-                .is_some_and(|c| c.start <= cut.start && cut.end <= c.end)
-            {
-                format.background = p.surface_hover;
-            }
-            job.append(piece, 0.0, format);
-        }
-    };
-    let mut at = 0;
-    for (range, kind) in spans {
-        if range.start < at {
-            continue;
-        }
-        append(at..range.start, plain);
-        let color = match kind {
-            Kind::Keyword => p.blue,
-            Kind::String => p.ok,
-            Kind::Name => p.purple,
-            Kind::Number => p.redirect,
-            Kind::Comment => p.muted,
-        };
-        append(range.clone(), color);
-        at = range.end;
-    }
-    append(at..text.len(), plain);
-    job.wrap.max_width = wrap_width;
-    job
 }
 
 /// The end of `query` if it matches `text` at byte `at`.
@@ -1044,29 +1056,150 @@ mod tests {
         assert_eq!(file_name("plain.sql"), "plain.sql");
     }
 
-    #[test]
-    fn the_statement_run_would_execute_is_on_a_faint_background_r_sql_28() {
-        let text = "VALUES 1;\nSELECT 'æøå' FROM T;\n";
-        let current = text::statement_at(text, 12).expect("a statement");
-        let mut harness = egui_kittest::Harness::new_ui(move |ui| {
-            crate::test_support::install_fonts(ui);
-            let job = coloured(ui, text, 400.0, Some(&current));
-            let shaded: String = job
-                .sections
-                .iter()
-                .filter(|s| s.format.background != Color32::TRANSPARENT)
-                .filter_map(|s| text.get(s.byte_range.start.0..s.byte_range.end.0))
-                .collect();
-            assert_eq!(shaded, "SELECT 'æøå' FROM T");
-            let plain = coloured(ui, text, 400.0, None);
-            assert!(
-                plain
-                    .sections
-                    .iter()
-                    .all(|s| s.format.background == Color32::TRANSPARENT)
+    /// An editor showing `text`, focused, with byte range `selection` selected.
+    fn focused(text: &str, selection: (usize, usize)) -> egui_kittest::Harness<'static, Scripts> {
+        use egui_kittest::kittest::Queryable;
+
+        let mut scripts = Scripts::restore(&[]);
+        scripts.set_text(text, 0);
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(700.0, 400.0))
+            .build_ui_state(
+                |ui, s: &mut Scripts| {
+                    crate::test_support::install_fonts(ui);
+                    // As the window does, before the editor is drawn (R-SQL-60).
+                    s.take_keys(ui, None);
+                    s.show(
+                        ui,
+                        super::TextHeight {
+                            least: 0.0,
+                            most: 200.0,
+                        },
+                        None,
+                    );
+                },
+                scripts,
             );
-        });
-        harness.run();
+        harness.run_steps(2);
+        harness
+            .get_by_role(egui::accesskit::Role::MultilineTextInput)
+            .focus();
+        harness.run_steps(2);
+        harness.state_mut().select_range(selection);
+        harness.run_steps(2);
+        harness
+    }
+
+    /// R-SQL-44 (a fix): an assistant's answer opens in a tab that has the keyboard, and the
+    /// completion list of the tab before does not come with it, so the arrows move the cursor.
+    #[test]
+    fn the_arrows_move_the_cursor_in_an_answer_opened_with_a_list_open_r_sql_44() {
+        let mut harness = focused("SELECT na", (9, 9));
+        harness
+            .state_mut()
+            .follow_typing(true, Some(egui::pos2(40.0, 40.0)));
+        harness
+            .state_mut()
+            .offer(vec![offered("NAVN"), offered("NAVN2")]);
+        harness.run_steps(2);
+        let answer = "-- Kunderne i Århus\nSELECT 1\nFROM t";
+        harness.state_mut().open_new("Assistant", answer);
+        harness.run_steps(2);
+        assert!(harness.state().popup.is_none(), "the list stayed behind");
+        assert_eq!(harness.state().selection(), (answer.len(), answer.len()));
+        press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+        let below = answer.find("SELECT").expect("a line") + 6;
+        assert_eq!(harness.state().selection(), (below, below));
+        assert_eq!(harness.state().text(), answer);
+    }
+
+    fn press(
+        harness: &mut egui_kittest::Harness<'static, Scripts>,
+        modifiers: Modifiers,
+        key: Key,
+    ) {
+        harness.key_press_modifiers(modifiers, key);
+        harness.run_steps(2);
+    }
+
+    #[test]
+    fn the_editing_keys_reach_the_text_r_sql_52_r_sql_53_r_sql_54() {
+        let mut harness = focused("SELECT a,\nb\nFROM æ", (0, 11));
+        press(&mut harness, Modifiers::COMMAND, Key::Slash);
+        assert_eq!(harness.state().text(), "-- SELECT a,\n-- b\nFROM æ");
+        press(&mut harness, Modifiers::COMMAND, Key::Slash);
+        assert_eq!(harness.state().text(), "SELECT a,\nb\nFROM æ");
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+        assert_eq!(harness.state().text(), "    SELECT a,\n    b\nFROM æ");
+        press(&mut harness, Modifiers::SHIFT, Key::Tab);
+        assert_eq!(harness.state().text(), "SELECT a,\nb\nFROM æ");
+        press(&mut harness, Modifiers::ALT, Key::ArrowDown);
+        assert_eq!(harness.state().text(), "FROM æ\nSELECT a,\nb");
+        press(&mut harness, Modifiers::COMMAND | Modifiers::SHIFT, Key::D);
+        assert_eq!(harness.state().text(), "FROM æ\nSELECT a,\nb\nSELECT a,\nb");
+    }
+
+    #[test]
+    fn a_typed_bracket_closes_itself_only_when_the_setting_is_on_r_sql_55() {
+        let mut harness = focused("SELECT ", (7, 7));
+        harness.state_mut().close_pairs = true;
+        harness.event(egui::Event::Text("(".to_owned()));
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("1".to_owned()));
+        harness.run_steps(2);
+        assert_eq!(harness.state().text(), "SELECT (1)");
+        let mut harness = focused("SELECT ", (7, 7));
+        harness.state_mut().close_pairs = false;
+        harness.event(egui::Event::Text("(".to_owned()));
+        harness.run_steps(2);
+        assert_eq!(harness.state().text(), "SELECT (");
+    }
+
+    #[test]
+    fn ctrl_g_goes_to_a_line_r_sql_57() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = focused("a\nb\næ\nd", (0, 0));
+        press(&mut harness, Modifiers::COMMAND, Key::G);
+        harness.get_by_label("Line").type_text("3");
+        harness.run_steps(2);
+        press(&mut harness, Modifiers::NONE, Key::Enter);
+        assert!(harness.query_by_label("Line").is_none(), "the bar closes");
+        assert_eq!(harness.state().text(), "a\nb\næ\nd");
+        assert_eq!(harness.state().selection(), (4, 4));
+    }
+
+    /// R-SQL-23 (a fix): Enter in the find bar selects the match and is not also typed into the
+    /// editor, which gets the focus with it.
+    #[test]
+    fn enter_in_the_find_bar_finds_without_typing_a_line_break_r_sql_23() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = focused("æ x æ", (0, 0));
+        press(&mut harness, Modifiers::COMMAND, Key::F);
+        harness
+            .get_by_role(egui::accesskit::Role::TextInput)
+            .type_text("x");
+        harness.run_steps(2);
+        press(&mut harness, Modifiers::NONE, Key::Enter);
+        assert_eq!(harness.state().text(), "æ x æ");
+        assert_eq!(harness.state().selection(), (3, 4));
+    }
+
+    #[test]
+    fn keyword_case_and_zoom_keys_r_sql_58_r_sql_59() {
+        let mut harness = focused("select a from t", (0, 0));
+        press(&mut harness, Modifiers::COMMAND | Modifiers::SHIFT, Key::U);
+        assert_eq!(harness.state().text(), "SELECT a FROM t");
+        press(&mut harness, Modifiers::COMMAND, Key::Plus);
+        press(&mut harness, Modifiers::COMMAND, Key::Plus);
+        assert_eq!(harness.state().zoom, 120);
+        press(&mut harness, Modifiers::COMMAND, Key::Num0);
+        assert_eq!(harness.state().zoom, 100);
+        for _ in 0..30 {
+            harness.state_mut().zoom_by(-1);
+        }
+        assert_eq!(harness.state().zoom, editing::ZOOM_LEAST);
     }
 
     fn offered(label: &str) -> Item {
@@ -1116,19 +1249,14 @@ mod tests {
 
     #[test]
     fn down_and_enter_choose_from_the_list_r_sql_36() {
-        let mut scripts = Scripts::restore(&[]);
-        scripts.set_text("SELECT na", 9);
-        scripts.follow_typing(true, Some(egui::pos2(40.0, 40.0)));
-        scripts.offer(vec![offered("NAVN"), offered("NAVN2")]);
-        let mut harness = egui_kittest::Harness::builder()
-            .with_size(egui::vec2(600.0, 400.0))
-            .build_ui_state(
-                |ui, s: &mut Scripts| {
-                    crate::test_support::install_fonts(ui);
-                    s.show(ui, 200.0, None);
-                },
-                scripts,
-            );
+        // The list takes the keys while the text has the keyboard.
+        let mut harness = focused("SELECT na", (9, 9));
+        harness
+            .state_mut()
+            .follow_typing(true, Some(egui::pos2(40.0, 40.0)));
+        harness
+            .state_mut()
+            .offer(vec![offered("NAVN"), offered("NAVN2")]);
         harness.run_steps(2);
         harness.key_press(Key::ArrowDown);
         harness.key_press(Key::Enter);

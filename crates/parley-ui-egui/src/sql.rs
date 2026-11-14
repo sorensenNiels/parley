@@ -10,6 +10,7 @@ mod database;
 pub mod editor;
 pub mod grid;
 pub mod hosting;
+pub mod keys;
 pub mod layout;
 mod parameters;
 pub mod results;
@@ -21,8 +22,8 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use egui::{
-    CentralPanel, Key, Modifiers, Panel, RichText, ScrollArea, TextEdit, Ui, ViewportBuilder,
-    ViewportCommand, ViewportId,
+    CentralPanel, Key, Panel, RichText, ScrollArea, TextEdit, Ui, ViewportBuilder, ViewportCommand,
+    ViewportId,
 };
 use parley_core::SessionConfig;
 use parley_core::password::Password;
@@ -71,6 +72,10 @@ pub struct Around<'a> {
     /// Where the results go: below the editor, beside it, or beside it when there is room
     /// (R-SQL-49).
     pub results: layout::ResultsPlace,
+    /// Brackets and quotes close themselves in the editor (R-SQL-55).
+    pub close_pairs: bool,
+    /// The window's shortcuts (R-SQL-60); `None` for the default keys, as in Parley.
+    pub keys: Option<&'a keys::SqlKeys>,
 }
 
 /// How far the window is, for Parley SQL's status bar (R-SQL-45).
@@ -82,6 +87,14 @@ pub enum Phase {
     Ready,
     /// Signed on, with a request in flight.
     Busy,
+}
+
+/// A small icon button that folds or opens the side panel, named `name`; true when clicked.
+fn panel_button(ui: &mut Ui, icon: &str, name: &str) -> bool {
+    let glyph = icons::icon(icon).color(theme::palette(ui).muted);
+    icons::add_named(ui, true, theme::ghost_button(glyph), name)
+        .on_hover_text(name)
+        .clicked()
 }
 
 /// What the window says about itself, for the status bar of Parley SQL (R-SQL-45).
@@ -100,6 +113,10 @@ pub struct WindowStatus {
 /// buttons and a line of error.
 const BELOW_THE_TEXT: f32 = 110.0;
 
+/// The id salt of the editor's part of the window, the same below the results and beside them,
+/// so the editor keeps its focus, cursor and scrolling when the arrangement changes (R-SQL-49).
+const WRITING: &str = "sql-writing";
+
 /// Where the window is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Place {
@@ -116,6 +133,14 @@ enum Side {
     Snippets,
     /// The schema browser (R-SQL-34).
     Database,
+}
+
+/// Whether the panel with History, Snippets and Database is shown (R-SQL-51).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SidePanel {
+    Open,
+    /// Folded to a narrow strip with a button that opens it again.
+    Folded,
 }
 
 /// How far the window is.
@@ -229,6 +254,13 @@ pub struct SqlWindow {
     place: Place,
     /// Results beside the editor: the editor's share of the width (R-SQL-49).
     editor_share: f32,
+    /// Results beside the editor: the height of what is above and below its text, measured
+    /// each frame so that the text fills the rest of the column (R-SQL-49).
+    around_the_text: f32,
+    /// Results below the editor: the height its text was dragged to (R-SQL-50).
+    editor_height: Option<f32>,
+    /// Whether History, Snippets and Database are shown or folded away (R-SQL-51).
+    side_panel: SidePanel,
 }
 
 impl SqlWindow {
@@ -283,6 +315,9 @@ impl SqlWindow {
             timeout: 0,
             place: Place::OwnWindow,
             editor_share: layout::DEFAULT_SHARE,
+            around_the_text: BELOW_THE_TEXT,
+            editor_height: None,
+            side_panel: SidePanel::Open,
         }
     }
 
@@ -437,10 +472,20 @@ impl SqlWindow {
                 CentralPanel::default().show(ui, |ui| self.sign_in(ui));
             }
             Stage::Ready => {
-                Panel::right("sql-history")
-                    .resizable(true)
-                    .default_size(250.0)
-                    .show(ui, |ui| self.side(ui, around));
+                match self.side_panel {
+                    SidePanel::Open => {
+                        Panel::right("sql-history")
+                            .resizable(true)
+                            .default_size(250.0)
+                            .show(ui, |ui| self.side(ui, around));
+                    }
+                    SidePanel::Folded => {
+                        Panel::right("sql-history-folded")
+                            .resizable(false)
+                            .exact_size(36.0)
+                            .show(ui, |ui| self.folded_side(ui));
+                    }
+                }
                 CentralPanel::default().show(ui, |ui| self.work(ui, around));
             }
         }
@@ -629,15 +674,22 @@ impl SqlWindow {
 
     /// History or Snippets, beside the editor (R-SQL-7, R-SQL-25).
     fn side(&mut self, ui: &mut Ui, around: Around<'_>) {
-        theme::segmented(
-            ui,
-            &mut self.side,
-            &[
-                (Side::History, "History"),
-                (Side::Snippets, "Snippets"),
-                (Side::Database, "Database"),
-            ],
-        );
+        ui.horizontal(|ui| {
+            theme::segmented(
+                ui,
+                &mut self.side,
+                &[
+                    (Side::History, "History"),
+                    (Side::Snippets, "Snippets"),
+                    (Side::Database, "Database"),
+                ],
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if panel_button(ui, icons::CARET_RIGHT, "Hide the side panel") {
+                    self.side_panel = SidePanel::Folded;
+                }
+            });
+        });
         ui.add_space(6.0);
         match self.side {
             Side::History => self.history(ui, around.history),
@@ -759,6 +811,15 @@ impl SqlWindow {
         self.next_statement();
     }
 
+    /// The folded side panel: a button that opens it again (R-SQL-51).
+    fn folded_side(&mut self, ui: &mut Ui) {
+        ui.vertical_centered(|ui| {
+            if panel_button(ui, icons::CARET_LEFT, "Show History, Snippets and Database") {
+                self.side_panel = SidePanel::Open;
+            }
+        });
+    }
+
     fn history(&mut self, ui: &mut Ui, history: &[String]) {
         if history.is_empty() {
             theme::hint(ui, "Statements you run are listed here.");
@@ -788,18 +849,39 @@ impl SqlWindow {
 
     /// The editor with its Run buttons, and the results below or beside it (R-SQL-49).
     fn work(&mut self, ui: &mut Ui, around: Around<'_>) {
-        self.keys(ui);
+        self.scripts.close_pairs = around.close_pairs;
+        let keys = around.keys.cloned().unwrap_or_default();
+        if keys != self.scripts.keys {
+            self.scripts.keys = keys;
+        }
+        self.keys(ui, around.files);
         self.complete();
         self.describe();
         match around.results.arrangement(ui.available_width()) {
-            layout::Arrangement::Stacked => {
-                let height = (ui.available_height() * 0.38).clamp(90.0, 320.0);
-                self.writing(ui, height, around);
-                ui.add_space(4.0);
-                self.results_and_messages(ui, around.files);
-            }
+            layout::Arrangement::Stacked => self.stacked(ui, around),
             layout::Arrangement::SideBySide => self.side_by_side(ui, around),
         }
+    }
+
+    /// The editor above, the results below, a divider between them (R-SQL-50).
+    fn stacked(&mut self, ui: &mut Ui, around: Around<'_>) {
+        let height =
+            layout::editor_height(self.editor_height, ui.available_height(), BELOW_THE_TEXT);
+        let shown = ui
+            .scope_builder(egui::UiBuilder::new().id_salt(WRITING), |ui| {
+                self.writing(ui, height, around)
+            })
+            .inner;
+        let (divider, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), layout::DIVIDER),
+            egui::Sense::hover(),
+        );
+        match layout::divider(ui, divider, layout::Axis::Rows) {
+            Some(layout::Drag::Moved(by)) => self.editor_height = Some(shown + by),
+            Some(layout::Drag::Reset) => self.editor_height = None,
+            None => {}
+        }
+        self.results_and_messages(ui, around.files);
     }
 
     /// The editor on the left, the results on the right, a divider between them (R-SQL-49).
@@ -808,17 +890,27 @@ impl SqlWindow {
         let width = layout::editor_width(self.editor_share, full.width());
         let left = egui::Rect::from_min_size(full.min, egui::vec2(width, full.height()));
         {
-            let mut left_ui = ui.new_child(egui::UiBuilder::new().max_rect(left));
-            // Room for the tab strip, the Run buttons and a line of error below the text.
-            let height = (left.height() - BELOW_THE_TEXT).max(90.0);
-            self.writing(&mut left_ui, height, around);
+            let mut left_ui = ui.new_child(egui::UiBuilder::new().id_salt(WRITING).max_rect(left));
+            // The text fills the column, less what was around it the last frame: the Ask row,
+            // the tab strip, the find bar, the Run buttons and a line of error (R-SQL-49).
+            let text = (left.height() - self.around_the_text).max(90.0);
+            let height = layout::TextHeight {
+                least: text,
+                most: text,
+            };
+            let shown = self.writing(&mut left_ui, height, around);
+            self.around_the_text = (left_ui.min_rect().height() - shown).max(0.0);
         }
         let divider = egui::Rect::from_min_size(
             egui::pos2(left.right(), full.top()),
             egui::vec2(layout::DIVIDER, full.height()),
         );
-        if let Some(share) = layout::divider(ui, divider, width, full.width()) {
-            self.editor_share = share;
+        match layout::divider(ui, divider, layout::Axis::Columns) {
+            Some(layout::Drag::Moved(by)) if full.width() > 0.0 => {
+                self.editor_share = ((width + by) / full.width()).clamp(0.0, 1.0);
+            }
+            Some(layout::Drag::Reset) => self.editor_share = layout::DEFAULT_SHARE,
+            Some(layout::Drag::Moved(_)) | None => {}
         }
         let right = egui::Rect::from_min_max(egui::pos2(divider.right(), full.top()), full.max);
         let mut right_ui = ui.new_child(egui::UiBuilder::new().max_rect(right));
@@ -826,17 +918,19 @@ impl SqlWindow {
         ui.allocate_rect(full, egui::Sense::hover());
     }
 
-    /// The Ask row, the editor with a text `height` tall, the Run buttons and the error line.
-    fn writing(&mut self, ui: &mut Ui, height: f32, around: Around<'_>) {
+    /// The Ask row, the editor with its text `height` tall, the Run buttons and the error line;
+    /// returns how high the text was drawn.
+    fn writing(&mut self, ui: &mut Ui, height: layout::TextHeight, around: Around<'_>) -> f32 {
         if self.assistant.on {
             self.assistant_row(ui);
         }
-        self.scripts.show(ui, height, around.files);
+        let shown = self.scripts.show(ui, height, around.files);
         ui.add_space(6.0);
         self.run_buttons(ui, around.systems);
         if let Some(error) = &self.error_line {
             theme::error(ui, error);
         }
+        shown
     }
 
     /// The Results and Messages tabs.
@@ -853,23 +947,16 @@ impl SqlWindow {
         }
     }
 
-    /// Ctrl+Enter runs, Ctrl+Shift+Enter runs all, Esc cancels: taken before the editor sees them.
-    fn keys(&mut self, ui: &Ui) {
-        let (all, one, cancel) = ui.input_mut(|i| {
-            (
-                i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Enter),
-                i.consume_key(Modifiers::COMMAND, Key::Enter),
-                // Esc closes the find bar or the completion list first, when one is open.
-                !self.scripts.takes_escape() && i.consume_key(Modifiers::NONE, Key::Escape),
-            )
-        });
-        if all {
-            self.run_all();
-        } else if one {
-            self.run_current();
-        }
-        if cancel {
-            self.cancel();
+    /// The window's shortcuts (R-SQL-60), taken before the editor sees them: Run, Run all and
+    /// Cancel here, the rest in the editor.
+    fn keys(&mut self, ui: &Ui, files: Option<&dyn SqlFiles>) {
+        for action in self.scripts.take_keys(ui, files) {
+            match action {
+                keys::SqlAction::Run => self.run_current(),
+                keys::SqlAction::RunAll => self.run_all(),
+                keys::SqlAction::Cancel => self.cancel(),
+                _ => {}
+            }
         }
     }
 
@@ -879,11 +966,13 @@ impl SqlWindow {
             // R-SQL-28: says what Run does now.
             let (start, end) = self.scripts.selection();
             let label = if start < end { "Run selection" } else { "Run" };
-            let run = icons::button(icons::PLAY, label).shortcut_text("Ctrl+Enter");
+            let run = icons::button(icons::PLAY, label)
+                .shortcut_text(self.scripts.keys.label(keys::SqlAction::Run));
             if icons::add_named(ui, idle, run, label).clicked() {
                 self.run_current();
             }
-            let all = egui::Button::new("Run all").shortcut_text("Ctrl+Shift+Enter");
+            let all = egui::Button::new("Run all")
+                .shortcut_text(self.scripts.keys.label(keys::SqlAction::RunAll));
             if icons::add_named(ui, idle, all, "Run all").clicked() {
                 self.run_all();
             }
@@ -1790,11 +1879,8 @@ mod tests {
         let run = harness.get_by_label("Run").rect();
         let tab = harness.get_by_label("Results").rect();
         assert!(tab.top() > run.bottom(), "below: {tab:?} under {run:?}");
-        assert!(
-            harness
-                .query_by_label("Editor and results divider")
-                .is_none()
-        );
+        let divider = harness.get_by_label("Editor and results divider").rect();
+        assert!(divider.width() > divider.height(), "across: {divider:?}");
 
         let mut harness = drawn_with_results(1100.0, layout::ResultsPlace::Beside);
         let run = harness.get_by_label("Run").rect();
@@ -1809,19 +1895,139 @@ mod tests {
         );
     }
 
+    /// R-SQL-49 (a fix): when Automatic puts the results below instead of beside, the editor
+    /// keeps the focus and what is typed still goes into it.
+    #[test]
+    fn the_editor_keeps_the_keyboard_when_the_results_move_r_sql_49() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = drawn_with_results(1600.0, layout::ResultsPlace::Automatic);
+        harness
+            .get_by_role(egui::accesskit::Role::MultilineTextInput)
+            .focus();
+        harness.run();
+        harness.event(egui::Event::Text("a".to_owned()));
+        harness.run();
+        harness.set_size(egui::vec2(980.0, 760.0));
+        harness.run();
+        harness.event(egui::Event::Text("b".to_owned()));
+        harness.run();
+        assert_eq!(harness.state().scripts.text(), "ab");
+    }
+
+    /// Drags the editor and results divider by `by`.
+    fn drag_divider(harness: &mut egui_kittest::Harness<'static, SqlWindow>, by: egui::Vec2) {
+        use egui_kittest::kittest::Queryable;
+
+        let from = harness
+            .get_by_label("Editor and results divider")
+            .rect()
+            .center();
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(egui::Event::PointerMoved(from));
+        harness.event(button(from, true));
+        harness.run();
+        for step in 1..=4 {
+            #[expect(clippy::cast_precision_loss, reason = "a step of four")]
+            harness.event(egui::Event::PointerMoved(from + by * (step as f32 / 4.0)));
+            harness.run();
+        }
+        harness.event(button(from + by, false));
+        harness.run();
+    }
+
+    /// R-SQL-50: below, dragging the divider down makes the editor taller and the results
+    /// start lower; the height lasts over frames.
+    #[test]
+    fn dragging_the_divider_below_changes_the_editor_height_r_sql_50() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = drawn_with_results(1100.0, layout::ResultsPlace::Below);
+        let before = harness.get_by_label("Results").rect().top();
+        drag_divider(&mut harness, egui::vec2(0.0, 80.0));
+        harness.run_steps(3);
+        let after = harness.get_by_label("Results").rect().top();
+        assert!(
+            (after - before - 80.0).abs() < 4.0,
+            "moved from {before} to {after}"
+        );
+        assert!(harness.state().editor_height.is_some());
+    }
+
+    /// R-SQL-50: dragging past the bottom leaves the results their least height.
+    #[test]
+    fn the_editor_cannot_push_the_results_out_of_the_window_r_sql_50() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = drawn_with_results(1100.0, layout::ResultsPlace::Below);
+        drag_divider(&mut harness, egui::vec2(0.0, 2000.0));
+        harness.run_steps(3);
+        let tab = harness.get_by_label("Results").rect();
+        assert!(tab.bottom() < 760.0 - 100.0, "results shown: {tab:?}");
+    }
+
+    /// R-SQL-51: the side panel folds to a strip and opens again, and the editor gets the room.
+    #[test]
+    fn the_side_panel_folds_away_and_opens_again_r_sql_51() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = drawn_with_results(1100.0, layout::ResultsPlace::Below);
+        let wide = harness
+            .get_by_label("Editor and results divider")
+            .rect()
+            .width();
+        harness.get_by_label("Hide the side panel").click();
+        harness.run();
+        assert!(harness.query_by_label("History").is_none());
+        let wider = harness
+            .get_by_label("Editor and results divider")
+            .rect()
+            .width();
+        assert!(wider > wide + 150.0, "{wide} then {wider}");
+        harness
+            .get_by_label("Show History, Snippets and Database")
+            .click();
+        harness.run();
+        harness.get_by_label("History");
+        harness.get_by_label("Hide the side panel");
+    }
+
+    /// R-SQL-49: beside, the editor fills the column: the Run buttons are at its foot, and they
+    /// stay there over frames.
+    #[test]
+    fn beside_the_editor_takes_the_full_height_r_sql_49() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = drawn_with_results(1100.0, layout::ResultsPlace::Beside);
+        harness.run_steps(2);
+        let divider = harness.get_by_label("Editor and results divider").rect();
+        let run = harness.get_by_label("Run").rect();
+        assert!(
+            divider.bottom() - run.bottom() < 30.0,
+            "Run at {run:?}, column to {}",
+            divider.bottom()
+        );
+        harness.run_steps(3);
+        assert_eq!(harness.get_by_label("Run").rect(), run);
+    }
+
     /// R-SQL-49: automatic puts the results beside the editor only in a wide window.
     #[test]
     fn automatic_results_go_beside_in_a_wide_window_r_sql_49() {
         use egui_kittest::kittest::Queryable;
 
+        // Below, the divider lies across; beside, it stands up.
         let narrow = drawn_with_results(980.0, layout::ResultsPlace::Automatic);
-        assert!(
-            narrow
-                .query_by_label("Editor and results divider")
-                .is_none()
-        );
+        let divider = narrow.get_by_label("Editor and results divider").rect();
+        assert!(divider.width() > divider.height(), "below: {divider:?}");
         let wide = drawn_with_results(1600.0, layout::ResultsPlace::Automatic);
-        wide.get_by_label("Editor and results divider");
+        let divider = wide.get_by_label("Editor and results divider").rect();
+        assert!(divider.height() > divider.width(), "beside: {divider:?}");
     }
 
     #[test]
@@ -1956,6 +2162,43 @@ mod tests {
         harness.run();
         assert!(harness.query_by_label("Match case").is_none());
         assert!(!harness.state().scripts.takes_escape());
+    }
+
+    /// R-SQL-60: with Find moved to F3, F3 opens the find bar and Ctrl+F no longer does; the
+    /// Run button shows the key in use.
+    #[test]
+    fn the_window_uses_the_keys_from_the_settings_r_sql_60() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut overrides = keys::Overrides::new();
+        overrides.insert("find".to_owned(), vec!["F3".to_owned()]);
+        overrides.insert("run".to_owned(), vec!["F5".to_owned()]);
+        let keys = keys::SqlKeys::new(&overrides);
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1100.0, 760.0))
+            .build_ui_state(
+                move |ui, w: &mut SqlWindow| {
+                    crate::test_support::install_fonts(ui);
+                    let around = Around {
+                        keys: Some(&keys),
+                        ..Around::default()
+                    };
+                    w.show_in(ui, around);
+                },
+                window().signed_on_for_tests(),
+            );
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::F);
+        harness.run();
+        assert!(harness.query_by_label("Match case").is_none());
+        harness.key_press(egui::Key::F3);
+        harness.run();
+        harness.get_by_label("Match case");
+        assert_eq!(
+            harness.state().scripts.keys.label(keys::SqlAction::Run),
+            "F5",
+            "what the Run button shows"
+        );
     }
 
     #[test]

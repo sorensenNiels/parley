@@ -17,6 +17,7 @@ A TN5250 terminal emulator for IBM i, written in Rust, for Windows, Linux and ma
 | [docs/ROADMAP.md](docs/ROADMAP.md) | The plan: open requirements and the decisions behind the design. |
 | [docs/FEATURES.md](docs/FEATURES.md) · [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | What is done and how it was verified. |
 | [docs/IDEAS.md](docs/IDEAS.md) | Ideas that may become requirements. |
+| [docs/sql/](docs/sql/) | The same documents for SQL on IBM i (the SQL add-on and Parley SQL): [PRD](docs/sql/PRD.md), [roadmap](docs/sql/ROADMAP.md), [features](docs/sql/FEATURES.md) · [requirements](docs/sql/REQUIREMENTS.md), [ideas](docs/sql/IDEAS.md). |
 | [docs/RELEASING.md](docs/RELEASING.md) | How releases and installers are made. |
 
 ## Using it

@@ -252,6 +252,7 @@ impl ParleySqlUi {
             .get(&name)
             .cloned()
             .unwrap_or_default();
+        let keys = sql::keys::SqlKeys::new(&self.settings.sql_keys);
         let around = sql::Around {
             history: &history,
             files: self.files.as_deref(),
@@ -260,6 +261,8 @@ impl ParleySqlUi {
             // One connection at a time: no Run on… (D26).
             systems: None,
             results: self.settings.sql_results,
+            close_pairs: self.settings.sql_close_pairs,
+            keys: Some(&keys),
         };
         window.set_assistant(assistant, &self.settings.assistant, self.api_keys.as_ref());
         let open = window.show_in(ui, around);
@@ -384,6 +387,7 @@ mod tests {
     use egui_kittest::kittest::Queryable;
 
     use super::*;
+    use crate::sql::layout::ResultsPlace;
 
     const SETTLE_STEPS: u64 = 16;
 
@@ -439,7 +443,7 @@ mod tests {
         let mut harness = app_with(Vec::new());
         harness.get_by_label("Settings").click();
         harness.run();
-        for page in ["Appearance", "SQL", "SQL assistant", "About"] {
+        for page in ["Appearance", "Shortcuts", "SQL", "SQL assistant", "About"] {
             harness.get_by_label(page);
         }
         for page in ["Terminal", "Keyboard", "Add-ons"] {
@@ -451,6 +455,27 @@ mod tests {
         let before = harness.get_by_label("Save").rect();
         harness.run_steps(5);
         assert_eq!(harness.get_by_label("Save").rect(), before, "D12");
+        // R-SQL-60: the Shortcuts page, with the Save button where it was.
+        harness.get_by_label("Shortcuts").click();
+        harness.run();
+        harness.get_by_label("Run the statement");
+        harness.run_steps(5);
+        assert_eq!(harness.get_by_label("Save").rect(), before, "D12");
+    }
+
+    #[test]
+    fn where_results_go_is_chosen_on_the_appearance_page_r_sql_49() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("Appearance").click();
+        harness.run();
+        harness.get_by_label("SQL WINDOW");
+        harness.get_by_label("Beside").click();
+        harness.run();
+        harness.get_by_label("Save").click();
+        harness.run();
+        assert_eq!(harness.state().settings.sql_results, ResultsPlace::Beside);
     }
 
     #[test]
