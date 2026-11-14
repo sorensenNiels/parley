@@ -24,8 +24,6 @@ parley-ui-egui.workspace = true
 eframe.workspace = true
 parley-core.workspace = true
 keyring = "4.2"
-# Reads Parley SQL's settings, which eframe keeps as RON, for Parley's SQL window (R-SQL-69).
-ron = "0.12"
 
 # File windows for importing and exporting macros (R-KEY-7). GTK on Linux, as Tortuga: the
 # xdg-desktop-portal backend fails silently where no portal runs (WSL).

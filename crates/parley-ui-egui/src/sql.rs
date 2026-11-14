@@ -21,10 +21,7 @@ mod tools;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
-use egui::{
-    CentralPanel, Key, Panel, RichText, ScrollArea, TextEdit, Ui, ViewportBuilder, ViewportCommand,
-    ViewportId,
-};
+use egui::{CentralPanel, Key, Panel, RichText, ScrollArea, TextEdit, Ui};
 use parley_core::SessionConfig;
 use parley_core::password::Password;
 use parley_core::sql::helper::HelperFiles;
@@ -438,32 +435,6 @@ impl SqlWindow {
             return false;
         }
         true
-    }
-
-    /// Draws the window; false once it is closed.
-    pub fn show(&mut self, ctx: &egui::Context, around: Around<'_>) -> bool {
-        let title = format!("SQL – {}", self.session);
-        let builder = ViewportBuilder::default()
-            .with_title(&title)
-            .with_inner_size([980.0, 660.0])
-            .with_min_inner_size([560.0, 360.0]);
-        self.step(|window| {
-            ctx.show_viewport_immediate(
-                ViewportId::from_hash_of("parley-sql"),
-                builder,
-                |ui, _class| {
-                    if ui.ctx().input(|i| i.viewport().close_requested())
-                        && window.closing == Closing::Open
-                    {
-                        if window.uncommitted {
-                            ui.ctx().send_viewport_cmd(ViewportCommand::CancelClose);
-                        }
-                        window.request_close();
-                    }
-                    window.ui(ui, around);
-                },
-            );
-        })
     }
 
     fn ui(&mut self, ui: &mut Ui, around: Around<'_>) {
@@ -1867,7 +1838,7 @@ mod tests {
                         history: &history,
                         ..Around::default()
                     };
-                    w.show(ui.ctx(), around);
+                    w.show_in(ui, around);
                 },
                 w,
             )
@@ -1934,7 +1905,7 @@ mod tests {
                         systems: Some(&others),
                         ..Around::default()
                     };
-                    w.show(ui.ctx(), around);
+                    w.show_in(ui, around);
                 },
                 window().signed_on_for_tests(),
             );

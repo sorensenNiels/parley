@@ -1,7 +1,6 @@
 //! What a program does around an [`SqlWindow`]: opens it with the settings, keeps what it
-//! changed back in them, and says why it could not open. Shared by Parley's SQL add-on
-//! (R-SQL-6) and Parley SQL (R-SQL-45), so both keep a session's history, scripts and pinned
-//! libraries the same way.
+//! changed back in them, and says why it could not open. Parley SQL's (R-SQL-45); Parley
+//! shows only its notice, when Parley SQL cannot be started (R-SQL-70).
 
 use std::path::{Path, PathBuf};
 
@@ -19,34 +18,22 @@ const HISTORY: usize = 100;
 const NO_HELPER: &str =
     "This Parley was installed without the SQL helper, so the SQL window cannot open.";
 
-/// Where Parley reads Parley SQL's settings, which its SQL window uses (R-SQL-69): read each
-/// time the window opens, so changes made in Parley SQL count. `None`: none saved yet.
-pub struct SettingsReader(pub Box<dyn Fn() -> Option<Settings>>);
-
-impl std::fmt::Debug for SettingsReader {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("SettingsReader")
-    }
-}
-
-/// The window for `name` on `config`'s host, with the headings, scripts and pinned libraries
-/// `kept`, and the Java and limits `chosen` (in Parley SQL the same settings; in Parley, Parley
-/// SQL's, R-SQL-69); `user` is filled in. The helper's jars are in `helpers`; Java is the one
+/// The window for `name` on `config`'s host, with `settings`' limits, headings, scripts and
+/// pinned libraries; `user` is filled in. The helper's jars are in `helpers`; Java is the one
 /// the settings name, or found. `Err` says why it cannot open.
 pub fn open(
     name: &str,
     config: &SessionConfig,
     helpers: Option<&Path>,
     user: &str,
-    kept: &Settings,
-    chosen: &Settings,
+    settings: &Settings,
 ) -> Result<SqlWindow, String> {
     let folder = helpers.ok_or_else(|| NO_HELPER.to_owned())?;
-    let java_path = chosen.java_path.trim();
-    let configured = (!java_path.is_empty()).then(|| PathBuf::from(java_path));
+    let configured =
+        (!settings.java_path.trim().is_empty()).then(|| PathBuf::from(settings.java_path.trim()));
     let java = parley_core::sql::java::find(configured.as_deref()).map_err(|e| e.to_string())?;
-    let scripts = kept.sql_scripts.get(name).cloned().unwrap_or_default();
-    let pinned = kept.sql_pinned.get(name).cloned().unwrap_or_default();
+    let scripts = settings.sql_scripts.get(name).cloned().unwrap_or_default();
+    let pinned = settings.sql_pinned.get(name).cloned().unwrap_or_default();
     Ok(SqlWindow::open(
         name,
         config,
@@ -55,8 +42,8 @@ pub fn open(
         user,
         &scripts,
     )
-    .with_limits(chosen.sql_rows, chosen.sql_timeout)
-    .with_header(kept.sql_header)
+    .with_limits(settings.sql_rows, settings.sql_timeout)
+    .with_header(settings.sql_header)
     .with_pinned(pinned))
 }
 
@@ -172,14 +159,7 @@ mod tests {
     #[test]
     fn without_the_helper_the_window_says_why_it_cannot_open_r_sql_45() {
         let config = SessionConfig::default();
-        let opened = open(
-            "Prod",
-            &config,
-            None,
-            "",
-            &Settings::default(),
-            &Settings::default(),
-        );
+        let opened = open("Prod", &config, None, "", &Settings::default());
         assert_eq!(opened.err().as_deref(), Some(NO_HELPER));
     }
 }

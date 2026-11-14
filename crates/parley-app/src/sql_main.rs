@@ -12,23 +12,13 @@
 )]
 
 use eframe::egui;
-use parley_app::{PARLEY_SQL_ID, SETTINGS_KEY, screenshot};
+use parley_app::{screenshot, sql_start};
 use parley_ui_egui::{ParleySqlUi, SqlConnection};
 
 /// Where the saved connections are kept in eframe's storage (R-SQL-46).
 const CONNECTIONS_KEY: &str = "connections";
-
-const USAGE: &str = "\
-Usage: parley-sql [OPTION] [CONNECTION]
-
-Opens Parley SQL, the SQL window of Parley on its own, for SQL on IBM i. With CONNECTION,
-the name of a saved connection, opens its sign-on straight away.
-
-Options:
-  --screenshot FILE    After a few seconds, save the window as a PPM image and quit
-                       (for development)
-  --version            Print the version and quit
-  --help               Print this help and quit";
+/// Where the settings are kept.
+const SETTINGS_KEY: &str = "settings";
 
 /// Runs the UI inside eframe.
 struct App {
@@ -65,40 +55,26 @@ impl eframe::App for App {
     }
 }
 
-/// What the command line asked for.
-#[derive(Debug, Default)]
-struct Args {
-    connection: Option<String>,
-    screenshot: Option<String>,
-}
-
 fn main() -> eframe::Result {
-    let mut args = Args::default();
-    let mut command_line = std::env::args().skip(1);
-    while let Some(arg) = command_line.next() {
-        match arg.as_str() {
-            "--version" | "-V" => {
-                println!("parley-sql {}", env!("CARGO_PKG_VERSION"));
-                return Ok(());
-            }
-            "--help" | "-h" => {
-                println!("{USAGE}");
-                return Ok(());
-            }
-            "--screenshot" => args.screenshot = command_line.next(),
-            _ if !arg.starts_with('-') && args.connection.is_none() => {
-                args.connection = Some(arg);
-            }
-            _ => {
-                eprintln!("parley-sql: unknown option '{arg}'\n\n{USAGE}");
-                std::process::exit(2);
-            }
+    let args = match sql_start::parse(std::env::args().skip(1)) {
+        Ok(sql_start::Command::Run(args)) => args,
+        Ok(sql_start::Command::Version) => {
+            println!("parley-sql {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
         }
-    }
+        Ok(sql_start::Command::Help) => {
+            println!("{}", sql_start::USAGE);
+            return Ok(());
+        }
+        Err(e) => {
+            eprintln!("parley-sql: {e}\n\n{}", sql_start::USAGE);
+            std::process::exit(2);
+        }
+    };
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Parley SQL")
-        .with_app_id(PARLEY_SQL_ID)
+        .with_app_id("parley-sql")
         .with_inner_size([1100.0, 720.0])
         .with_min_inner_size([640.0, 400.0]);
     match parley_app::window_icon() {
@@ -133,13 +109,17 @@ fn main() -> eframe::Result {
                 Ok(logo) => ui.set_logo(logo),
                 Err(e) => eprintln!("parley-sql: could not load the menu bar icon: {e}"),
             }
-            let connect_on_start = args.connection.as_deref().and_then(|name| {
-                let found = ui.connection_index(name);
-                if found.is_none() {
-                    eprintln!("parley-sql: no saved connection called '{name}'");
-                }
-                found
-            });
+            // R-SQL-70: Parley's Tools ▸ SQL… names a host; a saved connection to it, or a new one.
+            let connect_on_start = match args.start {
+                Some(start) => Some(ui.connection_for(start)),
+                None => args.connection.as_deref().and_then(|name| {
+                    let found = ui.connection_index(name);
+                    if found.is_none() {
+                        eprintln!("parley-sql: no saved connection called '{name}'");
+                    }
+                    found
+                }),
+            };
             Ok(Box::new(App {
                 ui,
                 title: String::new(),

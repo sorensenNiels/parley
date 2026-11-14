@@ -494,4 +494,64 @@ mod tests {
         );
         assert!(signatures[1].parameters.is_empty(), "no parameters");
     }
+
+    /// Recorded from the owner's IBM i 7.3 (2026-11-14, `sqlprobe --sql`): `QSYS2.QCMDEXC` has
+    /// three signatures, the first with parameters that have no name.
+    #[test]
+    fn qcmdexc_reads_as_three_signatures_with_unnamed_parameters_r_sql_65() {
+        let rows = [
+            row(&[
+                Some("QCMDEXC"),
+                Some("1"),
+                Some("IN"),
+                None,
+                Some("CHARACTER VARYING"),
+                Some("32000"),
+                None,
+                None,
+            ]),
+            row(&[
+                Some("QCMDEXC"),
+                Some("2"),
+                Some("IN"),
+                None,
+                Some("DECIMAL"),
+                None,
+                Some("15"),
+                Some("5"),
+            ]),
+            row(&[
+                Some("QCMDEXC1"),
+                Some("1"),
+                Some("IN"),
+                Some("COMMAND"),
+                Some("CHARACTER VARYING"),
+                Some("32000"),
+                None,
+                None,
+            ]),
+            row(&[
+                Some("QCMDEXC2"),
+                Some("1"),
+                Some("IN"),
+                Some("COMMAND"),
+                Some("CHARACTER VARYING"),
+                Some("32000"),
+                None,
+                None,
+            ]),
+        ];
+        let signatures = signatures_from(&rows);
+        assert_eq!(signatures.len(), 3);
+        let first: Vec<(&str, &str)> = signatures[0]
+            .parameters
+            .iter()
+            .map(|p| (p.name.as_str(), p.data_type.as_str()))
+            .collect();
+        assert_eq!(
+            first,
+            [("", "CHARACTER VARYING(32000)"), ("", "DECIMAL(15, 5)")]
+        );
+        assert_eq!(signatures[1].parameters[0].name, "COMMAND");
+    }
 }

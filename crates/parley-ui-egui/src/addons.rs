@@ -48,9 +48,7 @@ impl AddOn {
     pub const fn about(self) -> &'static str {
         match self {
             Self::Macros => "Record keystrokes and play them back, also when a session connects.",
-            Self::Sql => {
-                "Run SQL on the session's host in a window of its own. Needs Java 11 or later."
-            }
+            Self::Sql => "SQL… in the Tools menu opens Parley SQL on the session's host.",
             Self::Assistant => "Off: nothing of it shows in the SQL window and nothing is sent.",
         }
     }

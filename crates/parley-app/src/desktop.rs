@@ -75,13 +75,8 @@ pub fn run() -> eframe::Result {
             if let Some(settings) = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)) {
                 ui.set_settings(settings);
             }
-            ui.set_sql_helpers(parley_app::helpers::sql_helpers());
-            ui.set_sql_settings_reader(Box::new(parley_app::parley_sql_settings));
-            ui.set_file_saver(Box::new(parley_app::helpers::SqlFileWindow));
-            ui.set_api_keys(std::sync::Arc::new(parley_app::api_keys::Keychain));
-            ui.set_snippet_store(Box::new(
-                parley_app::snippets::SnippetFolders::beside_settings(),
-            ));
+            // R-SQL-70: Tools ▸ SQL… starts Parley SQL, installed beside Parley.
+            ui.set_sql_starter(Box::new(parley_app::sql_start::start));
             match parley_app::macros::MacroFolder::beside_settings() {
                 Some(folder) => ui.set_macro_store(Box::new(folder)),
                 None => eprintln!("parley: no folder for macros on this system"),

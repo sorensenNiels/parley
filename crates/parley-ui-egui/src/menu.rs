@@ -1,5 +1,5 @@
-//! The header (R-UI-15, R-UI-10): the app's icon and name, the menus, and on the right Help, the
-//! session in use and a newer version. It only reports what the operator chose, as an
+//! The header (R-UI-15, R-UI-10, R-UI-18): the app's icon and name, the menus, and on the right
+//! the gear for Settings, the session in use and a newer version. It only reports what the operator chose, as an
 //! [`Action`] for [`crate::ParleyUi`] to carry out.
 
 use egui::{Button, MenuBar, RichText, Sense, Ui};
@@ -44,9 +44,8 @@ pub enum Action {
     Shortcuts,
     /// Tools ▸ SQL… (R-SQL-6).
     Sql,
+    /// The gear (R-UI-18).
     Settings,
-    /// Help ▸ Check for updates…: Settings on the About page, checking (R-UI-11).
-    CheckForUpdates,
     Key(Key),
     /// Tools ▸ Record macro (R-KEY-3).
     RecordMacro,
@@ -104,20 +103,22 @@ impl Header<'_> {
     }
 }
 
-/// The header: brand, menus; Help, the session pill and a newer version on the right.
+/// The header: brand, menus (Tools only while it has something); the gear, the session pill
+/// and a newer version on the right (R-UI-18).
 pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     let mut action = None;
     MenuBar::new().ui(ui, |ui| {
         brand(ui, header.logo, Program::Parley);
+        let tools = header.macros.is_some() || header.sql;
         let menus = [file_menu, edit_menu, view_menu, tools_menu];
-        for menu in menus {
+        for menu in menus.into_iter().take(if tools { 4 } else { 3 }) {
             if let Some(chosen) = menu(ui, header) {
                 action = Some(chosen);
             }
         }
         theme::button_row(ui, |ui| {
-            if let Some(chosen) = help_menu(ui, header) {
-                action = Some(chosen);
+            if gear(ui) {
+                action = Some(Action::Settings);
             }
             if let Some(chosen) = session_pill(ui, header) {
                 action = Some(chosen);
@@ -244,39 +245,29 @@ fn tools_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     ui.menu_button("Tools", |ui| {
         if let Some(macros) = header.macros {
             action = macro_items(ui, header, macros);
-            ui.separator();
         }
         // R-SQL-6: for the connected session's host.
         if header.sql {
+            if header.macros.is_some() {
+                ui.separator();
+            }
             let sql = (icons::DATABASE, "SQL…");
             if item(ui, header, header.connected(), sql, Some(&Function::Sql)) {
                 action = Some(Action::Sql);
             }
-            ui.separator();
-        }
-        if item(ui, header, true, (icons::GEAR, "Settings…"), None) {
-            action = Some(Action::Settings);
         }
     });
     action
 }
 
-fn help_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
-    let mut action = None;
-    ui.menu_button("Help", |ui| {
-        let shortcuts = (icons::KEYBOARD, "Keyboard shortcuts");
-        if item(ui, header, true, shortcuts, Some(&Function::Shortcuts)) {
-            action = Some(Action::Shortcuts);
-        }
-        let check = (icons::ARROWS_CLOCKWISE, "Check for updates…");
-        if item(ui, header, true, check, None) {
-            action = Some(Action::CheckForUpdates);
-        }
-        ui.separator();
-        let version = format!("Parley {}", env!("CARGO_PKG_VERSION"));
-        ui.add_enabled(false, icons::button(icons::INFO, &version));
-    });
-    action
+/// The gear at the right end of the header, for Settings (R-UI-18; Parley SQL's, R-SQL-45);
+/// true when clicked.
+pub(crate) fn gear(ui: &mut Ui) -> bool {
+    let muted = theme::palette(ui).muted;
+    let button = Button::new(icons::icon(icons::GEAR).color(muted)).frame_when_inactive(false);
+    icons::add_named(ui, true, button, "Settings")
+        .on_hover_text("Settings")
+        .clicked()
 }
 
 /// Record / Stop recording, Run macro ▸, Stop macro and Macros…

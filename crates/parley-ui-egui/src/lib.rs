@@ -42,6 +42,18 @@ pub use sql_app::{ParleySqlUi, SqlConnection};
 pub use theme::Density;
 pub use updates::Checker;
 
+/// How the launcher starts Parley SQL on a host (R-SQL-70); `Err` says why it could not.
+pub type StartSql = Box<dyn Fn(&SqlConnection) -> Result<(), String>>;
+
+/// Starts Parley SQL on a host (R-SQL-70): given by the launcher, which knows where it is.
+struct SqlStarter(StartSql);
+
+impl std::fmt::Debug for SqlStarter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SqlStarter")
+    }
+}
+
 /// The whole application UI: menu bar, toolbar and status bar around the start screen or the
 /// open session's screen.
 #[derive(Debug)]
@@ -86,27 +98,10 @@ pub struct ParleyUi {
     /// Asking for the password a running macro needs (R-KEY-4).
     macro_password: Option<macros::PasswordDialog>,
     macro_manager: Option<macros::Manager>,
-    /// The folder of the SQL helper's jars, if this installation has one (R-SQL-13).
-    sql_helpers: Option<std::path::PathBuf>,
-    /// The keychain the SQL assistant's API keys are kept in (R-SQL-48).
-    api_keys: Option<std::sync::Arc<dyn ApiKeys>>,
-    /// The SQL window, while open (R-SQL-6).
-    sql_window: Option<sql::SqlWindow>,
-    /// The user last typed in the SQL window, by session, for this run of Parley only.
-    sql_users: std::collections::BTreeMap<String, String>,
-    /// Why the SQL window cannot open (no Java, no helper), while that is shown (R-SQL-12).
+    /// Why Parley SQL could not be started, while that is shown (R-SQL-70).
     sql_notice: Option<String>,
-    /// Where Parley SQL's settings are read when the SQL window opens (R-SQL-69).
-    sql_settings_reader: Option<sql::hosting::SettingsReader>,
-    /// Parley SQL's settings as read when the SQL window last opened: its Java, limits,
-    /// results, brackets, shared snippets and assistant (R-SQL-69).
-    sql_settings: Settings,
-    /// The file window for exports and scripts (R-SQL-8, R-SQL-21).
-    file_saver: Option<Box<dyn sql::SqlFiles>>,
-    /// The snippet folders (R-SQL-24); without them, the SQL window has only the starters.
-    snippet_store: Option<Box<dyn sql::snippets::SnippetStore>>,
-    /// The SQL window's scripts as last kept in the settings (R-SQL-20).
-    sql_scripts_kept: u64,
+    /// Starts Parley SQL on a host (R-SQL-70); without one (tests), Tools ▸ SQL… says so.
+    sql_starter: Option<SqlStarter>,
 }
 
 impl Default for ParleyUi {
@@ -142,16 +137,8 @@ impl ParleyUi {
             save_macro: None,
             macro_password: None,
             macro_manager: None,
-            sql_helpers: None,
-            api_keys: None,
-            sql_window: None,
-            sql_users: std::collections::BTreeMap::new(),
             sql_notice: None,
-            sql_settings_reader: None,
-            sql_settings: Settings::default(),
-            file_saver: None,
-            snippet_store: None,
-            sql_scripts_kept: 0,
+            sql_starter: None,
         }
     }
 
@@ -170,31 +157,9 @@ impl ParleyUi {
         self.logo = menu::Logo::new(image);
     }
 
-    /// How the SQL window reaches files (R-SQL-8, R-SQL-21); without it, no Export or Open….
-    pub fn set_file_saver(&mut self, saver: Box<dyn sql::SqlFiles>) {
-        self.file_saver = Some(saver);
-    }
-
-    /// Where the SQL window keeps snippets (R-SQL-24).
-    pub fn set_snippet_store(&mut self, store: Box<dyn sql::snippets::SnippetStore>) {
-        self.snippet_store = Some(store);
-    }
-
-    /// Where the SQL helper's jars are (R-SQL-13); `None` when this installation has none.
-    pub fn set_sql_helpers(&mut self, folder: Option<std::path::PathBuf>) {
-        self.sql_helpers = folder;
-    }
-
-    /// The keychain for the SQL assistant's API keys (R-SQL-48); without one, keys come only
-    /// from the environment.
-    pub fn set_api_keys(&mut self, keys: std::sync::Arc<dyn ApiKeys>) {
-        self.api_keys = Some(keys);
-    }
-
-    /// Where to read Parley SQL's settings, which the SQL window uses (R-SQL-69). Without one
-    /// (tests), the window opens with the default settings.
-    pub fn set_sql_settings_reader(&mut self, read: Box<dyn Fn() -> Option<Settings>>) {
-        self.sql_settings_reader = Some(sql::hosting::SettingsReader(read));
+    /// How to start Parley SQL on a host, the program `parley-sql` beside Parley (R-SQL-70).
+    pub fn set_sql_starter(&mut self, start: StartSql) {
+        self.sql_starter = Some(SqlStarter(start));
     }
 
     /// How to ask for the latest release (R-UI-11). Without one, Parley doesn't look for
@@ -462,10 +427,6 @@ impl ParleyUi {
                 self.end_recording(&mut connection.session());
                 connection.close();
                 self.closed = Some("Disconnected.".to_owned());
-                // R-SQL-6: the SQL window goes with its session, asking first under R-SQL-5.
-                if let Some(window) = &mut self.sql_window {
-                    window.request_close();
-                }
             }
             other => self.connection = other,
         }
@@ -476,7 +437,7 @@ impl ParleyUi {
 
         self.show_editor(ui.ctx());
         self.show_settings(ui.ctx());
-        self.show_sql_window(ui.ctx());
+        sql::hosting::notice_dialog(ui.ctx(), &mut self.sql_notice);
         self.show_shortcut_sheet(ui.ctx());
         self.show_macro_dialogs(ui.ctx());
         self.show_exit_question(ui.ctx());
@@ -550,13 +511,8 @@ impl ParleyUi {
                     self.focus_terminal = true;
                 }
                 Action::Settings => self.settings_dialog = Some(self.open_settings(ctx)),
-                Action::CheckForUpdates => {
-                    let dialog = self.open_settings(ctx).on_about_page();
-                    self.settings_dialog = Some(dialog);
-                    self.updates.start(ctx, updates::Check::Now);
-                }
                 Action::Shortcuts => self.shortcut_sheet = Some(shortcuts::Sheet::default()),
-                Action::Sql => self.open_sql_window(connected),
+                Action::Sql => self.start_parley_sql(connected),
                 Action::Key(key) => {
                     if let Some(s) = session.as_deref_mut() {
                         s.key(key);
@@ -647,88 +603,23 @@ impl ParleyUi {
         }
     }
 
-    /// Tools ▸ SQL… (R-SQL-6): the window for the session in use, or why it cannot open.
+    /// Tools ▸ SQL… (R-SQL-70): starts Parley SQL on the session's host, or says why not.
     /// `connected` comes from the caller: during a frame the connection is out of its field.
-    fn open_sql_window(&mut self, connected: bool) {
-        if !connected || !self.addon_on(AddOn::Sql) || self.sql_window.is_some() {
+    fn start_parley_sql(&mut self, connected: bool) {
+        if !connected || !self.addon_on(AddOn::Sql) {
             return;
         }
         let Some(profile) = self.current.as_ref() else {
             return;
         };
-        self.sql_settings = self
-            .sql_settings_reader
-            .as_ref()
-            .and_then(|read| (read.0)())
-            .unwrap_or_default();
-        let user = self.sql_users.get(&profile.name).map_or("", String::as_str);
-        match sql::hosting::open(
-            &profile.name,
-            &profile.config,
-            self.sql_helpers.as_deref(),
-            user,
-            &self.settings,
-            &self.sql_settings,
-        ) {
-            Ok(window) => self.sql_window = Some(window),
-            Err(e) => self.sql_notice = Some(e),
+        let connection = SqlConnection::for_session(&profile.name, &profile.config);
+        let started = match &self.sql_starter {
+            Some(starter) => (starter.0)(&connection),
+            None => Err("This Parley cannot start Parley SQL.".to_owned()),
+        };
+        if let Err(e) = started {
+            self.sql_notice = Some(e);
         }
-    }
-
-    /// The SQL window while open, its statements into the history (R-SQL-7), and the notice
-    /// when it could not open.
-    fn show_sql_window(&mut self, ctx: &egui::Context) {
-        // R-SQL-69: the assistant is turned on in Parley SQL's settings.
-        let assistant_on = self.sql_settings.addons.enabled(AddOn::Assistant);
-        if let Some(window) = &mut self.sql_window {
-            let session = self
-                .current
-                .as_ref()
-                .map_or_else(String::new, |p| p.name.clone());
-            let history = self
-                .settings
-                .sql_history
-                .get(&session)
-                .cloned()
-                .unwrap_or_default();
-            // R-SQL-43: the saved sessions "Run on…" offers.
-            let systems: Vec<(String, parley_core::SessionConfig)> = self
-                .profiles
-                .iter()
-                .map(|p| (p.name.clone(), p.config.clone()))
-                .collect();
-            let around = sql::Around {
-                history: &history,
-                files: self.file_saver.as_deref(),
-                snippets: self.snippet_store.as_deref(),
-                shared: &self.sql_settings.sql_snippets_shared,
-                systems: Some(&systems),
-                results: self.sql_settings.sql_results,
-                close_pairs: self.sql_settings.sql_close_pairs,
-                // Parley's SQL add-on keeps the default keys (R-SQL-60).
-                keys: None,
-            };
-            window.set_assistant(
-                assistant_on,
-                &self.sql_settings.assistant,
-                self.api_keys.as_ref(),
-            );
-            let open = window.show(ctx, around);
-            if !window.user.trim().is_empty() {
-                self.sql_users
-                    .insert(session.clone(), window.user.trim().to_owned());
-            }
-            sql::hosting::keep(
-                window,
-                &session,
-                &mut self.settings,
-                &mut self.sql_scripts_kept,
-            );
-            if !open {
-                self.sql_window = None;
-            }
-        }
-        sql::hosting::notice_dialog(ctx, &mut self.sql_notice);
     }
 
     /// The keyboard shortcut sheet, while it is open (R-UI-17).
@@ -831,7 +722,7 @@ impl ParleyUi {
                 Function::RunMacro(name) => self.play(session, &name),
                 Function::Shortcuts => self.shortcut_sheet = Some(shortcuts::Sheet::default()),
                 // The terminal took the key, so a session is connected.
-                Function::Sql => self.open_sql_window(true),
+                Function::Sql => self.start_parley_sql(true),
                 Function::Key(_) | Function::CopyScreen | Function::Paste => {}
             }
         }
@@ -1142,9 +1033,7 @@ mod tests {
     }
 
     fn choose_terminal_font(harness: &mut Harness<'static, ParleyUi>, font: &str) {
-        harness.get_by_label("Tools").click();
-        harness.run();
-        harness.get_by_label("Settings…").click();
+        harness.get_by_label("Settings").click();
         harness.run();
         choose_terminal_font_on_open_dialog(harness, font);
     }
@@ -1239,9 +1128,7 @@ mod tests {
     fn restore_defaults_resets_only_the_page_shown() {
         // R-UI-8: the theme (Appearance) survives restoring the Terminal page.
         let mut harness = app_with(Vec::new());
-        harness.get_by_label("Tools").click();
-        harness.run();
-        harness.get_by_label("Settings…").click();
+        harness.get_by_label("Settings").click();
         harness.run();
         harness.get_by_label("Dark").click();
         harness.run();
@@ -1257,9 +1144,7 @@ mod tests {
     fn the_settings_dialog_keeps_its_place_from_frame_to_frame() {
         // R-UI-8: a dialog that grows each frame moves its buttons away from the pointer.
         let mut harness = app_with(Vec::new());
-        harness.get_by_label("Tools").click();
-        harness.run();
-        harness.get_by_label("Settings…").click();
+        harness.get_by_label("Settings").click();
         harness.run();
         let before = harness.get_by_label("Save").rect();
         harness.run_steps(5);
@@ -1323,8 +1208,8 @@ mod tests {
     }
 
     #[test]
-    fn the_menu_bar_starts_with_the_app_and_ends_with_help() {
-        // R-UI-10
+    fn the_menu_bar_starts_with_the_app_and_ends_with_the_settings_gear() {
+        // R-UI-10, R-UI-18
         let mut app = ParleyUi::default();
         app.set_logo(egui::ColorImage::filled([4, 4], egui::Color32::WHITE));
         let harness = Harness::builder()
@@ -1336,16 +1221,22 @@ mod tests {
         );
         let file = harness.get_by_label("File").rect();
         let tools = harness.get_by_label("Tools").rect();
-        let help = harness
-            .get_all_by_label("Help")
-            .map(|n| n.rect())
-            .find(|r| (r.center().y - file.center().y).abs() < 1.0)
-            .expect("Help in the menu bar");
+        let gear = harness.get_by_label("Settings").rect();
         assert!(
-            help.left() > tools.right() + 400.0,
-            "Help on the right: {help:?}"
+            (gear.center().y - file.center().y).abs() < 1.0,
+            "in the menu bar: {gear:?}"
         );
-        assert!(help.right() > 950.0, "at the edge: {help:?}");
+        assert!(
+            gear.left() > tools.right() + 400.0,
+            "the gear on the right: {gear:?}"
+        );
+        assert!(gear.right() > 950.0, "at the edge: {gear:?}");
+        assert!(
+            harness
+                .query_all_by_label("Help")
+                .all(|n| (n.rect().center().y - file.center().y).abs() >= 1.0),
+            "no Help menu (the Keys menu's Help key is another thing)"
+        );
     }
 
     /// An update checker that answers `found` and counts its calls; never GitHub.
@@ -1376,15 +1267,15 @@ mod tests {
         })
     }
 
-    /// Help ▸ Check for updates… (the Help menu, not the toolbar's Help key).
+    /// The gear's Settings, About, Check now (R-UI-18).
     fn check_for_updates(harness: &mut Harness<'static, ParleyUi>) {
-        harness
-            .get_all_by_label("Help")
-            .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
-            .expect("the Help menu")
-            .click();
+        harness.get_by_label("Settings").click();
         harness.run();
-        harness.get_by_label("Check for updates…").click();
+        harness.get_by_label("About").click();
+        harness.run();
+        if let Some(check) = harness.query_by_label("Check now") {
+            check.click();
+        }
     }
 
     /// Frames until `label` shows: the check runs on a thread.
@@ -1487,8 +1378,12 @@ mod tests {
         // R-UI-12
         let (checker, _) = fake_checker(Ok(newer_release()));
         let mut harness = app_checking(checker, Settings::default());
-        check_for_updates(&mut harness);
-        wait_for(&mut harness, "Copy download command");
+        // The check at start-up finds it; a second one from Check now would race with it.
+        wait_for(&mut harness, "Parley 9.9.9 is available");
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("About").click();
+        harness.run();
         harness.get_by_label("Copy download command").click();
         harness.run_steps(2);
         harness.get_by_label("parley_9.9.9_amd64.deb").click();
@@ -1659,10 +1554,27 @@ mod tests {
     }
 
     #[test]
+    fn settings_open_from_the_gear_not_from_tools_r_ui_18() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("Tools").click();
+        harness.run();
+        assert!(
+            harness.query_by_label("Settings…").is_none(),
+            "not in Tools"
+        );
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("Appearance");
+        assert!(harness.state().settings_dialog.is_some());
+    }
+
+    #[test]
     fn the_header_and_status_bar_are_there_before_connecting_without_the_keys_menu() {
         // R-UI-15, R-UI-16: one header row; the Keys menu only while connected.
         let harness = app_with(Vec::new());
-        for menu in ["File", "Edit", "View", "Tools", "Help", "Offline"] {
+        for menu in ["File", "Edit", "View", "Tools", "Settings", "Offline"] {
             harness.get_by_label(menu);
         }
         assert!(harness.query_by_label("Keys").is_none());
@@ -1859,9 +1771,7 @@ mod tests {
 
     /// Settings ▸ Add-ons, then the switch named `name`.
     fn switch_add_on_in_settings(harness: &mut Harness<'static, ParleyUi>, name: &str) {
-        harness.get_by_label("Tools").click();
-        harness.run();
-        harness.get_by_label("Settings…").click();
+        harness.get_by_label("Settings").click();
         harness.run();
         harness.get_by_label("Add-ons").click();
         harness.run();
@@ -1951,14 +1861,11 @@ mod tests {
             .set_macro_store(Box::new(test_support::macros_with("Jobs")));
         assert!(harness.state().macros.list().is_empty(), "folder not read");
         harness.run();
-        harness.get_by_label("Tools").click();
-        harness.run();
-        harness.get_by_label("Settings…");
+        // R-UI-18: with neither macros nor SQL, Tools would be empty, so it is not there.
+        assert!(harness.query_by_label("Tools").is_none());
         for item in ["Record macro", "Run macro", "Macros…"] {
-            assert!(harness.query_by_label(item).is_none(), "{item} in Tools");
+            assert!(harness.query_by_label(item).is_none(), "{item} shown");
         }
-        harness.get_by_label("Tools").click();
-        harness.run();
         harness.get_by_label("New session…").click();
         harness.run();
         assert!(harness.query_by_label("Run macro").is_none());
@@ -2022,11 +1929,9 @@ mod tests {
         assert!(harness.state().macro_manager.is_none());
     }
 
-    /// Tools ▸ Settings…, then the Keyboard page.
+    /// The gear's Settings, then the Keyboard page.
     fn open_keyboard_settings(harness: &mut Harness<'static, ParleyUi>) {
-        harness.get_by_label("Tools").click();
-        harness.run();
-        harness.get_by_label("Settings…").click();
+        harness.get_by_label("Settings").click();
         harness.run();
         harness.get_by_label("Keyboard").click();
         harness.run();
@@ -2355,77 +2260,63 @@ mod tests {
         harness.get_by_label("SQL…");
     }
 
-    #[test]
-    fn without_the_helper_or_a_working_java_the_sql_window_explains_r_sql_12() {
-        let (mut harness, _host) = connected_app();
+    /// Settings with the SQL add-on on, and a starter that keeps what it was asked to open.
+    fn with_sql_starter(
+        harness: &mut Harness<'static, ParleyUi>,
+    ) -> std::sync::Arc<std::sync::Mutex<Vec<SqlConnection>>> {
         let mut settings = Settings::default();
         settings.addons.set_enabled(AddOn::Sql, true);
-        harness.state_mut().set_settings(settings.clone());
-        harness.state_mut().open_sql_window(true);
+        harness.state_mut().set_settings(settings);
+        let started = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = std::sync::Arc::clone(&started);
+        harness.state_mut().set_sql_starter(Box::new(move |c| {
+            kept.lock().expect("not poisoned").push(c.clone());
+            Ok(())
+        }));
+        started
+    }
+
+    #[test]
+    fn tools_sql_starts_parley_sql_on_the_sessions_host_r_sql_70() {
+        // R-SQL-6's bug stays fixed: the menu's action ran while the frame held the
+        // connection, so it found no connection and did nothing.
+        let (mut harness, _host) = connected_app();
+        let started = with_sql_starter(&mut harness);
         harness.run();
-        harness.get_by_label_contains("installed without the SQL helper");
-        assert!(harness.state().sql_window.is_none());
+        harness.get_by_label("Tools").click();
+        harness.run();
+        harness.get_by_label("SQL…").click();
+        harness.run();
+        let profile = harness.state().current.clone().expect("a session in use");
+        let started = started.lock().expect("not poisoned").clone();
+        assert_eq!(started.len(), 1, "one Parley SQL");
+        assert_eq!(started[0].name, profile.name);
+        assert_eq!(started[0].host, profile.config.host);
+        assert_eq!(started[0].tls, profile.config.tls);
+        assert!(started[0].user.is_empty(), "Parley knows no user (D16)");
+    }
+
+    #[test]
+    fn when_parley_sql_cannot_start_parley_says_why_r_sql_70() {
+        let (mut harness, _host) = connected_app();
+        with_sql_starter(&mut harness);
+        harness.state_mut().set_sql_starter(Box::new(|_| {
+            Err("Parley SQL is not installed beside Parley.".into())
+        }));
+        harness.state_mut().start_parley_sql(true);
+        harness.run();
+        harness.get_by_label_contains("not installed beside Parley");
         harness.get_by_label("OK").click();
         harness.run();
-
-        // R-SQL-69: the Java is Parley SQL's, read when the window opens.
-        settings.java_path = "/no/such/java".to_owned();
-        harness
-            .state_mut()
-            .set_sql_settings_reader(Box::new(move || Some(settings.clone())));
-        harness
-            .state_mut()
-            .set_sql_helpers(Some(std::path::PathBuf::from("/some/helpers")));
-        harness.state_mut().open_sql_window(true);
-        harness.run();
-        harness.get_by_label_contains("needs Java 11 or later");
-        harness.get_by_label_contains("Eclipse Temurin");
-        assert!(harness.state().sql_window.is_none());
+        assert!(harness.query_by_label_contains("not installed").is_none());
     }
 
     #[test]
-    fn tools_sql_opens_from_the_menu_while_connected_r_sql_6() {
-        // The bug: the menu's action ran while the frame held the connection, so the window
-        // found no connection and did nothing.
-        let (mut harness, _host) = connected_app();
-        let mut settings = Settings::default();
-        settings.addons.set_enabled(AddOn::Sql, true);
-        harness.state_mut().set_settings(settings);
-        let parley_sql = Settings {
-            java_path: "/no/such/java".to_owned(),
-            ..Settings::default()
-        };
-        harness
-            .state_mut()
-            .set_sql_settings_reader(Box::new(move || Some(parley_sql.clone())));
-        harness
-            .state_mut()
-            .set_sql_helpers(Some(std::path::PathBuf::from("/some/helpers")));
+    fn without_a_connection_tools_sql_starts_nothing_r_sql_70() {
+        let mut harness = app_with(Vec::new());
+        let started = with_sql_starter(&mut harness);
+        harness.state_mut().start_parley_sql(false);
         harness.run();
-        harness.get_by_label("Tools").click();
-        harness.run();
-        harness.get_by_label("SQL…").click();
-        harness.run();
-        // Something answers: here, why the window cannot open with this Java.
-        harness.get_by_label_contains("needs Java 11 or later");
-    }
-
-    #[test]
-    #[ignore = "needs Java and the jars from make helper"]
-    fn with_java_and_the_helper_tools_sql_shows_the_sign_on_r_sql_6() {
-        let (mut harness, _host) = connected_app();
-        let mut settings = Settings::default();
-        settings.addons.set_enabled(AddOn::Sql, true);
-        harness.state_mut().set_settings(settings);
-        let helpers = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/helpers");
-        harness.state_mut().set_sql_helpers(Some(helpers));
-        harness.run();
-        harness.get_by_label("Tools").click();
-        harness.run();
-        harness.get_by_label("SQL…").click();
-        harness.run();
-        assert!(harness.state().sql_window.is_some(), "the window is open");
-        harness.get_by_label("Password");
-        harness.get_by_label("Connect");
+        assert!(started.lock().expect("not poisoned").is_empty());
     }
 }

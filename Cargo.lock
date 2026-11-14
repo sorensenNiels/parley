@@ -2653,7 +2653,6 @@ dependencies = [
  "parley-core",
  "parley-ui-egui",
  "rfd",
- "ron",
  "winresource",
 ]
 

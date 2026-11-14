@@ -5,8 +5,8 @@
 > [REQUIREMENTS.md](REQUIREMENTS.md) (done ones), and [FEATURES.md](FEATURES.md) says how each was verified.
 > Requirement IDs (`R-SQL-7`) and decisions (`D20`) below point there. The terminal is [../PRD.md](../PRD.md).
 
-**Status:** draft, written 2026-11-14 when the SQL plan got documents of its own, after Phase 12. Everything below
-is built; none of it is verified in the running app yet.
+**Status:** written 2026-11-14 when the SQL plan got documents of its own; updated after Phase 14. Everything below
+is built and verified on Linux under WSL against the owner's IBM i 7.3 (2026-11-14); Windows and macOS not yet.
 
 ## 1. Summary
 
@@ -50,15 +50,19 @@ library list, `LABEL ON` headings) in a fast desktop window.
 
 | Area | Capability | IDs | State |
 |---|---|---|---|
-| Connection | A Java helper with JTOpen, Java found or explained; sign-on, TLS, commit control | R-SQL-3..5, R-SQL-11..13 | Built |
-| Writing | Editor in colour, scripts in tabs and files, format, find and replace, a visible Run selection | R-SQL-7, R-SQL-19..23, R-SQL-28 | Built |
-| Results | Tabs, row detail, filter, headings, Copy as, hex, compare, charts; below or beside the editor | R-SQL-8, R-SQL-14..16, R-SQL-29, R-SQL-38, R-SQL-39, R-SQL-41, R-SQL-42, R-SQL-49 | Built |
-| The database | Schema browser, DDL, completion, names on hover | R-SQL-33..37 | Built |
-| IBM i tools | `CL:` commands, message help and job log, library list and schema | R-SQL-30..32 | Built |
-| Reuse | Snippets with placeholders, starters from IBM i Services; parameter markers | R-SQL-24..27, R-SQL-40 | Built |
-| Several systems | One read-only statement on several saved sessions (the add-on only) | R-SQL-43 | Built |
-| Assistant | Plain words to SQL, names only, from Anthropic, OpenAI, Gemini, Mistral or a local llama.cpp | R-SQL-44, R-SQL-48, R-ADD-3 | Built |
-| Parley SQL | The program on its own: saved connections, its own settings | R-SQL-45..47 | Built |
+| Connection | A Java helper with JTOpen, Java found or explained; sign-on, TLS, commit control | R-SQL-3..5, R-SQL-11..13 | Verified |
+| Writing | Editor in colour, scripts in tabs and files, format, find and replace, a visible Run selection | R-SQL-7, R-SQL-19..23, R-SQL-28 | Verified |
+| Results | Tabs, row detail, filter, headings, Copy as, hex, compare, charts; below or beside the editor | R-SQL-8, R-SQL-14..16, R-SQL-29, R-SQL-38, R-SQL-39, R-SQL-41, R-SQL-42, R-SQL-49 | Verified |
+| The database | Schema browser, DDL, completion, names on hover | R-SQL-33..37 | Verified |
+| IBM i tools | `CL:` commands, message help and job log, library list and schema | R-SQL-30..32 | Verified |
+| Reuse | Snippets with placeholders, starters from IBM i Services; parameter markers | R-SQL-24..27, R-SQL-40 | Verified |
+| Several systems | One read-only statement on several saved sessions (the add-on only) | R-SQL-43 | Verified |
+| Assistant | Plain words to SQL, names only, from Anthropic, OpenAI, Gemini, Mistral or a local llama.cpp | R-SQL-44, R-SQL-48, R-ADD-3 | Verified |
+| Parley SQL | The program on its own: saved connections, its own settings | R-SQL-45..47 | Verified |
+| Layout | Results below or beside the editor, the editor's height, the side panel folded | R-SQL-49..51 | Verified |
+| Editing | Comment, indent, move and duplicate lines, pairs, matching bracket, go to line, keyword case, zoom | R-SQL-52..59 | Verified |
+| Editor, deeper | Gutter with line numbers, ▶ and outcomes; completion on Ctrl+Space and with snippets; a routine's parameters; the word under the cursor, Ctrl+D; trailing blanks trimmed (D28) | R-SQL-61..68 | Verified |
+| Shortcuts and settings | Parley SQL's Shortcuts page; Parley SQL's settings kept in Parley SQL only | R-SQL-60, R-SQL-69 | Verified |
 
 ## 6. Solution overview
 

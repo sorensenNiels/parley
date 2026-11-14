@@ -1,7 +1,8 @@
 //! Settings (R-UI-6, R-UI-8, R-UI-11, R-KEY-2, R-ADD-1): theme, text size, density, the
-//! terminal font, keyboard maps, add-ons and looking for new versions, with what this build is on the About page, in a dialog
-//! from Tools ▸ Settings… laid out as Tortuga's (D12): pages listed on the left, and on the
-//! right groups of rows, each a name with a short line about it and the control beside it.
+//! terminal font, keyboard maps, add-ons and looking for new versions, with what this build is
+//! on the About page, in a dialog from the gear in the header (R-UI-18) laid out as Tortuga's
+//! (D12): pages listed on the left, and on the right groups of rows, each a name with a short
+//! line about it and the control beside it.
 //! Changes show at once; Cancel puts the old ones back.
 
 mod assistant;
@@ -207,10 +208,9 @@ const SQL_SECTIONS: Sections = &[
     ("App", &[Page::Sql, Page::Assistant, Page::About]),
 ];
 
-/// Said under Parley's add-ons while SQL is on (R-SQL-69).
-pub(crate) const SQL_SETTINGS_ELSEWHERE: &str = "The SQL window uses Parley SQL's settings: Java, rows at a \
-     time, query timeout, where results go, shared snippets and the SQL assistant. Change them \
-     in Parley SQL's Settings.";
+/// Said under Parley's add-ons while SQL is on (R-SQL-69, R-SQL-70).
+pub(crate) const SQL_SETTINGS_ELSEWHERE: &str = "SQL… in the Tools menu starts Parley SQL \
+     on the session's host. Its settings, such as Java and the SQL assistant, are in Parley SQL.";
 
 /// Where the source and the issues are.
 const REPOSITORY: &str = "https://github.com/sorensenNiels/parley";
@@ -306,7 +306,7 @@ impl Dialog {
         self.keyboard.take_renames()
     }
 
-    /// Opens on the About page (Help ▸ Check for updates…).
+    /// Opens on the About page (Parley SQL's Help ▸ Check for updates…).
     pub fn on_about_page(mut self) -> Self {
         self.page = Page::About;
         self

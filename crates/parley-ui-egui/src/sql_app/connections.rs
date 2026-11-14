@@ -64,6 +64,19 @@ impl SqlConnection {
         }
     }
 
+    /// The connection to Parley's session `name` on `config`'s host, for Tools ▸ SQL… (R-SQL-70).
+    /// Parley knows no user (D16); Parley SQL keeps the last one per connection.
+    pub fn for_session(name: &str, config: &SessionConfig) -> Self {
+        Self {
+            name: name.to_owned(),
+            host: config.host.trim().to_owned(),
+            tls: config.tls,
+            ca_file: config.ca_file.clone(),
+            code_page: config.code_page,
+            user: String::new(),
+        }
+    }
+
     /// Its card on the start screen: the host, TLS and the user.
     pub fn entry(&self) -> Entry<'_> {
         let mut address = self.host.clone();

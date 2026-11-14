@@ -120,6 +120,30 @@ impl ParleySqlUi {
             .position(|c| c.name.eq_ignore_ascii_case(name))
     }
 
+    /// The saved connection to `wanted`'s host (the same host, ignoring case, and the same TLS),
+    /// or `wanted` saved as a new one under a name no other connection has (R-SQL-70: Parley's
+    /// Tools ▸ SQL…). Returns its index.
+    pub fn connection_for(&mut self, wanted: SqlConnection) -> usize {
+        let same = |c: &SqlConnection| {
+            c.host.trim().eq_ignore_ascii_case(wanted.host.trim()) && c.tls == wanted.tls
+        };
+        if let Some(index) = self.connections.iter().position(same) {
+            return index;
+        }
+        let mut connection = wanted;
+        if self.connection_index(&connection.name).is_some() {
+            let base = format!("{} ({})", connection.name, connection.host.trim());
+            connection.name.clone_from(&base);
+            let mut n = 2;
+            while self.connection_index(&connection.name).is_some() {
+                connection.name = format!("{base} {n}");
+                n += 1;
+            }
+        }
+        self.connections.push(connection);
+        self.connections.len() - 1
+    }
+
     /// The title bar: the connection in use, then the program.
     pub fn title(&self) -> String {
         let name = Program::ParleySql.name();
@@ -143,7 +167,6 @@ impl ParleySqlUi {
             &connection.config(),
             self.helpers.as_deref(),
             &connection.user,
-            &self.settings,
             &self.settings,
         ) {
             Ok(window) => {
@@ -437,6 +460,46 @@ mod tests {
         let harness = app_with(vec![prod()]);
         harness.get_by_label("Offline");
         assert_eq!(harness.state().title(), "Parley SQL");
+    }
+
+    #[test]
+    fn a_host_from_parley_uses_its_saved_connection_or_saves_a_new_one_r_sql_70() {
+        let saved = SqlConnection {
+            name: "Prod".to_owned(),
+            host: "IBMI.example.com".to_owned(),
+            user: "NIELS".to_owned(),
+            ..SqlConnection::default()
+        };
+        let mut app = ParleySqlUi::new(vec![saved]);
+        let same_host = SqlConnection {
+            name: "Produktion æøå".to_owned(),
+            host: "ibmi.example.com ".to_owned(),
+            ..SqlConnection::default()
+        };
+        assert_eq!(
+            app.connection_for(same_host),
+            0,
+            "the saved one, with its user"
+        );
+        assert_eq!(app.connections().len(), 1);
+
+        let other = SqlConnection {
+            name: "Prod".to_owned(),
+            host: "test.example.com".to_owned(),
+            ..SqlConnection::default()
+        };
+        assert_eq!(app.connection_for(other.clone()), 1);
+        assert_eq!(app.connections()[1].name, "Prod (test.example.com)");
+        let plain = SqlConnection {
+            tls: false,
+            ..other
+        };
+        assert_eq!(
+            app.connection_for(plain),
+            2,
+            "without TLS is another connection"
+        );
+        assert_eq!(app.connections()[2].name, "Prod (test.example.com) 2");
     }
 
     #[test]

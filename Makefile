@@ -83,7 +83,9 @@ setup-windows:
 
 # ---------------------------------------------------------------- run
 
+# Builds Parley SQL too: Tools > SQL... starts it from beside Parley (R-SQL-70)
 run:
+	cargo build -p $(APP) --bins
 	$(RUN_ENV)cargo run -p $(APP) -- $(HOST)
 
 # Parley SQL, the SQL window on its own (R-SQL-45); CONNECTION= opens a saved connection's sign-on

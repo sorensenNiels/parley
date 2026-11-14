@@ -8,9 +8,20 @@
 > been checked in the running app on at least one OS. Note which OSes were checked. Then move the
 > requirement's row from the roadmap to [REQUIREMENTS.md](REQUIREMENTS.md).
 
-**Verified on:** nothing yet; what was checked so far is under each entry below.
+**Verified on:** Linux under WSL (the owner, 2026-11-14), and the owner's IBM i 7.3 as NODEJT400 (D22). Windows and macOS not yet.
 
 ## In progress
+
+None.
+
+## Implemented
+
+- **Checked on the owner's IBM i** (2026-11-14, 7.3, as NODEJT400 without TLS, D22, `sqlprobe`): `--sql` signs on
+  through the helper and JTOpen 21.0.7 and reads every type, more rows in blocks, and SQL0204 as an error (R-SQL-3,
+  R-SQL-4, R-SQL-11..13); `--tools` runs CL with CPF2103 read, message help from the job log and the message file in
+  Danish, the job log, library list and current schema, objects, columns, DDL and parameter markers (R-SQL-30..35,
+  R-SQL-40); `--snippets` runs all 13 starters (R-SQL-27); the `SYSPARMS` query of R-SQL-65 reads `QSYS2.QCMDEXC` as
+  three signatures, kept as a test. The parts seen only in the window are left to the owner's check.
 
 - **R-SQL-61..68** (2026-11-14): the editor, deeper (Phase 14, D28), built. **Automated** (`make test`): in
   `parley-core` the word under the cursor and its places (quoted, unquoted, æøå, not in strings), Ctrl+D's next place
@@ -19,15 +30,14 @@
   by statement text and said on hover, a statement's first line, the ▶ that selects and runs its statement, the
   outcome of a run and of an error, Ctrl+Space and a list that stays open while typing, a snippet chosen from the list,
   keywords kept in a long list, Ctrl+D, Save trimming the file and the script, the word's places on a background, the
-  call found and Esc hiding its box. **Left:** seen in the running app (both programs, light and dark, wrapped lines,
-  zoom); the `SYSPARMS` query checked on the owner's IBM i (`make probe-sql`, D22).
+  call found and Esc hiding its box. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-60** (2026-11-14): Parley SQL's Shortcuts page, built. **Automated** (`make test`): every action has its
   own keys, which read back and are allowed; only changed actions are kept; typing and text-field keys are refused;
   Ctrl+Shift+F is taken as Format, not Find; a free key replaces or joins at once, a taken one moves only when
   confirmed; in kittest the page changes Go to line to Ctrl+Shift+G by click and press, Parley SQL's settings list
   the page and keep Save in place, and a window given F3 for Find opens the find bar on F3 and not on Ctrl+F.
-  **Left:** seen in the running app (light and dark), keys kept after a restart.
+  **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-52..59** (2026-11-14): the editor, handier (Phase 13), built. **Automated** (`make test`): the text
   changes in `parley_core::sql::edit` (comment, indent, outdent, Tab stops, move and duplicate lines, pairs, the
@@ -35,20 +45,17 @@
   Alt+↓ and Ctrl+Shift+D reach the text, `(` closes itself only with the setting on, Ctrl+G goes to a line,
   Ctrl+Shift+U and the zoom keys work, the bracket pair is marked and a lone one in the error colour. Fixed on the way:
   the editor kept the keyboard when Automatic moved the results (R-SQL-49), and Enter in the find bar no longer types
-  a line break over the match (R-SQL-23). **Left:** seen in the running app (both programs, light and dark), Ctrl+/
-  on a Danish keyboard, Ctrl+wheel.
+  a line break over the match (R-SQL-23). **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-50, R-SQL-51** (2026-11-14): the editor's height and folding the side panel, built. **Automated**
   (`make test`): the editor's height stays within its limits; in kittest dragging the divider below the editor down
   by 80 points moves the results down by as much, dragging it past the bottom leaves the results in the window, and
-  the side panel folds (the editor gets wider, History is gone) and opens again. **Left:** seen in the running app
-  (both programs, light and dark).
+  the side panel folds (the editor gets wider, History is gone) and opens again. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-49** (2026-11-14): results below or beside the editor, built. **Automated** (`make test`): Automatic is
   below under 1100 points and beside from there; each column keeps its least width; the setting is kept by name and chosen on the Appearance page; in
   kittest the Results tab is under the Run button when Below and to its right when Beside, where the editor fills the column down to the Run buttons, with a divider that stays
-  in place, and Automatic shows the divider only in a wide window. **Left:** seen in the running app (both programs,
-  light and dark, dragging the divider).
+  in place, and Automatic shows the divider only in a wide window. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-48** (2026-11-14): the SQL assistant's settings page and providers, built. **Automated** (`make test`):
   each provider has an address and model unless given, a local one needs no key; the Anthropic and OpenAI formats
@@ -60,9 +67,7 @@
   Add-ons page no longer has the switch. **Seen** (WSL2): the engine, through `examples/askprobe.rs` and a
   made-up library, asked the owner's `llama-server` (b8681, Qwen2.5-Coder-7B Q4_K_M): it listed the tables, read two
   tables' columns and answered with a correct join in four rounds (~40 s). Without `tool_choice: "required"` that model
-  wrote its calls as text, so llama.cpp now forces calls. **Left:** the owner asks a question in the SQL window with
-  each provider (a real key, and the `llama-server`), checks the page in light and dark and the keychain on Windows, macOS and Linux,
-  then move it to REQUIREMENTS.md.
+  wrote its calls as text, so llama.cpp now forces calls. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-45, R-SQL-46, R-SQL-47** (2026-11-14): Parley SQL, built (`make run-sql`). **Automated** (`make test`): in
   kittest, the header has the name, File and Help and a gear at the right end, and no Tools menu; the status bar says
@@ -71,23 +76,21 @@
   the helper says why; an open window fills the main window under the header, says Not signed on, and Disconnect goes
   back to the start screen; a signed-on window has no Run on… although other connections are saved (D26); a connection needs a unique name and a host, keeps no password, and a rename keeps its
   history and pins. **Seen** in `--screenshot`s of the start screen and of a connection's sign-on in the main window
-  (WSL2, dark). **Left:** the owner signs on and runs statements in Parley SQL on Windows, macOS and Linux, checks
-  light and dark and the packaged program, then move them to REQUIREMENTS.md.
+  (WSL2, dark). **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-1** (2026-11-13): host-server records and the port mapper, built (`parley_core::hostserver`,
   `net::hostserver`). **Automated** (`make test`): the sign-on replies recorded from the owner's IBM i and PUB400 read
   into their parameters; a record encodes and decodes to itself (`æøå` in a parameter); broken records (empty, short,
   wrong length, a template or parameter past the end, an unknown server) are errors; the port mapper is asked by name
   and its port used, `-` is "not known", odd replies are errors; with no port mapper the caller falls back. **Seen:**
-  `make probe-sql` now uses this code and reads PUB400 as before. **Left:** nothing to see in the app until R-SQL-6.
+  `make probe-sql` now uses this code and reads PUB400 as before. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-13** (2026-11-13): JTOpen checked, fetched and shipped, built. JTOpen's licence (IBM Public License 1.0,
   read from `jt400.jar` 21.0.7) allows shipping the unmodified jar with the notices (D20); `scripts/fetch-jt400.sh`
   fetches 21.0.7 from Maven Central and checks its SHA-256; the installers carry `helpers/` (the helper, JTOpen,
   `NOTICE.txt`, `JTOpen-LICENSE.html`) and the release workflow builds them with Java; Settings ▸ About and README.md
   name IBM's copyright; `make verify` builds the helper (JDK in the setup scripts, a Java job in CI). **Seen:** a
-  Linux `.deb` holds them in `/usr/lib/parley/helpers`, where the app looks (WSL2). **Left:** the Windows and macOS
-  installers, checked by the owner.
+  Linux `.deb` holds them in `/usr/lib/parley/helpers`, where the app looks (WSL2). **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-12** (2026-11-13): Java found or explained, built (`sql::java`, Settings ▸ Add-ons). A path named in
   the settings is used alone (a wrong one is named, not passed over), else `JAVA_HOME`, then `PATH`; version 11 or
@@ -114,8 +117,7 @@
   the selection or the statement under the cursor; `${name}`/`${name:default}` asked for in a form that offers the
   last values; 13 "did you know" IBM i Services starters, read-only. **Automated:** parsing, writing back, search,
   placeholders and filling (`æøå`) in parley-core; the panel with a store in memory, the save and values dialogs
-  keep their buttons in place, a name cannot leave its folder (parley-app). **Left:** `sqlprobe --snippets` on the
-  owner's IBM i (each starter on 7.3); the owner tries the panel, in light and dark.
+  keep their buttons in place, a name cannot leave its folder (parley-app). **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-30..33** (2026-11-13): IBM i tools and the second connection, built. `CL:` statements run through
   `QSYS2.QCMDEXC` (coloured, kept as written in the history, DLT/CLR/END commands confirmed); Explain on an error
@@ -123,8 +125,7 @@
   list in the top bar (click sets the schema, Add runs `CL: ADDLIBLE`), read after Connect and after `SET`/`CL:`;
   a second helper signs on only after the first did, its job named in the top bar. **Automated:** parsing, guard,
   colour and format of CL; message IDs and format codes (`æøå`); Explain's fallback; the job context; the second
-  connection's states and that a refused first sign-on stops it. `sqlprobe --tools` ran on the owner's 7.3. **Left:**
-  the owner tries them in the app (two QZDASOINIT jobs in WRKACTJOB).
+  connection's states and that a refused first sign-on stops it. `sqlprobe --tools` ran on the owner's 7.3. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-34, R-SQL-35** (2026-11-13): the schema browser, built. A Database tab beside History and Snippets: the
   SQL job's library list and the libraries pinned (kept per saved session), each opening to tables, views,
@@ -140,7 +141,7 @@
   schema or of `library.`, the libraries and SQL keywords; Up/Down, Tab or Enter, Esc. Names come from the
   browser's cache; what is missing is asked on the second connection and offered when answered. **Automated:**
   the name typed and its qualifier (not in text or comments, `æøå`), tables and aliases from FROM/JOIN, what is
-  offered from the cache, replacing the typed part, and the keys in a kittest. **Left:** the owner tries it.
+  offered from the cache, replacing the typed part, and the keys in a kittest. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-38, R-SQL-39** (2026-11-14): Copy as and binary values, built. Beside Copy, "Copy as" copies the selected
   rows (or all shown) as a Markdown table, `INSERT` statements (into the table the columns come from, else
@@ -148,7 +149,7 @@
   or `BINARY` value shows as hex in groups of four beside its EBCDIC text, in the session's code page or another
   chosen. **Automated:** each format's escaping, numbers and nulls (`æøå`, `O'Brien`, `|`); the dump's lines and
   unprintable bytes; Copy as takes the selection. **Checked:** JTOpen's type names for both on the owner's 7.3
-  (`CHAR () FOR BIT DATA`, `BINARY`), `'Æble'` arriving as `7B829385`. **Left:** the owner tries both in the app.
+  (`CHAR () FOR BIT DATA`, `BINARY`), `'Æble'` arriving as `7B829385`. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-40** (2026-11-14): a form for parameter markers, built. A statement with `?` or `:name` markers (not in
   strings, names or comments, never in `CL:`) opens a form first, a field per `?` and per name, each with a NULL
@@ -156,7 +157,7 @@
   values come back next time for the same statement in that window; Cancel stops what was queued. **Automated:**
   markers and their slots (`:name` twice, `æøå`, quotes, comments, `12:30`), the request's `params`, the form's
   buttons in place and its values, the window waiting for it. **Checked:** `sqlprobe --tools` on the owner's 7.3
-  as NODEJT400: text, a number, a name used twice and null came back right. **Left:** the owner tries it.
+  as NODEJT400: text, a number, a name used twice and null came back right. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-41, R-SQL-42** (2026-11-14): compare and charts, built. "Compare with…" over the result tabs ticks the key
   columns (the first by default) and lists the other results with the same column names; the comparison opens as
@@ -165,7 +166,7 @@
   D23): the first text or date column along the bottom, up to four numeric columns at first, others under
   Columns. **Automated:** matching by key in any row and column order, several keys, duplicates, mismatched
   columns or keys (`æøå`); the comparison tab and its marks; chart data (labels, gaps, row numbers) and a kittest
-  switching Table, Chart, Lines. **Left:** the owner tries both, in light and dark.
+  switching Table, Chart, Lines. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-43** (2026-11-14): one statement on several systems, built. "Run on…" in the run row lists the other saved
   sessions; ticking one asks for its user and password (used once, D16) and signs on in a helper of its own;
@@ -173,7 +174,7 @@
   (`SELECT`, `VALUES`, `WITH`; not `CL:`, not with markers); every system's rows get a tab named after it, its first
   block only (the cursor is closed; "more not fetched" said), errors in Messages under the system's name.
   **Automated:** what reads, sign-on and answers per system with its name, ticking and unticking, the window's
-  refusals and tabs, the sign-on dialog's buttons in place. **Left:** the owner tries it with two saved sessions.
+  refusals and tabs, the sign-on dialog's buttons in place. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-44, R-ADD-3** (2026-11-14): the SQL assistant, built. "SQL assistant" in Settings ▸ Add-ons, off by
   default; on, an Ask row over the editor says what is sent and where. A question goes to Claude Opus 5.5
@@ -184,13 +185,13 @@
   `ANTHROPIC_API_KEY` when asking and is dropped after. **Automated:** the request (model, tools, fallback, no
   sampling settings), replies (lookups with thinking blocks sent back unchanged, the answer, words only, refusal,
   cut off), HTTP errors said plainly, lookups answered from the cache and waiting while it is read, the script
-  text, no key, cancel, the add-on switch. **Left:** a real question with the owner's key (it costs a few cents).
+  text, no key, cancel, the add-on switch. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-37** (2026-11-13): names on hover, built. Hovering a table or view name in the editor (or its alias)
   shows its qualified name, kind, text and up to 25 columns with type and heading, from the browser's cache (read
   when missing). **Automated:** the name and library under the pointer (not in comments, `æøå`), aliases, columns
   of an alias left alone. **Checked:** completion and hover against the owner's 7.3 as NODEJT400 (D22): 9 tables
-  after `NODEJT400.`, 4 columns after `x.`, the hover text. **Left:** the owner tries both in the app.
+  after `NODEJT400.`, 4 columns after `x.`, the hover text. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-14..16, R-SQL-18** (2026-11-13): more from results, built (`sql/results`, `sql/grid`). A tab per query
   (up to 10, the oldest closing first, each with its sort, filter and Fetch more); a row's values one under another
@@ -200,7 +201,7 @@
   **Automated:** tabs (newest shown, ten kept, fetch into the right tab, closing), filter with `æøå` and a hidden
   selection, the detail stepping and stopping at the ends, widths fitted within limits, limits in each request; drawn:
   a row's number selects it and Enter shows "Row 1 of 2". Two bugs found by these tests: the row's double-click area
-  covered its number (no selection), and a focused number took Enter as a click. **Left:** the owner's use.
+  covered its number (no selection), and a focused number took Enter as a click. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-19..23** (2026-11-13): the editor, built (`sql/editor`, `sql::text::highlight` and `format`). Keywords,
   strings, names, numbers and comments in Tortuga's code colours (light and dark); scripts in tabs kept per saved
@@ -209,7 +210,7 @@
   replace (Ctrl+H), Esc closing the bar before it cancels a statement. **Automated:** highlighting (strings,
   comments and names are never keywords), formatting (clauses, AND/OR, joins, nested selects, kept strings and
   comments, formatting twice changes nothing), find ignoring case for `ÆØÅ`, replace all, scripts kept and restored
-  with whether they changed, closing asks only when changed; drawn: Ctrl+F and Esc, Ctrl+T. **Left:** the owner's use.
+  with whether they changed, closing asks only when changed; drawn: Ctrl+F and Esc, Ctrl+T. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-6..10** (2026-11-13): the SQL window, built (`sql`, `sql/grid` in the UI; `sql::text` and
   `sql::runner` in the engine). Its own OS window (egui viewport); sign-on asked each time, the password taken out of
@@ -220,15 +221,14 @@
   SQL add-on, off by default; Tools ▸ SQL… and the `sql` function. **Automated:** statement splitting and the
   guard against strings, names and comments; the runner with the real helper; the window's logic from answers as
   the helper gives them; the sign-in form and the ready window drawn (kittest), the Run button keeping its place.
-  **Left:** the owner's use against their IBM i on each OS, then these requirements to REQUIREMENTS.md.
+  **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-11** (2026-11-13): the SQL helper and its protocol, built (`helpers/sql`, `sql::protocol`,
   `sql::helper`). **Automated:** `make helper` compiles it with warnings as errors, runs its self-test (JSON both
   ways, broken JSON, hex, times with seconds) and Rust tests that start it (hello in protocol 1; a statement before
   connecting is an SQL error); the protocol is tested sans-I/O with answers the helper gave. **Seen:** a connect to a
   host where nothing listens answers SQLSTATE 08001 after the 30 s login timeout (5 s in the test), every request
-  is answered before the helper ends, and the password is in neither its output nor its errors. **Left:** the
-  owner's run of `make probe-sql HOST=… ARGS="--sql USER"` against their IBM i (R-SQL-3, R-SQL-4).
+  is answered before the helper ends, and the password is in neither its output nor its errors. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-SQL-2** (2026-11-13): sign-on to the sign-on server, built (`hostserver::signon`, `hostserver::substitute`,
   `net::hostserver::sign_on`). The RFC 4777 substitute (DES, SHA-1) is restored from R-NET-7 with its RFC test
@@ -242,13 +242,8 @@
   with `make probe-sql … ARGS="--sign-on USER"` at the first attempt; the request is now a fixture the encoder must
   match byte for byte, and the reply (signed on, CCSID 277) another. **Not verified:** SHA-1 against a real host and
   a sign-on over TLS (no PUB400 user to be had); the TLS handshake and exchange of attributes over TLS were seen on
-  PUB400 (R-NET-8), and SHA-1 rests on the RFC 4777 test vector. **Left:** the SQL window (R-SQL-6) for the app.
+  PUB400 (R-NET-8), and SHA-1 rests on the RFC 4777 test vector. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
 
 - **R-NET-8** (2026-11-13): `make probe-sql`, built and run against the owner's IBM i and PUB400 (WSL2): the port
   mapper, the sign-on server's attributes (release, password level), the database host server, DRDA's EXCSAT, Mapepire
-  and SSH were each identified or reported unreachable, with no sign-on. **Left:** the owner's review, then move
-  R-NET-8 to REQUIREMENTS.md.
-
-## Implemented
-
-None yet.
+  and SSH were each identified or reported unreachable, with no sign-on. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).

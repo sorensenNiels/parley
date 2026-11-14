@@ -2,7 +2,7 @@
 //! name, File and Help; on the right a gear for Settings, the connection in use and a newer
 //! version. They only report what the operator chose, as an [`Action`].
 
-use egui::{Button, MenuBar, RichText, Sense, Ui};
+use egui::{MenuBar, RichText, Sense, Ui};
 
 use super::connections::SqlConnection;
 use crate::menu::{self, Program};
@@ -53,7 +53,7 @@ pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
             }
         }
         theme::button_row(ui, |ui| {
-            if gear(ui) {
+            if menu::gear(ui) {
                 action = Some(Action::Settings);
             }
             if let Some(chosen) = connection_pill(ui, header) {
@@ -119,15 +119,6 @@ fn help_menu(ui: &mut Ui, _header: &Header<'_>) -> Option<Action> {
         ui.add_enabled(false, icons::button(icons::INFO, &version));
     });
     action
-}
-
-/// The gear at the right end of the header; true when clicked.
-fn gear(ui: &mut Ui) -> bool {
-    let muted = theme::palette(ui).muted;
-    let button = Button::new(icons::icon(icons::GEAR).color(muted)).frame_when_inactive(false);
-    icons::add_named(ui, true, button, "Settings")
-        .on_hover_text("Settings")
-        .clicked()
 }
 
 /// The connection in use (as Parley's session pill, R-UI-15): a dot for where the window is,
