@@ -35,7 +35,7 @@ as its recorded exception (D20).
 | Phase 12: the assistant's providers | Done, verified (2026-11-14, Linux under WSL): Settings ▸ SQL assistant in both programs, with the switch, the provider (Anthropic, OpenAI, Google Gemini, Mistral, llama.cpp on a local `llama-server`, or any OpenAI-compatible server), the model and address, and the API key in the keychain (R-SQL-48); D27. |
 | Phase 13: the editor, handier | Done, verified (2026-11-14, Linux under WSL): asked by the owner: comment lines (R-SQL-52), indent and outdent (R-SQL-53), move and duplicate lines (R-SQL-54), brackets and quotes that close themselves (R-SQL-55), the matching bracket (R-SQL-56), go to a line (R-SQL-57), keyword case (R-SQL-58), zoom the editor (R-SQL-59); then Parley SQL's Shortcuts page (R-SQL-60). |
 | Phase 14: the editor, deeper | Done, verified (2026-11-14, Linux under WSL): from IDEA-34 (the owner): on egui's text field with a gutter of Parley's own (D28): line numbers (R-SQL-61), a ▶ and the last outcome per statement (R-SQL-62), completion on demand and with snippets (R-SQL-63, R-SQL-64), a routine's parameters while it is called (R-SQL-65), the word under the cursor marked (R-SQL-66), Ctrl+D (R-SQL-67), trailing blanks trimmed on save (R-SQL-68). |
-| Phase 15: data transfer | Built, to check in the running app (2026-11-15): every row to CSV or Excel (R-SQL-71, R-SQL-72), a CSV file into a table, all or nothing (R-SQL-73); D31. |
+| Phase 15: data transfer | Done, verified (2026-11-15, Linux under WSL): every row to CSV or Excel (R-SQL-71, R-SQL-72), a CSV file into a table, all or nothing (R-SQL-73); D31. |
 
 ## 4. Phases
 
@@ -131,7 +131,7 @@ R-SQL-64), a routine's parameters (R-SQL-65), the word under the cursor and Ctrl
 blanks (R-SQL-68). The editor stays egui's text field; the gutter is drawn beside it from the rows it laid out
 (D28). Folding and several cursors, which need an editor of Parley's own, stay in IDEA-34.
 
-### Phase 15 — Data transfer (built)
+### Phase 15 — Data transfer (done)
 
 From IDEA-26 (the owner, 2026-11-14): every row of a result or a table to a CSV or Excel file (R-SQL-71, R-SQL-72),
 and a CSV file into a table, all or nothing (R-SQL-73), as Access Client Solutions' Data Transfer does (D31).
@@ -147,11 +147,7 @@ Open requirements, in the order they are planned, as `| ID | Requirement | Phase
 ones come from [IDEAS.md](IDEAS.md). Areas: `SQL` the SQL window, its helper and its host-server client (D19); a few
 rows from Parley's areas belong here too: `ADD` (the assistant's add-on switch) and `NET` (the SQL probes).
 
-| ID | Requirement | Phase |
-|---|---|---|
-| R-SQL-71 | **Download every row** (2026-11-14, draft; IDEA-26, D31). A result tab's "Download…" (beside Export…) and the schema browser's "Download…" on a table or view (which runs `SELECT * FROM lib.table`) write every row of the query to a file the operator picks in the file window, not only the rows fetched: the window fetches the rest of the open cursor in batches of "Rows at a time" (R-SQL-18) and writes each batch as it comes, so memory stays small. The format is CSV (UTF-8, comma, a header row of field names, quoted as Export… does) or Excel (R-SQL-72), chosen in the dialog with a switch for "IBM i column headings as the first row" (R-SQL-29) instead of the field names. The grid's filter and sort do not apply: the file holds the query's rows in the host's order. While it runs, the run row shows "Downloading… *n* rows" with Cancel; Cancel stops and removes the part written. When done, Messages says how many rows went to which file. A tab's download takes the rest of its cursor, so the tab offers no Fetch more afterwards. | 15 |
-| R-SQL-72 | **Excel files** (2026-11-14, draft; D31). Download's Excel format writes an `.xlsx` file (with `rust_xlsxwriter`; no Excel needed): one sheet named after the table, or "Result", with a bold header row that stays in view. Numbers are numbers (DECIMAL and NUMERIC with more than 15 significant digits are written as text, so no digit is lost), DATE and TIMESTAMP are Excel dates shown in ISO form, TIME is text, NULL is an empty cell, binary columns are hex (R-SQL-39). Past Excel's 1 048 576 rows a sheet, the rows go on in a new sheet ("Result (2)"). | 15 |
-| R-SQL-73 | **Upload a CSV file into a table, all or nothing** (2026-11-14, draft; IDEA-26, D31). The schema browser's "Upload CSV…" on a table (and "Upload CSV…" in the SQL window's top bar, which asks for the library and table) opens a dialog: the file (UTF-8, a BOM allowed), "First row is column names" (on), the separator (found from the first line: comma, semicolon or tab; changeable), and a preview of the first 10 rows under the table's columns, matched by name (ignoring case) or, without names, by position. Columns of the file that match none, and columns of the table left out, are listed; a column the table needs (NOT NULL without a default) left out is an error before anything is sent. An empty field is NULL where the column allows it. Upload inserts every row in one transaction, whatever the window's autocommit (R-SQL-5): the helper prepares one `INSERT` and sends the rows in batches; when every row went in it commits, otherwise it rolls back and the dialog says which row of the file failed, which column if known, and the host's message (a table that is not journaled says so, SQL7008). Progress shows rows sent with Cancel, which rolls back. When done, Messages says how many rows went into which table. While the window has changes not committed (R-SQL-5) the upload waits: it says to commit or roll back first, since its end commits. | 15 |
+None open: every requirement so far is verified and in [REQUIREMENTS.md](REQUIREMENTS.md) (the owner, 2026-11-15).
 
 
 ## 6. Decisions

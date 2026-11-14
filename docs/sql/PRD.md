@@ -60,7 +60,7 @@ library list, `LABEL ON` headings) in a fast desktop window.
 | Assistant | Plain words to SQL, names only, from Anthropic, OpenAI, Gemini, Mistral or a local llama.cpp | R-SQL-44, R-SQL-48, R-ADD-3 | Verified |
 | Parley SQL | The program on its own: saved connections, its own settings | R-SQL-45..47 | Verified |
 | From Parley | Parley's Tools ▸ SQL… starts Parley SQL on the session's host | R-SQL-70 | Verified |
-| Data transfer | Every row to CSV or Excel; a CSV file into a table, all or nothing | R-SQL-71..73 | Built |
+| Data transfer | Every row to CSV or Excel; a CSV file into a table, all or nothing | R-SQL-71..73 | Verified |
 | Layout | Results below or beside the editor, the editor's height, the side panel folded | R-SQL-49..51 | Verified |
 | Editing | Comment, indent, move and duplicate lines, pairs, matching bracket, go to line, keyword case, zoom | R-SQL-52..59 | Verified |
 | Editor, deeper | Gutter with line numbers, ▶ and outcomes; completion on Ctrl+Space and with snippets; a routine's parameters; the word under the cursor, Ctrl+D; trailing blanks trimmed (D28) | R-SQL-61..68 | Verified |

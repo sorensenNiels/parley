@@ -12,6 +12,10 @@
 
 ## In progress
 
+None.
+
+## Implemented
+
 - **R-SQL-71..73** (2026-11-15): data transfer (Phase 15, D31), built. **Automated** (`make test`, `make helper`): in
   `parley-core` CSV lines quoted as RFC 4180, a CSV download written batch by batch, a stopped download leaving no file,
   a folder that is not there named in the error, an Excel workbook (checked once by unzipping: a frozen bold header,
@@ -21,11 +25,9 @@
   upload's requests and answers; in the helper's self-test the failed row of a batch. In the UI a tab's download
   writing the rows fetched then the rest, Cancel removing the file, a table's download with IBM i headings, a host
   error removing the file, an upload committing and saying how many, a failed row named by its line with SQL7008
-  explained, Cancel rolling back, and both dialogs keeping their buttons in place. **Not checked:** against an IBM i
-  (upload writes, and Claude may only read on the owner's system, D22). **Left:** the owner downloads a result and a
-  table to CSV and Excel and uploads a CSV into a journaled test table, in the running app.
-
-## Implemented
+  explained, Cancel rolling back, and both dialogs keeping their buttons in place. **Checked in the running app** by
+  the owner, Linux under WSL (2026-11-15): downloads to CSV and Excel and an upload into a table. Claude did not run
+  them against an IBM i (upload writes, and Claude may only read on the owner's system, D22).
 
 - **R-SQL-70** (2026-11-14): Parley's SQL… starts Parley SQL (D30), built. **Automated** (`make test`): Parley SQL's
   command line read back from what Parley passes (name, host, TLS, CA file, CCSID; æøå in the name), a host alone
