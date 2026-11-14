@@ -13,17 +13,20 @@ pub enum AddOn {
     Macros,
     /// The SQL window over a Java helper with `JTOpen` (R-SQL-10, D20). Off by default.
     Sql,
+    /// The SQL assistant in the SQL window (R-SQL-44, R-ADD-3, D25). Off by default.
+    Assistant,
 }
 
 impl AddOn {
     /// Every add-on, in the order Settings lists them.
-    pub const ALL: [Self; 2] = [Self::Macros, Self::Sql];
+    pub const ALL: [Self; 3] = [Self::Macros, Self::Sql, Self::Assistant];
 
     /// The name the settings keep it under.
     pub const fn id(self) -> &'static str {
         match self {
             Self::Macros => "macros",
             Self::Sql => "sql",
+            Self::Assistant => "sql-assistant",
         }
     }
 
@@ -32,6 +35,7 @@ impl AddOn {
         match self {
             Self::Macros => "Macros",
             Self::Sql => "SQL",
+            Self::Assistant => "SQL assistant",
         }
     }
 
@@ -42,6 +46,10 @@ impl AddOn {
             Self::Sql => {
                 "Run SQL on the session's host in a window of its own. Needs Java 11 or later."
             }
+            Self::Assistant => {
+                "Ask Claude to write SQL from plain words in the SQL window; sends your question and \
+                 table and column names to Anthropic. Needs the SQL add-on and ANTHROPIC_API_KEY."
+            }
         }
     }
 
@@ -49,7 +57,7 @@ impl AddOn {
     pub const fn on_by_default(self) -> bool {
         match self {
             Self::Macros => true,
-            Self::Sql => false,
+            Self::Sql | Self::Assistant => false,
         }
     }
 }
@@ -105,6 +113,10 @@ mod tests {
         assert!(
             !settings.enabled(AddOn::Sql),
             "SQL is off until turned on (R-SQL-10)"
+        );
+        assert!(
+            !settings.enabled(AddOn::Assistant),
+            "nothing is sent to Anthropic until turned on (R-ADD-3)"
         );
     }
 

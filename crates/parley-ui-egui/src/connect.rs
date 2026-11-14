@@ -1,4 +1,5 @@
-//! The start screen while not connected: the saved sessions, to connect to or edit (R-UI-5).
+//! The start screen while not connected: the saved sessions, to connect to or edit (R-UI-5);
+//! in Parley SQL, its saved connections (R-SQL-46).
 
 use egui::{Button, RichText, Ui};
 
@@ -13,7 +14,46 @@ pub enum Choice {
     New,
 }
 
-pub fn show(ui: &mut Ui, profiles: &[Profile], last_error: Option<&str>) -> Option<Choice> {
+/// What the start screen calls the things it lists.
+#[derive(Debug, Clone, Copy)]
+pub struct Words {
+    /// Said when there are none: "No sessions yet."
+    pub none: &'static str,
+    /// The button that adds one: "New session…"
+    pub new: &'static str,
+}
+
+/// Parley's words: saved sessions.
+pub const SESSIONS: Words = Words {
+    none: "No sessions yet.",
+    new: "New session…",
+};
+
+/// One card: a name and the line under it.
+#[derive(Debug, Clone)]
+pub struct Entry<'a> {
+    pub name: &'a str,
+    pub address: String,
+}
+
+impl<'a> Entry<'a> {
+    /// A saved session: its name, host:port and TLS.
+    pub fn session(profile: &'a Profile) -> Self {
+        let config = &profile.config;
+        let tls = if config.tls { "  ·  TLS" } else { "" };
+        Self {
+            name: &profile.name,
+            address: format!("{}:{}{tls}", config.host, config.port),
+        }
+    }
+}
+
+pub fn show(
+    ui: &mut Ui,
+    words: Words,
+    entries: &[Entry<'_>],
+    last_error: Option<&str>,
+) -> Option<Choice> {
     let mut choice = None;
     ui.vertical_centered(|ui| {
         ui.add_space(ui.available_height() * 0.12);
@@ -23,8 +63,8 @@ pub fn show(ui: &mut Ui, profiles: &[Profile], last_error: Option<&str>) -> Opti
             theme::error(ui, error);
             ui.add_space(8.0);
         }
-        if profiles.is_empty() {
-            theme::hint(ui, "No sessions yet.");
+        if entries.is_empty() {
+            theme::hint(ui, words.none);
             ui.add_space(8.0);
         }
     });
@@ -34,8 +74,8 @@ pub fn show(ui: &mut Ui, profiles: &[Profile], last_error: Option<&str>) -> Opti
         ui.add_space(margin);
         ui.vertical(|ui| {
             ui.set_width(width);
-            for (i, profile) in profiles.iter().enumerate() {
-                if let Some(chosen) = card(ui, profile) {
+            for (i, entry) in entries.iter().enumerate() {
+                if let Some(chosen) = card(ui, entry) {
                     choice = Some(match chosen {
                         Card::Connect => Choice::Connect(i),
                         Card::Edit => Choice::Edit(i),
@@ -45,7 +85,7 @@ pub fn show(ui: &mut Ui, profiles: &[Profile], last_error: Option<&str>) -> Opti
             }
             ui.add_space(12.0);
             if ui
-                .add(Button::new("New session…").min_size(egui::vec2(width, 34.0)))
+                .add(Button::new(words.new).min_size(egui::vec2(width, 34.0)))
                 .clicked()
             {
                 choice = Some(Choice::New);
@@ -60,8 +100,8 @@ enum Card {
     Edit,
 }
 
-/// One saved session: its name and address, with Edit… and Connect.
-fn card(ui: &mut Ui, profile: &Profile) -> Option<Card> {
+/// One saved session or connection: its name and address, with Edit… and Connect.
+fn card(ui: &mut Ui, entry: &Entry<'_>) -> Option<Card> {
     let muted = theme::palette(ui).muted;
     theme::card(ui)
         .inner_margin(egui::Margin::symmetric(14, 10))
@@ -69,11 +109,8 @@ fn card(ui: &mut Ui, profile: &Profile) -> Option<Card> {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(theme::semibold(&profile.name).size(14.5));
-                    let config = &profile.config;
-                    let tls = if config.tls { "  ·  TLS" } else { "" };
-                    let address = format!("{}:{}{tls}", config.host, config.port);
-                    ui.label(RichText::new(address).small().color(muted));
+                    ui.label(theme::semibold(entry.name).size(14.5));
+                    ui.label(RichText::new(&entry.address).small().color(muted));
                 });
                 let connect = theme::primary_button(ui, "Connect");
                 theme::button_row(ui, |ui| {

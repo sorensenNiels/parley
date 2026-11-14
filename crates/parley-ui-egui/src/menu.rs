@@ -11,6 +11,23 @@ use crate::keymap::{Function, KeyMap};
 use crate::profile::Profile;
 use crate::theme;
 
+/// Which program the UI is: Parley, or Parley SQL, the SQL window on its own (R-SQL-45).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Program {
+    Parley,
+    ParleySql,
+}
+
+impl Program {
+    /// The name the header, the title bar and the About page show.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Parley => "Parley",
+            Self::ParleySql => "Parley SQL",
+        }
+    }
+}
+
 /// Something the operator chose from the header or the status bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -91,7 +108,7 @@ impl Header<'_> {
 pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     let mut action = None;
     MenuBar::new().ui(ui, |ui| {
-        brand(ui, header.logo);
+        brand(ui, header.logo, Program::Parley);
         let menus = [file_menu, edit_menu, view_menu, tools_menu];
         for menu in menus {
             if let Some(chosen) = menu(ui, header) {
@@ -144,7 +161,8 @@ fn file_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
             action = Some(Action::EditSessions);
         }
         let can_connect = !header.connected() && !header.profiles.is_empty();
-        if let Some(i) = connect_menu(ui, can_connect, header.profiles, None) {
+        let names = header.profiles.iter().map(|p| p.name.as_str());
+        if let Some(i) = connect_menu(ui, can_connect, names, None) {
             action = Some(Action::Connect(i));
         }
         ui.separator();
@@ -165,19 +183,20 @@ fn file_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     action
 }
 
-/// "Connect to ▸" with every saved session but `except`; the index of the one chosen.
-fn connect_menu(
+/// "Connect to ▸" with every saved session (or connection, R-SQL-46) named in `names` but
+/// `except`; the index of the one chosen.
+pub(crate) fn connect_menu<'a>(
     ui: &mut Ui,
     enabled: bool,
-    profiles: &[Profile],
+    names: impl Iterator<Item = &'a str>,
     except: Option<&str>,
 ) -> Option<usize> {
     let mut chosen = None;
     ui.add_enabled_ui(enabled, |ui| {
         let text = (icons::icon(icons::PLUGS_CONNECTED), "Connect to");
         ui.menu_button(text, |ui| {
-            for (i, profile) in profiles.iter().enumerate() {
-                if Some(profile.name.as_str()) != except && ui.button(&profile.name).clicked() {
+            for (i, name) in names.enumerate() {
+                if Some(name) != except && ui.button(name).clicked() {
                     chosen = Some(i);
                 }
             }
@@ -321,7 +340,8 @@ fn session_pill(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     let response = ui.menu_button(atoms, |ui| {
         theme::section_label(ui, &profile.name);
         let others = header.profiles.len() > 1;
-        if let Some(i) = connect_menu(ui, others, header.profiles, Some(&profile.name)) {
+        let names = header.profiles.iter().map(|p| p.name.as_str());
+        if let Some(i) = connect_menu(ui, others, names, Some(&profile.name)) {
             action = Some(Action::Connect(i));
         }
         if item(ui, header, true, (icons::PENCIL, "Edit session…"), None) {
@@ -386,15 +406,15 @@ impl Logo {
 }
 
 /// The app's icon and name, as Tortuga shows its own at the start of its top bar.
-fn brand(ui: &mut Ui, logo: Option<&egui::TextureHandle>) {
+pub(crate) fn brand(ui: &mut Ui, logo: Option<&egui::TextureHandle>, program: Program) {
     if let Some(logo) = logo {
         ui.add(
             egui::Image::new(logo)
                 .fit_to_exact_size(egui::vec2(18.0, 18.0))
-                .alt_text("Parley"),
+                .alt_text(program.name()),
         );
     }
-    ui.label(theme::semibold("Parley").size(15.0));
+    ui.label(theme::semibold(program.name()).size(15.0));
     ui.add_space(8.0);
     ui.separator();
     ui.add_space(2.0);

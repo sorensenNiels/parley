@@ -46,6 +46,18 @@ pub enum Ask {
 }
 
 impl Results {
+    /// How many result tabs there are.
+    pub fn len(&self) -> usize {
+        self.tabs.len()
+    }
+
+    /// Puts `system` before the newest tab's title (R-SQL-43).
+    pub fn retitle_last(&mut self, system: &str) {
+        if let Some(tab) = self.tabs.last_mut() {
+            tab.title = format!("{system}: {}", tab.title);
+        }
+    }
+
     /// No results yet; binary values are read in `code_page`, the session's (R-SQL-39).
     pub fn reading(code_page: CodePage) -> Self {
         Self {

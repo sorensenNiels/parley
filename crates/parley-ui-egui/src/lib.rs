@@ -17,6 +17,7 @@ mod sessions;
 mod settings;
 mod shortcuts;
 mod sql;
+mod sql_app;
 mod status;
 mod terminal;
 mod theme;
@@ -36,6 +37,7 @@ pub use settings::{Settings, Theme};
 pub use sql::SqlFiles;
 pub use sql::editor::SavedScript;
 pub use sql::snippets::SnippetStore;
+pub use sql_app::{ParleySqlUi, SqlConnection};
 pub use theme::Density;
 pub use updates::Checker;
 
@@ -410,7 +412,9 @@ impl ParleyUi {
                 });
         } else {
             CentralPanel::default().show(ui, |ui| {
-                match connect::show(ui, &self.profiles, self.closed.as_deref()) {
+                let entries: Vec<_> = self.profiles.iter().map(connect::Entry::session).collect();
+                let words = connect::SESSIONS;
+                match connect::show(ui, words, &entries, self.closed.as_deref()) {
                     Some(connect::Choice::Connect(i)) => actions.push(Action::Connect(i)),
                     Some(connect::Choice::Edit(i)) => self.open_editor(Some(i)),
                     Some(connect::Choice::New) => actions.push(Action::NewSession),
@@ -627,51 +631,23 @@ impl ParleyUi {
         let Some(profile) = self.current.as_ref() else {
             return;
         };
-        let Some(folder) = &self.sql_helpers else {
-            self.sql_notice = Some(
-                "This Parley was installed without the SQL helper, so the SQL window cannot open."
-                    .to_owned(),
-            );
-            return;
-        };
-        let configured = (!self.settings.java_path.trim().is_empty())
-            .then(|| std::path::PathBuf::from(self.settings.java_path.trim()));
-        match parley_core::sql::java::find(configured.as_deref()) {
-            Ok(java) => {
-                let user = self.sql_users.get(&profile.name).map_or("", String::as_str);
-                let scripts = self
-                    .settings
-                    .sql_scripts
-                    .get(&profile.name)
-                    .cloned()
-                    .unwrap_or_default();
-                self.sql_window = Some(
-                    sql::SqlWindow::open(
-                        &profile.name,
-                        &profile.config,
-                        java.path,
-                        parley_core::sql::helper::HelperFiles::in_folder(folder),
-                        user,
-                        &scripts,
-                    )
-                    .with_limits(self.settings.sql_rows, self.settings.sql_timeout)
-                    .with_header(self.settings.sql_header)
-                    .with_pinned(
-                        self.settings
-                            .sql_pinned
-                            .get(&profile.name)
-                            .cloned()
-                            .unwrap_or_default(),
-                    ),
-                );
-            }
-            Err(e) => self.sql_notice = Some(e.to_string()),
+        let user = self.sql_users.get(&profile.name).map_or("", String::as_str);
+        match sql::hosting::open(
+            &profile.name,
+            &profile.config,
+            self.sql_helpers.as_deref(),
+            user,
+            &self.settings,
+        ) {
+            Ok(window) => self.sql_window = Some(window),
+            Err(e) => self.sql_notice = Some(e),
         }
     }
 
     /// The SQL window while open, its statements into the history (R-SQL-7), and the notice
     /// when it could not open.
     fn show_sql_window(&mut self, ctx: &egui::Context) {
+        let assistant_on = self.addon_on(AddOn::Assistant);
         if let Some(window) = &mut self.sql_window {
             let session = self
                 .current
@@ -683,68 +659,36 @@ impl ParleyUi {
                 .get(&session)
                 .cloned()
                 .unwrap_or_default();
+            // R-SQL-43: the saved sessions "Run on…" offers.
+            let systems: Vec<(String, parley_core::SessionConfig)> = self
+                .profiles
+                .iter()
+                .map(|p| (p.name.clone(), p.config.clone()))
+                .collect();
             let around = sql::Around {
                 history: &history,
                 files: self.file_saver.as_deref(),
                 snippets: self.snippet_store.as_deref(),
                 shared: &self.settings.sql_snippets_shared,
+                systems: Some(&systems),
             };
+            window.set_assistant(assistant_on);
             let open = window.show(ctx, around);
-            let ran = window.take_ran();
             if !window.user.trim().is_empty() {
                 self.sql_users
                     .insert(session.clone(), window.user.trim().to_owned());
             }
-            // The choice of headings (R-SQL-29), kept for the next window.
-            self.settings.sql_header = window.header;
-            // The libraries pinned in the schema browser (R-SQL-34).
-            let pinned = window.pinned();
-            if self
-                .settings
-                .sql_pinned
-                .get(&session)
-                .map_or(!pinned.is_empty(), |p| p != pinned)
-            {
-                self.settings
-                    .sql_pinned
-                    .insert(session.clone(), pinned.to_vec());
-            }
-            // The scripts, kept when they changed (R-SQL-20).
-            if window.scripts_generation() != self.sql_scripts_kept {
-                let (generation, scripts) = window.scripts();
-                self.sql_scripts_kept = generation;
-                self.settings.sql_scripts.insert(session.clone(), scripts);
-            }
-            add_to_history(self.settings.sql_history.entry(session).or_default(), ran);
+            sql::hosting::keep(
+                window,
+                &session,
+                &mut self.settings,
+                &mut self.sql_scripts_kept,
+            );
             if !open {
                 self.sql_window = None;
             }
         }
-        if let Some(notice) = self.sql_notice.clone() {
-            let (close, ok) = dialog::dialog(
-                ctx,
-                "sql-notice",
-                "The SQL window cannot open",
-                440.0,
-                |ui| {
-                    ui.label(&notice);
-                    ui.add_space(6.0);
-                    ui.hyperlink_to(
-                        "A free Java: Eclipse Temurin (adoptium.net)",
-                        "https://adoptium.net",
-                    );
-                    theme::hint(
-                        ui,
-                        "Then name it on the Add-ons page of Settings, or set JAVA_HOME.",
-                    );
-                    ui.add_space(12.0);
-                    theme::button_row(ui, |ui| ui.add(theme::primary_button(ui, "OK")).clicked())
-                },
-            );
-            if close || ok {
-                self.sql_notice = None;
-            }
-        }
+        sql::hosting::notice_dialog(ctx, &mut self.sql_notice);
     }
 
     /// The keyboard shortcut sheet, while it is open (R-UI-17).
@@ -952,20 +896,6 @@ struct Next {
     disconnect: bool,
     /// Connect to the saved session at this index.
     connect: Option<usize>,
-}
-
-/// The statements of the SQL window kept per session (R-SQL-7).
-const HISTORY: usize = 100;
-
-/// Adds `ran` to `history`, oldest first: a statement run again moves to the end, and only the
-/// last [`HISTORY`] are kept.
-fn add_to_history(history: &mut Vec<String>, ran: Vec<String>) {
-    for statement in ran {
-        history.retain(|s| *s != statement);
-        history.push(statement);
-    }
-    let excess = history.len().saturating_sub(HISTORY);
-    history.drain(..excess);
 }
 
 /// Whether to name keys as macOS does (Cmd+C).
@@ -2324,16 +2254,6 @@ mod tests {
         let before = harness.get_by_label("Change keys…").rect();
         harness.run_steps(5);
         assert_eq!(harness.get_by_label("Change keys…").rect(), before);
-    }
-
-    #[test]
-    fn the_history_keeps_a_statement_once_and_only_the_last_hundred_r_sql_7() {
-        let mut history = vec!["A".to_owned(), "B".to_owned()];
-        add_to_history(&mut history, vec!["A".to_owned(), "C".to_owned()]);
-        assert_eq!(history, ["B", "A", "C"], "run again: moved to the end");
-        add_to_history(&mut history, (0..150).map(|n| format!("S{n}")).collect());
-        assert_eq!(history.len(), 100);
-        assert_eq!(history.last().map(String::as_str), Some("S149"));
     }
 
     #[test]

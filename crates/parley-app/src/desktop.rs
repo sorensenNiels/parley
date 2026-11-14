@@ -56,7 +56,7 @@ pub fn run() -> eframe::Result {
         .with_app_id("parley")
         .with_inner_size([1000.0, 640.0])
         .with_min_inner_size([480.0, 320.0]);
-    match eframe::icon_data::from_png_bytes(include_bytes!("../icons/256.png")) {
+    match parley_app::window_icon() {
         Ok(icon) => viewport = viewport.with_icon(std::sync::Arc::new(icon)),
         Err(e) => eprintln!("parley: could not load the window icon: {e}"),
     }
@@ -75,25 +75,18 @@ pub fn run() -> eframe::Result {
             if let Some(settings) = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)) {
                 ui.set_settings(settings);
             }
-            ui.set_sql_helpers(crate::helpers::sql_helpers());
-            ui.set_file_saver(Box::new(crate::helpers::SqlFileWindow));
-            ui.set_snippet_store(Box::new(crate::snippets::SnippetFolders::beside_settings()));
-            match crate::macros::MacroFolder::beside_settings() {
+            ui.set_sql_helpers(parley_app::helpers::sql_helpers());
+            ui.set_file_saver(Box::new(parley_app::helpers::SqlFileWindow));
+            ui.set_snippet_store(Box::new(
+                parley_app::snippets::SnippetFolders::beside_settings(),
+            ));
+            match parley_app::macros::MacroFolder::beside_settings() {
                 Some(folder) => ui.set_macro_store(Box::new(folder)),
                 None => eprintln!("parley: no folder for macros on this system"),
             }
-            ui.set_update_checker(std::sync::Arc::new(|| {
-                parley_core::update::check(
-                    parley_core::update::LATEST_RELEASE_URL,
-                    env!("CARGO_PKG_VERSION"),
-                )
-                .map_err(|e| e.to_string())
-            }));
-            match eframe::icon_data::from_png_bytes(include_bytes!("../icons/64.png")) {
-                Ok(icon) => ui.set_logo(egui::ColorImage::from_rgba_unmultiplied(
-                    [icon.width as usize, icon.height as usize],
-                    &icon.rgba,
-                )),
+            ui.set_update_checker(parley_app::update_checker());
+            match parley_app::logo() {
+                Ok(logo) => ui.set_logo(logo),
                 Err(e) => eprintln!("parley: could not load the menu bar icon: {e}"),
             }
             let connect_on_start = match args.host {
@@ -104,7 +97,7 @@ pub fn run() -> eframe::Result {
                 ui,
                 title: String::new(),
                 connect_on_start,
-                screenshot: args.screenshot.map(crate::screenshot::Pending::new),
+                screenshot: args.screenshot.map(parley_app::screenshot::Pending::new),
                 passwords_removed,
             }))
         }),

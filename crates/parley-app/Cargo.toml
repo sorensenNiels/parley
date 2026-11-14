@@ -7,10 +7,17 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 publish = false
+# `cargo run -p parley-app` runs Parley; Parley SQL is `--bin parley-sql` (make run-sql).
+default-run = "parley"
 
 [[bin]]
 name = "parley"
 path = "src/main.rs"
+
+# Parley SQL: the SQL window on its own (R-SQL-45, D26).
+[[bin]]
+name = "parley-sql"
+path = "src/sql_main.rs"
 
 [dependencies]
 parley-ui-egui.workspace = true
@@ -43,7 +50,7 @@ category = "Utility"
 license-file = "../../LICENSE-MIT"
 icons = ["icons/32.png", "icons/64.png", "icons/128.png", "icons/256.png", "icons/512.png", "icons/parley.ico"]
 out-dir = "../../target/packages"
-binaries = [{ path = "parley", main = true }]
+binaries = [{ path = "parley", main = true }, { path = "parley-sql", main = false }]
 # The bundled fonts' licence (SIL OFL 1.1) must travel with them; so must the SQL helper, JTOpen and
 # their notices (R-SQL-13, D20), built into target/helpers by `make helper` before packaging.
 resources = [

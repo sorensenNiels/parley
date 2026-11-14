@@ -13,6 +13,15 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
+- **R-SQL-45, R-SQL-46, R-SQL-47** (2026-11-14): Parley SQL, built (`make run-sql`). **Automated** (`make test`): in
+  kittest, the header has the name, File and Help and a gear at the right end, and no Tools menu; the status bar says
+  Offline; the gear opens Settings with Appearance, SQL and About only, and the SQL page keeps the dialog in place;
+  a new connection is saved from the start screen with TLS on; the connection dialog keeps its place; Connect without
+  the helper says why; an open window fills the main window under the header, says Not signed on, and Disconnect goes
+  back to the start screen; a signed-on window has no Run on… although other connections are saved (D26); a connection needs a unique name and a host, keeps no password, and a rename keeps its
+  history and pins. **Seen** in `--screenshot`s of the start screen and of a connection's sign-on in the main window
+  (WSL2, dark). **Left:** the owner signs on and runs statements in Parley SQL on Windows, macOS and Linux, checks
+  light and dark and the packaged program, then move them to REQUIREMENTS.md.
 - **R-KEY-5** (2026-11-12): editing a macro in Parley, built. **Automated** (`make test`): in kittest, Edit opens the
   file's text, a change is saved, text that does not read names its line and cannot be saved, Cancel leaves the file,
   New macro… saves a macro written by hand, the editor keeps its place; in parley-app the text is written and read
@@ -110,6 +119,23 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
   Columns. **Automated:** matching by key in any row and column order, several keys, duplicates, mismatched
   columns or keys (`æøå`); the comparison tab and its marks; chart data (labels, gaps, row numbers) and a kittest
   switching Table, Chart, Lines. **Left:** the owner tries both, in light and dark.
+- **R-SQL-43** (2026-11-14): one statement on several systems, built. "Run on…" in the run row lists the other saved
+  sessions; ticking one asks for its user and password (used once, D16) and signs on in a helper of its own;
+  "Run on all (n)" runs the statement under the cursor here and on each, only if it is one statement that reads
+  (`SELECT`, `VALUES`, `WITH`; not `CL:`, not with markers); every system's rows get a tab named after it, its first
+  block only (the cursor is closed; "more not fetched" said), errors in Messages under the system's name.
+  **Automated:** what reads, sign-on and answers per system with its name, ticking and unticking, the window's
+  refusals and tabs, the sign-on dialog's buttons in place. **Left:** the owner tries it with two saved sessions.
+- **R-SQL-44, R-ADD-3** (2026-11-14): the SQL assistant, built. "SQL assistant" in Settings ▸ Add-ons, off by
+  default; on, an Ask row over the editor says what is sent and where. A question goes to Claude Opus 5.5
+  (Messages API `2026-10-21` over `ureq`, refusal fallback `"default"`, effort `medium`) with the release, current
+  schema and library list; the model looks up a library's tables and a table's columns through two tools answered
+  from the schema browser's catalog (names, types, headings and texts only, D25) and answers through a third; the
+  SQL opens in a new script tab under its explanation as comments, never run. The key comes from
+  `ANTHROPIC_API_KEY` when asking and is dropped after. **Automated:** the request (model, tools, fallback, no
+  sampling settings), replies (lookups with thinking blocks sent back unchanged, the answer, words only, refusal,
+  cut off), HTTP errors said plainly, lookups answered from the cache and waiting while it is read, the script
+  text, no key, cancel, the add-on switch. **Left:** a real question with the owner's key (it costs a few cents).
 - **R-SQL-37** (2026-11-13): names on hover, built. Hovering a table or view name in the editor (or its alias)
   shows its qualified name, kind, text and up to 25 columns with type and heading, from the browser's cache (read
   when missing). **Automated:** the name and library under the pointer (not in comments, `æøå`), aliases, columns

@@ -46,6 +46,10 @@ pub enum Error {
     #[error("cannot read the CA certificate file {path}: {message}")]
     CaFile { path: String, message: String },
 
+    /// The SQL assistant could not get an answer (R-SQL-44): a sentence for the operator.
+    #[error("{0}")]
+    Assistant(String),
+
     /// Asking GitHub for the latest release failed (R-UI-11).
     #[error("could not check for a new version: {0}")]
     UpdateCheck(String),

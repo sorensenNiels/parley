@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::addons::{AddOn, AddOnSettings};
 use crate::fonts::{self, Installed};
 use crate::keymap::KeyMap;
+use crate::menu::Program;
 use crate::theme::{self, Density};
 use crate::updates::UpdateStatus;
 use crate::{dialog, terminal};
@@ -118,6 +119,8 @@ pub enum Page {
     Terminal,
     Keyboard,
     AddOns,
+    /// Parley SQL's page for the SQL window and its assistant (R-SQL-47).
+    Sql,
     About,
 }
 
@@ -128,6 +131,7 @@ impl Page {
             Self::Terminal => "Terminal",
             Self::Keyboard => "Keyboard",
             Self::AddOns => "Add-ons",
+            Self::Sql => "SQL",
             Self::About => "About",
         }
     }
@@ -150,18 +154,36 @@ impl Page {
                 settings.sql_rows = defaults.sql_rows;
                 settings.sql_timeout = defaults.sql_timeout;
             }
+            Self::Sql => {
+                settings
+                    .addons
+                    .set_enabled(AddOn::Assistant, AddOn::Assistant.on_by_default());
+                settings.java_path = defaults.java_path;
+                settings.sql_rows = defaults.sql_rows;
+                settings.sql_timeout = defaults.sql_timeout;
+                settings.sql_snippets_shared = defaults.sql_snippets_shared;
+            }
             Self::About => settings.check_for_updates = defaults.check_for_updates,
         }
     }
 }
 
 /// The pages under their headings, in the order the list shows them.
-const SECTIONS: [(&str, &[Page]); 2] = [
+type Sections = &'static [(&'static str, &'static [Page])];
+
+/// Parley's pages.
+const SECTIONS: Sections = &[
     (
         "General",
         &[Page::Appearance, Page::Terminal, Page::Keyboard],
     ),
     ("App", &[Page::AddOns, Page::About]),
+];
+
+/// Parley SQL's pages (R-SQL-47): no terminal, keyboard maps or add-on list.
+const SQL_SECTIONS: Sections = &[
+    ("General", &[Page::Appearance]),
+    ("App", &[Page::Sql, Page::About]),
 ];
 
 /// Where the source and the issues are.
@@ -186,6 +208,8 @@ pub struct Dialog {
     sql_helpers: Option<std::path::PathBuf>,
     /// The Java path last checked and what was found, so it is not looked for every frame.
     java_found: Option<(String, std::result::Result<String, String>)>,
+    /// Parley or Parley SQL: which pages, and the name on About.
+    program: Program,
 }
 
 /// How the dialog closed.
@@ -208,6 +232,20 @@ impl Dialog {
             keyboard: keyboard::Page::new(crate::keymap::DEFAULT_MAP, None, false),
             sql_helpers: None,
             java_found: None,
+            program: Program::Parley,
+        }
+    }
+
+    /// The dialog for `program`: Parley SQL's pages are Appearance, SQL and About (R-SQL-47).
+    pub const fn for_program(mut self, program: Program) -> Self {
+        self.program = program;
+        self
+    }
+
+    const fn sections(&self) -> Sections {
+        match self.program {
+            Program::Parley => SECTIONS,
+            Program::ParleySql => SQL_SECTIONS,
         }
     }
 
@@ -267,7 +305,8 @@ impl Dialog {
             let page_rect =
                 egui::Rect::from_min_max(egui::pos2(nav_rect.right() + 16.0, rect.top()), rect.max);
             let mut nav_ui = ui.new_child(egui::UiBuilder::new().max_rect(nav_rect));
-            nav(&mut nav_ui, &mut self.page, height);
+            let sections = self.sections();
+            nav(&mut nav_ui, &mut self.page, sections, height);
             let mut page_ui = ui.new_child(egui::UiBuilder::new().max_rect(page_rect));
             // Nothing too wide for the page paints outside the dialog.
             page_ui.set_clip_rect(page_rect.expand2(vec2(0.0, 4.0)));
@@ -313,6 +352,7 @@ impl Dialog {
             Page::Terminal => self.terminal_page(ui, settings),
             Page::Keyboard => self.keyboard.show(ui, settings),
             Page::AddOns => self.addons_page(ui, settings),
+            Page::Sql => self.sql_page(ui, settings),
             Page::About => self.about_page(ui, settings, updates),
         }
     }
@@ -335,6 +375,18 @@ impl Dialog {
         if settings.addons.enabled(AddOn::Sql) {
             self.sql_group(ui, settings);
         }
+    }
+
+    /// Parley SQL's SQL page (R-SQL-47): the assistant, which stays an add-on that is off until
+    /// turned on (R-ADD-3), then the Java and the SQL window's limits. SQL itself is always on.
+    fn sql_page(&mut self, ui: &mut Ui, settings: &mut Settings) {
+        group(ui, "Assistant", None, |rows| {
+            let addon = AddOn::Assistant;
+            let mut on = settings.addons.enabled(addon);
+            rows.switch(addon.name(), Some(addon.about()), &mut on);
+            settings.addons.set_enabled(addon, on);
+        });
+        self.sql_group(ui, settings);
     }
 
     /// The Java for the SQL helper, what was found, and whether the helper is installed.
@@ -423,7 +475,8 @@ impl Dialog {
     /// `curl` command that downloads a package (R-UI-12). As Tortuga's About page.
     fn about_page(&mut self, ui: &mut Ui, settings: &mut Settings, updates: &UpdateStatus) {
         let p = theme::palette(ui);
-        ui.label(theme::semibold("Parley").size(18.0));
+        let name = self.program.name();
+        ui.label(theme::semibold(name).size(18.0));
         ui.label(RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION"))).color(p.muted));
         ui.add_space(14.0);
         group(ui, "About", None, |rows| {
@@ -457,7 +510,7 @@ impl Dialog {
         }
         group(ui, "Updates", None, |rows| {
             rows.switch(
-                "Look for a new version when Parley starts",
+                &format!("Look for a new version when {name} starts"),
                 Some("Asks GitHub for the latest release; sends nothing else."),
                 &mut settings.check_for_updates,
             );
@@ -543,7 +596,7 @@ impl Dialog {
 }
 
 /// The list of pages, `height` tall; a click shows another page.
-fn nav(ui: &mut Ui, page: &mut Page, height: f32) {
+fn nav(ui: &mut Ui, page: &mut Page, sections: Sections, height: f32) {
     let p = theme::palette(ui);
     Frame::new()
         .fill(p.chrome)
@@ -553,7 +606,7 @@ fn nav(ui: &mut Ui, page: &mut Page, height: f32) {
             ui.set_width(NAV_WIDTH - 16.0);
             ui.set_height(height - 16.0);
             ui.spacing_mut().item_spacing.y = 2.0;
-            for (i, (heading, pages)) in SECTIONS.into_iter().enumerate() {
+            for (i, (heading, pages)) in sections.iter().enumerate() {
                 if i > 0 {
                     ui.add_space(10.0);
                 }
@@ -563,7 +616,7 @@ fn nav(ui: &mut Ui, page: &mut Page, height: f32) {
                     theme::section_label(ui, heading);
                 });
                 ui.add_space(2.0);
-                for &value in pages {
+                for &value in *pages {
                     nav_item(ui, page, value);
                 }
             }

@@ -2,6 +2,7 @@
 //! with IBM's `JTOpen` (`helpers/sql`). [`protocol`] is what the two say to each other, sans-I/O
 //! (D4); [`java`] finds a Java to run the helper with (R-SQL-12); [`helper`] runs it (R-SQL-11).
 
+pub mod assistant;
 pub mod catalog;
 pub mod compare;
 pub mod complete;

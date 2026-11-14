@@ -12,12 +12,9 @@
 )]
 
 mod desktop;
-mod helpers;
 mod keychain;
-mod macros;
-mod screenshot;
-mod snippets;
 
+use parley_app::screenshot;
 use parley_ui_egui::{ParleyUi, Profile};
 
 /// Where the saved sessions are kept in eframe's storage.

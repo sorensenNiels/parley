@@ -23,7 +23,7 @@ endif
 RUN_ENV := $(if $(IS_WSL),GALLIUM_DRIVER=$${GALLIUM_DRIVER:-d3d12} ,)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup run probe probe-sql jt400 helper build release package icons test test-core test-ui lint \
+.PHONY: help setup run run-sql probe probe-sql jt400 helper build release package icons test test-core test-ui lint \
         fmt fmt-check deny verify doc clean outdated update upgrade \
         release-patch release-minor release-major
 
@@ -33,6 +33,7 @@ help:
 	@echo "  Getting started"
 	@echo "    setup         Install system libraries, Rust toolchain and cargo tools (once per machine)"
 	@echo "    run           Run the desktop app (HOST=name connects at once)"
+	@echo "    run-sql       Run Parley SQL, the SQL window on its own (CONNECTION=name signs on at once)"
 	@echo "    probe         Connect to HOST without the UI, press KEYS, print each screen"
 	@echo "    probe-sql     Ask HOST which SQL routes it offers, without signing on (R-NET-8)"
 	@echo "    jt400         Fetch JTOpen (pinned, checked) for the SQL helper into target/helpers"
@@ -82,6 +83,10 @@ setup-windows:
 
 run:
 	$(RUN_ENV)cargo run -p $(APP) -- $(HOST)
+
+# Parley SQL, the SQL window on its own (R-SQL-45); CONNECTION= opens a saved connection's sign-on
+run-sql:
+	$(RUN_ENV)cargo run -p $(APP) --bin parley-sql -- $(CONNECTION)
 
 # make probe HOST=pub400.com [KEYS=help,reset,enter] [ARGS="--tls --ccsid 277"]
 probe:

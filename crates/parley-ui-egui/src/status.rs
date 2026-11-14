@@ -324,7 +324,7 @@ fn chip_width(ui: &Ui, chip: &Chip, status: &Status<'_>) -> f32 {
 }
 
 /// A muted chip: its icon, then its text.
-fn muted(ui: &mut Ui, icon: Option<&str>, text: String) -> egui::Response {
+pub(crate) fn muted(ui: &mut Ui, icon: Option<&str>, text: String) -> egui::Response {
     let color = theme::palette(ui).muted;
     match icon {
         Some(icon) => icons::label(
