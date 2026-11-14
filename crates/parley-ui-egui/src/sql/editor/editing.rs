@@ -126,6 +126,16 @@ impl Scripts {
             SqlAction::DuplicateLines => Some(edit::duplicate_lines(&text, selection)),
             SqlAction::MoveLinesUp => edit::move_lines(&text, selection, Direction::Up),
             SqlAction::MoveLinesDown => edit::move_lines(&text, selection, Direction::Down),
+            SqlAction::Complete => {
+                self.open_completion();
+                None
+            }
+            SqlAction::SelectNext => {
+                if let Some(next) = edit::select_next(&text, selection) {
+                    self.select_range(next);
+                }
+                None
+            }
             SqlAction::ZoomIn => {
                 self.zoom_by(1);
                 None

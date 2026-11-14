@@ -1,7 +1,6 @@
 //! The SQL window's editor (R-SQL-19..23): scripts in tabs, kept per saved session; SQL in
 //! colour; open and save `.sql` files; format; find and replace.
 
-use std::ops::Range;
 use std::sync::Arc;
 
 use crate::sql::keys::SqlAction;
@@ -17,7 +16,10 @@ use crate::{dialog, icons, theme};
 mod colour;
 mod complete;
 mod editing;
-pub use complete::{Item, MAX_ITEMS};
+mod find;
+pub mod gutter;
+mod signature;
+pub use complete::{Item, arrange};
 
 /// A script as the settings keep it between runs of Parley (R-SQL-20).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,19 +53,6 @@ impl Script {
     }
 }
 
-/// The find bar (R-SQL-23).
-#[derive(Debug, Clone, Default)]
-struct Find {
-    query: String,
-    replacement: String,
-    match_case: bool,
-    replacing: bool,
-    /// Give the query field the focus on the next frame.
-    focus: bool,
-    /// Said after Replace all.
-    note: Option<String>,
-}
-
 /// Something the editor asks the window to do with a file's outcome, or a question shown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Closing {
@@ -85,7 +74,7 @@ pub struct Scripts {
     tabs: Vec<Script>,
     shown: usize,
     next_number: u32,
-    find: Option<Find>,
+    find: Option<find::Find>,
     closing: Option<Closing>,
     /// The selection in the shown script last frame, as byte offsets.
     selection: (usize, usize),
@@ -117,6 +106,70 @@ pub struct Scripts {
     field: Option<egui::Id>,
     /// The tab the completion list and selection belong to.
     shown_number: Option<u32>,
+    /// What the statements run in the window gave, for the gutter (R-SQL-62).
+    pub outcomes: gutter::Outcomes,
+    /// A statement's ▶ was clicked: the window runs the selection (R-SQL-62).
+    run_asked: bool,
+    /// Below the cursor last frame, in screen points.
+    cursor_at: Option<egui::Pos2>,
+    /// A snippet chosen in the completion list, for the window to put in (R-SQL-64).
+    snippet_chosen: Option<usize>,
+    /// A routine's parameters while it is called (R-SQL-65).
+    help: signature::Help,
+}
+
+/// What the text field did this frame.
+#[derive(Debug, Default)]
+struct FieldOut {
+    changed: bool,
+    hovered: bool,
+    /// Below the cursor, in screen points: where the completion list goes.
+    cursor_at: Option<egui::Pos2>,
+    /// The byte under the pointer.
+    pointer_at: Option<usize>,
+    /// The selection, as byte offsets, while the field has a cursor.
+    selection: Option<(usize, usize)>,
+    /// The statement whose ▶ in the gutter was clicked (R-SQL-62).
+    run: Option<std::ops::Range<usize>>,
+}
+
+impl FieldOut {
+    /// Reads `output` of the field showing `text`: scrolls to the cursor when `reveal`, and
+    /// shows `described` on hover (R-SQL-37).
+    fn read(
+        ui: &Ui,
+        output: &egui::text_edit::TextEditOutput,
+        text: &str,
+        reveal: bool,
+        described: Option<&str>,
+    ) -> Self {
+        let mut out = Self {
+            changed: output.response.changed(),
+            ..Self::default()
+        };
+        let response = &output.response.response;
+        out.hovered = response.hovered();
+        if response.hovered()
+            && let Some(pos) = response.hover_pos()
+        {
+            let cursor = output.galley.cursor_from_pos(pos - output.galley_pos);
+            out.pointer_at = Some(byte_at(text, cursor.index.0));
+            if let Some(described) = described {
+                response.clone().on_hover_text(described);
+            }
+        }
+        if let Some(range) = output.cursor_range {
+            let cursor = output.galley.pos_from_cursor(range.primary);
+            out.cursor_at = Some(output.galley_pos + cursor.left_bottom().to_vec2());
+            if reveal {
+                let rect = cursor.translate(output.galley_pos.to_vec2());
+                ui.scroll_to_rect(rect, Some(egui::Align::Center));
+            }
+            let (a, b) = (range.primary.index.0, range.secondary.index.0);
+            out.selection = Some((byte_at(text, a.min(b)), byte_at(text, a.max(b))));
+        }
+        out
+    }
 }
 
 /// A name in the text, and the name before a `.` in front of it.
@@ -146,6 +199,11 @@ impl Scripts {
             keys: crate::sql::keys::SqlKeys::default(),
             field: None,
             shown_number: None,
+            outcomes: gutter::Outcomes::default(),
+            run_asked: false,
+            cursor_at: None,
+            snippet_chosen: None,
+            help: signature::Help::default(),
         };
         for s in saved {
             let number = scripts.take_number();
@@ -291,6 +349,7 @@ impl Scripts {
     pub fn takes_escape(&self) -> bool {
         self.find.is_some()
             || self.go_to.is_some()
+            || self.help_shown()
             || self.popup.as_ref().is_some_and(|p| !p.items.is_empty())
     }
 
@@ -333,16 +392,49 @@ impl Scripts {
         };
         if let Some(item) = popup.items.get(index) {
             self.selection = (popup.typed.start, popup.typed.end);
-            self.insert(&item.insert);
+            match item.snippet {
+                // What was typed goes; the window puts the snippet in (R-SQL-64).
+                Some(snippet) => {
+                    self.insert("");
+                    self.snippet_chosen = Some(snippet);
+                }
+                None => self.insert(&item.insert),
+            }
         }
+    }
+
+    /// The snippet chosen in the completion list since last asked (R-SQL-64).
+    pub fn take_snippet_chosen(&mut self) -> Option<usize> {
+        self.snippet_chosen.take()
+    }
+
+    /// Ctrl+Space (R-SQL-63): the completion list at the cursor, also with nothing typed.
+    pub(super) fn open_completion(&mut self) {
+        let (start, end) = self.selection;
+        if start != end {
+            return;
+        }
+        let typed = parley_core::sql::complete::typed_at(self.text(), start).unwrap_or(
+            parley_core::sql::complete::Typed {
+                start,
+                end: start,
+                prefix: String::new(),
+                qualifier: None,
+            },
+        );
+        let mut popup = complete::Popup::new(typed);
+        popup.at = self.cursor_at;
+        self.popup = Some(popup);
     }
 
     /// After the text field: a list while a name is being typed, gone when the cursor leaves it.
     fn follow_typing(&mut self, changed: bool, cursor_at: Option<egui::Pos2>) {
         let (start, end) = self.selection;
         if changed && start == end {
+            // An open list stays open while typing goes on, however short the name (R-SQL-63).
+            let open = self.popup.is_some();
             let typed = parley_core::sql::complete::typed_at(self.text(), start)
-                .filter(|t| t.qualifier.is_some() || t.prefix.chars().count() >= 2);
+                .filter(|t| open || t.qualifier.is_some() || t.prefix.chars().count() >= 2);
             self.popup = typed.map(|typed| match self.popup.take() {
                 Some(mut popup) => {
                     popup.typed = typed;
@@ -376,6 +468,7 @@ impl Scripts {
             self.go_to_bar(ui);
         }
         let shown = self.text_field(ui, height);
+        self.help_box(ui);
         if let Some(index) = self.popup.as_ref().and_then(|p| p.show(ui)) {
             self.accept(index);
         }
@@ -405,11 +498,13 @@ impl Scripts {
         if self.has_focus(ui.ctx()) {
             self.editing_keys(ui);
         }
-        if (self.find.is_some() || self.go_to.is_some())
+        if (self.find.is_some() || self.go_to.is_some() || self.help_shown())
             && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
         {
-            // The Go to line bar is the newer of the two when both are open.
-            if self.go_to.take().is_none() {
+            // The parameters box first, then the Go to line bar, the newer of the two bars.
+            if self.help_shown() {
+                self.hide_help();
+            } else if self.go_to.take().is_none() {
                 self.find = None;
             }
         }
@@ -533,6 +628,15 @@ impl Scripts {
 
     /// Save (or Save as… with `ask`): the file the script has, or a new one.
     fn save(&mut self, files: &dyn SqlFiles, ask: bool) -> bool {
+        // R-SQL-68: no blanks at the ends of lines, in the file and the script.
+        let (trimmed, cursor) =
+            parley_core::sql::edit::trim_trailing(self.text(), self.selection.0);
+        if trimmed != self.text() {
+            self.apply(parley_core::sql::edit::Edit {
+                text: trimmed,
+                selection: (cursor, cursor),
+            });
+        }
         let Some(tab) = self.tabs.get_mut(self.shown) else {
             return false;
         };
@@ -606,21 +710,14 @@ impl Scripts {
         }
     }
 
+    /// Whether a statement's ▶ was clicked since last asked (R-SQL-62); it is selected.
+    pub fn take_run_asked(&mut self) -> bool {
+        std::mem::take(&mut self.run_asked)
+    }
+
     /// Whether the shown script's text has the keyboard (as of last frame's field).
     pub fn has_focus(&self, ctx: &egui::Context) -> bool {
         self.field.is_some_and(|id| ctx.memory(|m| m.has_focus(id)))
-    }
-
-    /// Opens the find bar with the focus in it, with Replace when `replacing` (R-SQL-23);
-    /// a selection on one line is what it looks for.
-    fn open_find(&mut self, replacing: bool) {
-        let mut bar = self.find.take().unwrap_or_default();
-        bar.replacing = replacing || bar.replacing;
-        bar.focus = true;
-        if let Some(selected) = self.selected_text().filter(|s| !s.contains('\n')) {
-            bar.query = selected;
-        }
-        self.find = Some(bar);
     }
 
     fn text_field(&mut self, ui: &mut Ui, height: TextHeight) -> f32 {
@@ -652,59 +749,60 @@ impl Scripts {
                 ui.fonts_mut(|f| f.layout_job(job))
             };
         let reveal = std::mem::take(&mut self.reveal);
-        let mut hovered = false;
         let before = tab.text.len();
-        let mut changed = false;
-        let mut cursor_at = None;
-        let mut pointer_at = None;
-        let described = self.described.as_ref().filter(|(name, _)| {
-            self.pointed
-                .as_ref()
-                .is_some_and(|(pointed, _)| pointed == name)
-        });
+        let described = self
+            .described
+            .as_ref()
+            .filter(|(name, _)| {
+                self.pointed
+                    .as_ref()
+                    .is_some_and(|(pointed, _)| pointed == name)
+            })
+            .map(|(_, text)| text.as_str());
+        let gutter = gutter::width(ui, &tab.text, &font);
+        let mut out = FieldOut::default();
         let shown = ScrollArea::vertical()
             .id_salt(("sql-editor", tab.number))
             .max_height(height.most)
             .min_scrolled_height(height.most)
             .show(ui, |ui| {
-                let output = TextEdit::multiline(&mut tab.text)
-                    .id(id)
-                    .code_editor()
-                    .font(font.clone())
-                    .layouter(&mut layouter)
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(8)
-                    // As high as the divider was dragged to (R-SQL-50).
-                    .min_size(egui::vec2(0.0, height.least))
-                    .hint_text("SELECT * FROM QSYS2.SYSTABLES FETCH FIRST 10 ROWS ONLY")
-                    .show(ui);
-                changed = output.response.changed();
-                let response = &output.response.response;
-                hovered = response.hovered();
-                if response.hovered()
-                    && let Some(pos) = response.hover_pos()
-                {
-                    let cursor = output.galley.cursor_from_pos(pos - output.galley_pos);
-                    pointer_at = Some(byte_at(&tab.text, cursor.index.0));
-                    if let Some((_, text)) = described {
-                        response.clone().on_hover_text(text.as_str());
-                    }
-                }
-                if let Some(range) = output.cursor_range {
-                    let cursor = output.galley.pos_from_cursor(range.primary);
-                    let below = cursor.left_bottom();
-                    cursor_at = Some(output.galley_pos + below.to_vec2());
-                    if reveal {
-                        let rect = cursor.translate(output.galley_pos.to_vec2());
-                        ui.scroll_to_rect(rect, Some(egui::Align::Center));
-                    }
-                    let (a, b) = (range.primary.index.0, range.secondary.index.0);
-                    self.selection = (byte_at(&tab.text, a.min(b)), byte_at(&tab.text, a.max(b)));
-                }
+                ui.horizontal_top(|ui| {
+                    // The gutter is painted here once the text is laid out (R-SQL-61).
+                    ui.add_space(gutter);
+                    let edit = TextEdit::multiline(&mut tab.text)
+                        .id(id)
+                        .code_editor()
+                        .font(font.clone())
+                        .layouter(&mut layouter)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(8)
+                        // As high as the divider was dragged to (R-SQL-50).
+                        .min_size(egui::vec2(0.0, height.least))
+                        .hint_text("SELECT * FROM QSYS2.SYSTABLES FETCH FIRST 10 ROWS ONLY");
+                    let output = edit.show(ui);
+                    out = FieldOut::read(ui, &output, &tab.text, reveal, described);
+                    let lines = gutter::Lines {
+                        text: &tab.text,
+                        cursor: out.selection.map_or(0, |(start, _)| start),
+                        outcomes: &self.outcomes,
+                        font: &font,
+                    };
+                    out.run = gutter::paint(ui, &output.galley, output.galley_pos, gutter, &lines);
+                });
             });
+        if let Some(selection) = out.selection {
+            self.selection = selection;
+        }
+        if let Some(statement) = out.run.take() {
+            self.select_range((statement.start, statement.end));
+            self.run_asked = true;
+        }
+        let (changed, hovered, cursor_at, pointer_at) =
+            (out.changed, out.hovered, out.cursor_at, out.pointer_at);
+        self.cursor_at = cursor_at.or(self.cursor_at);
         // The text's own height, or the area's when it scrolls.
         let shown = shown.content_size.y.min(shown.inner_rect.height());
-        let changed = changed || tab.text.len() != before;
+        let changed = changed || self.text().len() != before;
         if changed {
             self.generation += 1;
         }
@@ -717,118 +815,6 @@ impl Scripts {
             self.wheel_zoom(ui);
         }
         shown
-    }
-
-    // ---------------------------------------------------------------- find and replace
-
-    fn find_bar(&mut self, ui: &mut Ui) {
-        let Some(mut bar) = self.find.take() else {
-            return;
-        };
-        let mut go: Option<bool> = None; // Some(forward)
-        let mut replace_one = false;
-        let mut replace_all = false;
-        let mut close = false;
-        theme::card(ui).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(icons::icon(icons::MAGNIFYING_GLASS).color(theme::palette(ui).muted));
-                let field = theme::sized_edit(
-                    ui,
-                    220.0,
-                    TextEdit::singleline(&mut bar.query).hint_text("Find"),
-                );
-                if std::mem::take(&mut bar.focus) {
-                    field.request_focus();
-                }
-                // Taken, so it does not also reach the editor that gets the focus now.
-                if field.lost_focus() {
-                    let shift = ui.input(|i| i.modifiers.shift);
-                    if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) {
-                        go = Some(!shift);
-                    }
-                }
-                if ui.small_button("Previous").clicked() {
-                    go = Some(false);
-                }
-                if ui.small_button("Next").clicked() {
-                    go = Some(true);
-                }
-                let switch = theme::switch(ui, &mut bar.match_case);
-                let label = ui.label("Match case");
-                switch.labelled_by(label.id);
-                theme::button_row(ui, |ui| {
-                    close = ui
-                        .add(theme::icon_button(ui, "🗙"))
-                        .on_hover_text("Close (Esc)")
-                        .clicked();
-                    if !bar.replacing && ui.small_button("Replace…").clicked() {
-                        bar.replacing = true;
-                    }
-                });
-            });
-            if bar.replacing {
-                ui.horizontal(|ui| {
-                    ui.add_space(22.0);
-                    theme::sized_edit(
-                        ui,
-                        220.0,
-                        TextEdit::singleline(&mut bar.replacement).hint_text("Replace with"),
-                    );
-                    replace_one = ui.small_button("Replace").clicked();
-                    replace_all = ui.small_button("Replace all").clicked();
-                    if let Some(note) = &bar.note {
-                        theme::hint(ui, note);
-                    }
-                });
-            }
-        });
-        if replace_one {
-            self.replace_selection(&bar);
-            go = Some(true);
-        }
-        if replace_all && let Some(tab) = self.tabs.get_mut(self.shown) {
-            let (text, count) =
-                replace_everywhere(&tab.text, &bar.query, &bar.replacement, bar.match_case);
-            tab.text = text;
-            bar.note = Some(format!("{count} replaced"));
-            self.generation += 1;
-        }
-        if let Some(forward) = go {
-            self.go_to_match(&bar, forward);
-        }
-        if !close {
-            self.find = Some(bar);
-        }
-    }
-
-    /// Selects the next match after the selection, or the one before it.
-    fn go_to_match(&mut self, bar: &Find, forward: bool) {
-        let text = self.text();
-        let (start, end) = self.selection;
-        let found = if forward {
-            find_next(text, &bar.query, end, bar.match_case)
-                .or_else(|| find_next(text, &bar.query, 0, bar.match_case))
-        } else {
-            find_previous(text, &bar.query, start, bar.match_case)
-                .or_else(|| find_previous(text, &bar.query, text.len(), bar.match_case))
-        };
-        if let Some(range) = found {
-            self.select_range((range.start, range.end));
-        }
-    }
-
-    /// Replace: the selection, when it is a match.
-    fn replace_selection(&mut self, bar: &Find) {
-        let (start, end) = self.selection;
-        let Some(tab) = self.tabs.get_mut(self.shown) else {
-            return;
-        };
-        let is_match = matches_at(&tab.text, start, &bar.query, bar.match_case) == Some(end);
-        if start < end && is_match {
-            tab.text.replace_range(start..end, &bar.replacement);
-            self.selection = (start, start + bar.replacement.len());
-            self.generation += 1;
-        }
     }
 
     // ---------------------------------------------------------------- closing a changed tab
@@ -878,71 +864,6 @@ impl Scripts {
     }
 }
 
-/// The end of `query` if it matches `text` at byte `at`.
-fn matches_at(text: &str, at: usize, query: &str, match_case: bool) -> Option<usize> {
-    if query.is_empty() {
-        return None;
-    }
-    let rest = text.get(at..)?;
-    let mut end = at;
-    let mut chars = rest.chars();
-    for q in query.chars() {
-        let c = chars.next()?;
-        let same = if match_case {
-            c == q
-        } else {
-            c.to_lowercase().eq(q.to_lowercase())
-        };
-        if !same {
-            return None;
-        }
-        end += c.len_utf8();
-    }
-    Some(end)
-}
-
-/// The first match of `query` at or after byte `from`.
-fn find_next(text: &str, query: &str, from: usize, match_case: bool) -> Option<Range<usize>> {
-    text.char_indices()
-        .map(|(i, _)| i)
-        .filter(|&i| i >= from)
-        .find_map(|i| matches_at(text, i, query, match_case).map(|end| i..end))
-}
-
-/// The last match of `query` that ends at or before byte `before`.
-fn find_previous(text: &str, query: &str, before: usize, match_case: bool) -> Option<Range<usize>> {
-    text.char_indices()
-        .rev()
-        .map(|(i, _)| i)
-        .filter_map(|i| matches_at(text, i, query, match_case).map(|end| i..end))
-        .find(|r| r.end <= before)
-}
-
-/// `text` with every match of `query` replaced, and how many.
-fn replace_everywhere(
-    text: &str,
-    query: &str,
-    replacement: &str,
-    match_case: bool,
-) -> (String, usize) {
-    let mut out = String::with_capacity(text.len());
-    let mut count = 0;
-    let mut at = 0;
-    while at < text.len() {
-        if let Some(end) = matches_at(text, at, query, match_case) {
-            out.push_str(replacement);
-            count += 1;
-            at = end;
-        } else if let Some(c) = text.get(at..).and_then(|r| r.chars().next()) {
-            out.push(c);
-            at += c.len_utf8();
-        } else {
-            break;
-        }
-    }
-    (out, count)
-}
-
 /// A file's name from its path, for a tab.
 fn file_name(path: &str) -> String {
     path.rsplit(['/', '\\']).next().unwrap_or(path).to_owned()
@@ -962,6 +883,7 @@ fn char_at(text: &str, byte: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use super::find::{find_next, find_previous, replace_everywhere};
     use super::*;
 
     #[test]
@@ -1202,11 +1124,122 @@ mod tests {
         assert_eq!(harness.state().zoom, editing::ZOOM_LEAST);
     }
 
+    /// A file window that saves without asking and keeps what it was given.
+    #[derive(Debug, Default)]
+    struct KeptFile(std::sync::Mutex<String>);
+
+    impl SqlFiles for KeptFile {
+        fn export_csv(&self, _: &str, _: &[u8]) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+        fn open_script(&self) -> Result<Option<(String, String)>, String> {
+            Ok(None)
+        }
+        fn save_script(
+            &self,
+            _: Option<&str>,
+            _: &str,
+            text: &str,
+        ) -> Result<Option<String>, String> {
+            let mut kept = self.0.lock().map_err(|e| e.to_string())?;
+            text.clone_into(&mut kept);
+            Ok(Some("/tmp/x.sql".to_owned()))
+        }
+    }
+
+    #[test]
+    fn saving_trims_blanks_at_line_ends_in_the_file_and_the_script_r_sql_68() {
+        let mut scripts = Scripts::restore(&[]);
+        scripts.set_text("SELECT 'æ  \nø'  \nFROM t \t", 0);
+        let file = KeptFile::default();
+        assert!(scripts.save(&file, false));
+        let saved = file.0.lock().expect("kept").clone();
+        assert_eq!(saved, "SELECT 'æ  \nø'\nFROM t");
+        assert_eq!(scripts.text(), saved);
+    }
+
+    #[test]
+    fn ctrl_space_opens_the_list_and_it_stays_open_while_typing_r_sql_63() {
+        let mut harness = focused("SELECT ", (7, 7));
+        press(&mut harness, Modifiers::COMMAND, Key::Space);
+        let (typed, _) = harness.state().completing().expect("a list");
+        assert_eq!(typed.prefix, "");
+        harness.state_mut().offer(vec![offered("NAVN")]);
+        harness.event(egui::Event::Text("n".to_owned()));
+        harness.run_steps(2);
+        let (typed, _) = harness.state().completing().expect("still a list");
+        assert_eq!(typed.prefix, "N");
+    }
+
+    #[test]
+    fn a_snippet_chosen_in_the_list_takes_the_place_of_what_was_typed_r_sql_64() {
+        let mut harness = focused("SELECT ak", (9, 9));
+        harness
+            .state_mut()
+            .follow_typing(true, Some(egui::pos2(40.0, 40.0)));
+        harness.state_mut().offer(vec![Item {
+            detail: "snippet".to_owned(),
+            snippet: Some(4),
+            ..offered("Aktive job")
+        }]);
+        harness.run_steps(2);
+        press(&mut harness, Modifiers::NONE, Key::Enter);
+        assert_eq!(harness.state().text(), "SELECT ");
+        assert_eq!(harness.state_mut().take_snippet_chosen(), Some(4));
+    }
+
+    #[test]
+    fn ctrl_d_selects_the_name_then_the_next_place_r_sql_67() {
+        let mut harness = focused("a navn, b NAVN", (4, 4));
+        press(&mut harness, Modifiers::COMMAND, Key::D);
+        assert_eq!(harness.state().selection(), (2, 6));
+        press(&mut harness, Modifiers::COMMAND, Key::D);
+        assert_eq!(harness.state().selection(), (10, 14));
+    }
+
+    #[test]
+    fn the_call_at_the_cursor_is_found_and_esc_hides_its_parameters_r_sql_65() {
+        use parley_core::sql::catalog::{Parameter, Signature};
+
+        let text = "SELECT 1;\nCALL qgpl.opdater(1, ";
+        let mut harness = focused(text, (text.len(), text.len()));
+        let call = harness
+            .state()
+            .calling(&harness.ctx)
+            .expect("a call at the cursor");
+        assert_eq!((call.name.as_str(), call.argument), ("OPDATER", 1));
+        let signature = Signature {
+            specific_name: "OPDATER".to_owned(),
+            parameters: vec![Parameter {
+                mode: "IN".to_owned(),
+                name: "KUNDE".to_owned(),
+                data_type: "INTEGER".to_owned(),
+            }],
+        };
+        harness
+            .state_mut()
+            .set_signatures(Some((call.clone(), vec![signature.clone()])));
+        harness.run_steps(2);
+        assert!(harness.state().takes_escape(), "Esc hides the box first");
+        press(&mut harness, Modifiers::NONE, Key::Escape);
+        assert!(!harness.state().help_shown());
+        harness
+            .state_mut()
+            .set_signatures(Some((call, vec![signature])));
+        assert!(
+            !harness.state().help_shown(),
+            "hidden while in the same call"
+        );
+        harness.state_mut().set_signatures(None);
+        assert!(!harness.state().help_shown());
+    }
+
     fn offered(label: &str) -> Item {
         Item {
             label: label.to_owned(),
             detail: "column".to_owned(),
             insert: label.to_owned(),
+            snippet: None,
         }
     }
 

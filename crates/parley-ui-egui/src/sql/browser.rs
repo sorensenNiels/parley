@@ -12,7 +12,7 @@ use parley_core::sql::assistant::Lookup;
 use parley_core::sql::complete::{self, Typed};
 
 use super::database::{Answered, Ask, Database, State};
-use super::editor::{Item, MAX_ITEMS};
+use super::editor::Item;
 use super::snippets::field_row;
 use crate::{icons, theme};
 
@@ -52,6 +52,8 @@ pub struct Browser {
     error: Option<String>,
     objects: BTreeMap<String, Load<Vec<Object>>>,
     columns: BTreeMap<(String, String), Load<Vec<ColumnInfo>>>,
+    /// The signatures of routines, by library and name (R-SQL-65).
+    parameters: BTreeMap<(String, String), Load<Vec<catalog::Signature>>>,
 }
 
 impl Browser {
@@ -59,6 +61,31 @@ impl Browser {
         Self {
             pinned,
             ..Self::default()
+        }
+    }
+
+    /// The signatures of the routine `name` in `qualifier`, or else the current `schema`
+    /// (R-SQL-65): read once per window, asked for the first time it is wanted; `None` while
+    /// read, or when there is no such routine.
+    pub fn signatures(
+        &mut self,
+        qualifier: Option<&str>,
+        name: &str,
+        schema: Option<&str>,
+        db: &mut Database,
+    ) -> Option<&[catalog::Signature]> {
+        let library = qualifier.or(schema)?.to_owned();
+        let key = (library.clone(), name.to_owned());
+        if !self.parameters.contains_key(&key) {
+            self.parameters.insert(key.clone(), Load::Reading);
+            db.ask(Ask::Parameters {
+                library,
+                name: name.to_owned(),
+            });
+        }
+        match self.parameters.get(&key) {
+            Some(Load::Ready(found)) if !found.is_empty() => Some(found),
+            Some(Load::Ready(_) | Load::Reading | Load::Failed(_)) | None => None,
         }
     }
 
@@ -81,6 +108,11 @@ impl Browser {
                     let load =
                         rows.map_or_else(Load::Failed, |r| Load::Ready(catalog::columns_from(&r)));
                     self.columns.insert((library, table), load);
+                }
+                Ask::Parameters { library, name } => {
+                    let load = rows
+                        .map_or_else(Load::Failed, |r| Load::Ready(catalog::signatures_from(&r)));
+                    self.parameters.insert((library, name), load);
                 }
                 Ask::Ddl { title, .. } => match rows {
                     Ok(rows) => {
@@ -403,6 +435,7 @@ impl Browser {
                         label: library.clone(),
                         detail: "library".to_owned(),
                         insert: catalog::identifier(library),
+                        snippet: None,
                     });
                 }
             }
@@ -410,9 +443,10 @@ impl Browser {
                 label: k.to_owned(),
                 detail: "keyword".to_owned(),
                 insert: k.to_owned(),
+                snippet: None,
             }));
         }
-        items.truncate(MAX_ITEMS);
+        // The window arranges and cuts the list (R-SQL-63).
         items
     }
 
@@ -447,6 +481,7 @@ impl Browser {
                 label: o.name.clone(),
                 detail: o.kind.singular().to_owned(),
                 insert: catalog::identifier(&o.name),
+                snippet: None,
             });
         }
     }
@@ -501,6 +536,7 @@ impl Browser {
                 label: c.name.clone(),
                 detail: column_detail(c),
                 insert: catalog::identifier(&c.name),
+                snippet: None,
             });
         }
     }

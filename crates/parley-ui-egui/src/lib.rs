@@ -96,6 +96,11 @@ pub struct ParleyUi {
     sql_users: std::collections::BTreeMap<String, String>,
     /// Why the SQL window cannot open (no Java, no helper), while that is shown (R-SQL-12).
     sql_notice: Option<String>,
+    /// Where Parley SQL's settings are read when the SQL window opens (R-SQL-69).
+    sql_settings_reader: Option<sql::hosting::SettingsReader>,
+    /// Parley SQL's settings as read when the SQL window last opened: its Java, limits,
+    /// results, brackets, shared snippets and assistant (R-SQL-69).
+    sql_settings: Settings,
     /// The file window for exports and scripts (R-SQL-8, R-SQL-21).
     file_saver: Option<Box<dyn sql::SqlFiles>>,
     /// The snippet folders (R-SQL-24); without them, the SQL window has only the starters.
@@ -142,6 +147,8 @@ impl ParleyUi {
             sql_window: None,
             sql_users: std::collections::BTreeMap::new(),
             sql_notice: None,
+            sql_settings_reader: None,
+            sql_settings: Settings::default(),
             file_saver: None,
             snippet_store: None,
             sql_scripts_kept: 0,
@@ -182,6 +189,12 @@ impl ParleyUi {
     /// from the environment.
     pub fn set_api_keys(&mut self, keys: std::sync::Arc<dyn ApiKeys>) {
         self.api_keys = Some(keys);
+    }
+
+    /// Where to read Parley SQL's settings, which the SQL window uses (R-SQL-69). Without one
+    /// (tests), the window opens with the default settings.
+    pub fn set_sql_settings_reader(&mut self, read: Box<dyn Fn() -> Option<Settings>>) {
+        self.sql_settings_reader = Some(sql::hosting::SettingsReader(read));
     }
 
     /// How to ask for the latest release (R-UI-11). Without one, Parley doesn't look for
@@ -343,10 +356,11 @@ impl ParleyUi {
     /// The settings dialog, showing the session's keyboard map and the macros it can bind.
     fn open_settings(&self, ctx: &egui::Context) -> settings::Dialog {
         let macros = self.addon_on(AddOn::Macros).then(|| self.macro_names());
-        settings::Dialog::open(ctx, &self.settings)
-            .with_keyboard(&self.keyboard_map().name, macros, self.addon_on(AddOn::Sql))
-            .with_sql_helpers(self.sql_helpers.clone())
-            .with_api_keys(self.api_keys.clone())
+        settings::Dialog::open(ctx, &self.settings).with_keyboard(
+            &self.keyboard_map().name,
+            macros,
+            self.addon_on(AddOn::Sql),
+        )
     }
 
     /// Sessions that used the map `old` use it under its new name.
@@ -642,6 +656,11 @@ impl ParleyUi {
         let Some(profile) = self.current.as_ref() else {
             return;
         };
+        self.sql_settings = self
+            .sql_settings_reader
+            .as_ref()
+            .and_then(|read| (read.0)())
+            .unwrap_or_default();
         let user = self.sql_users.get(&profile.name).map_or("", String::as_str);
         match sql::hosting::open(
             &profile.name,
@@ -649,6 +668,7 @@ impl ParleyUi {
             self.sql_helpers.as_deref(),
             user,
             &self.settings,
+            &self.sql_settings,
         ) {
             Ok(window) => self.sql_window = Some(window),
             Err(e) => self.sql_notice = Some(e),
@@ -658,7 +678,8 @@ impl ParleyUi {
     /// The SQL window while open, its statements into the history (R-SQL-7), and the notice
     /// when it could not open.
     fn show_sql_window(&mut self, ctx: &egui::Context) {
-        let assistant_on = self.addon_on(AddOn::Assistant);
+        // R-SQL-69: the assistant is turned on in Parley SQL's settings.
+        let assistant_on = self.sql_settings.addons.enabled(AddOn::Assistant);
         if let Some(window) = &mut self.sql_window {
             let session = self
                 .current
@@ -680,16 +701,16 @@ impl ParleyUi {
                 history: &history,
                 files: self.file_saver.as_deref(),
                 snippets: self.snippet_store.as_deref(),
-                shared: &self.settings.sql_snippets_shared,
+                shared: &self.sql_settings.sql_snippets_shared,
                 systems: Some(&systems),
-                results: self.settings.sql_results,
-                close_pairs: self.settings.sql_close_pairs,
+                results: self.sql_settings.sql_results,
+                close_pairs: self.sql_settings.sql_close_pairs,
                 // Parley's SQL add-on keeps the default keys (R-SQL-60).
                 keys: None,
             };
             window.set_assistant(
                 assistant_on,
-                &self.settings.assistant,
+                &self.sql_settings.assistant,
                 self.api_keys.as_ref(),
             );
             let open = window.show(ctx, around);
@@ -1851,54 +1872,32 @@ mod tests {
     }
 
     #[test]
-    fn the_assistant_is_turned_on_on_its_own_page_not_in_add_ons_r_sql_48() {
+    fn parleys_settings_have_none_of_parley_sqls_only_the_add_on_r_sql_69() {
         let mut harness = app_with(Vec::new());
         switch_add_on_in_settings(&mut harness, "SQL");
-        assert!(
-            harness
-                .query_by_role_and_label(egui::accesskit::Role::CheckBox, "SQL assistant")
-                .is_none(),
-            "not on the Add-ons page"
-        );
-        harness.get_by_label("SQL assistant").click();
-        harness.run();
-        harness
-            .get_by_role_and_label(egui::accesskit::Role::CheckBox, "SQL assistant")
-            .click();
-        harness.get_by_label("Save").click();
-        harness.run();
-        assert!(harness.state().addon_on(AddOn::Assistant));
-    }
-
-    #[test]
-    fn turning_sql_on_shows_its_java_and_helper_and_off_hides_them_r_sql_12() {
-        let mut harness = app_with(Vec::new());
-        assert!(
-            !harness.state().addon_on(AddOn::Sql),
-            "off by default (R-SQL-10)"
-        );
-        harness.state_mut().set_sql_helpers(None);
-        switch_add_on_in_settings(&mut harness, "SQL");
-        harness.get_by_label("Found");
-        harness.get_by_label_contains("Not installed with this Parley");
-        // A Java that is not there is named, not looked for again every frame.
-        type_into(&mut harness, "Java", "/no/such/java");
-        harness.run_steps(3);
-        harness.get_by_label_contains("needs Java 11 or later");
-        harness
-            .get_by_role_and_label(egui::accesskit::Role::CheckBox, "SQL")
-            .click();
-        harness.run();
-        assert!(harness.query_by_label("Found").is_none());
-    }
-
-    #[test]
-    fn the_settings_dialog_keeps_its_place_with_the_sql_rows_r_sql_12() {
-        let mut harness = app_with(Vec::new());
-        switch_add_on_in_settings(&mut harness, "SQL");
+        harness.get_by_label(settings::SQL_SETTINGS_ELSEWHERE);
+        for gone in [
+            "SQL assistant",
+            "Java",
+            "Rows at a time",
+            "Found",
+            "Shortcuts",
+        ] {
+            assert!(
+                harness.query_by_label(gone).is_none(),
+                "{gone} is Parley SQL's"
+            );
+        }
         let before = harness.get_by_label("Save").rect();
         harness.run_steps(5);
-        assert_eq!(harness.get_by_label("Save").rect(), before);
+        assert_eq!(harness.get_by_label("Save").rect(), before, "D12");
+        harness.get_by_label("Appearance").click();
+        harness.run();
+        assert!(harness.query_by_label("SQL window").is_none());
+        assert!(harness.query_by_label("Results").is_none());
+        harness.get_by_label("Save").click();
+        harness.run();
+        assert!(harness.state().addon_on(AddOn::Sql));
     }
 
     #[test]
@@ -2369,8 +2368,11 @@ mod tests {
         harness.get_by_label("OK").click();
         harness.run();
 
+        // R-SQL-69: the Java is Parley SQL's, read when the window opens.
         settings.java_path = "/no/such/java".to_owned();
-        harness.state_mut().set_settings(settings);
+        harness
+            .state_mut()
+            .set_sql_settings_reader(Box::new(move || Some(settings.clone())));
         harness
             .state_mut()
             .set_sql_helpers(Some(std::path::PathBuf::from("/some/helpers")));
@@ -2388,8 +2390,14 @@ mod tests {
         let (mut harness, _host) = connected_app();
         let mut settings = Settings::default();
         settings.addons.set_enabled(AddOn::Sql, true);
-        settings.java_path = "/no/such/java".to_owned();
         harness.state_mut().set_settings(settings);
+        let parley_sql = Settings {
+            java_path: "/no/such/java".to_owned(),
+            ..Settings::default()
+        };
+        harness
+            .state_mut()
+            .set_sql_settings_reader(Box::new(move || Some(parley_sql.clone())));
         harness
             .state_mut()
             .set_sql_helpers(Some(std::path::PathBuf::from("/some/helpers")));

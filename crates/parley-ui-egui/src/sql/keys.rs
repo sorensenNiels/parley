@@ -31,6 +31,8 @@ pub enum SqlAction {
     DuplicateLines,
     MoveLinesUp,
     MoveLinesDown,
+    Complete,
+    SelectNext,
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -38,7 +40,7 @@ pub enum SqlAction {
 
 impl SqlAction {
     /// Every action, in the order the settings list them.
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 23] = [
         Self::Run,
         Self::RunAll,
         Self::Cancel,
@@ -57,6 +59,8 @@ impl SqlAction {
         Self::DuplicateLines,
         Self::MoveLinesUp,
         Self::MoveLinesDown,
+        Self::Complete,
+        Self::SelectNext,
         Self::ZoomIn,
         Self::ZoomOut,
         Self::ZoomReset,
@@ -83,6 +87,8 @@ impl SqlAction {
             Self::DuplicateLines => "duplicate-lines",
             Self::MoveLinesUp => "move-lines-up",
             Self::MoveLinesDown => "move-lines-down",
+            Self::Complete => "complete",
+            Self::SelectNext => "select-next",
             Self::ZoomIn => "zoom-in",
             Self::ZoomOut => "zoom-out",
             Self::ZoomReset => "zoom-reset",
@@ -109,6 +115,8 @@ impl SqlAction {
             Self::DuplicateLines => "Duplicate lines",
             Self::MoveLinesUp => "Move lines up",
             Self::MoveLinesDown => "Move lines down",
+            Self::Complete => "Complete the name",
+            Self::SelectNext => "Select the next one",
             Self::ZoomIn => "Larger text",
             Self::ZoomOut => "Smaller text",
             Self::ZoomReset => "Text at 100 %",
@@ -129,7 +137,9 @@ impl SqlAction {
             | Self::Comment
             | Self::DuplicateLines
             | Self::MoveLinesUp
-            | Self::MoveLinesDown => "Editing",
+            | Self::MoveLinesDown
+            | Self::Complete
+            | Self::SelectNext => "Editing",
             Self::ZoomIn | Self::ZoomOut | Self::ZoomReset => "Zoom",
         }
     }
@@ -141,6 +151,8 @@ impl SqlAction {
             | Self::DuplicateLines
             | Self::MoveLinesUp
             | Self::MoveLinesDown
+            | Self::Complete
+            | Self::SelectNext
             | Self::ZoomIn
             | Self::ZoomOut
             | Self::ZoomReset => true,
@@ -183,6 +195,8 @@ impl SqlAction {
             Self::DuplicateLines => &["Ctrl+Shift+D"],
             Self::MoveLinesUp => &["Alt+ArrowUp"],
             Self::MoveLinesDown => &["Alt+ArrowDown"],
+            Self::Complete => &["Ctrl+Space"],
+            Self::SelectNext => &["Ctrl+D"],
             Self::ZoomIn => &["Ctrl+Plus", "Ctrl+Equals"],
             Self::ZoomOut => &["Ctrl+Minus"],
             Self::ZoomReset => &["Ctrl+0"],

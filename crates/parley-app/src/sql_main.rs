@@ -12,13 +12,11 @@
 )]
 
 use eframe::egui;
-use parley_app::screenshot;
+use parley_app::{PARLEY_SQL_ID, SETTINGS_KEY, screenshot};
 use parley_ui_egui::{ParleySqlUi, SqlConnection};
 
 /// Where the saved connections are kept in eframe's storage (R-SQL-46).
 const CONNECTIONS_KEY: &str = "connections";
-/// Where the settings are kept.
-const SETTINGS_KEY: &str = "settings";
 
 const USAGE: &str = "\
 Usage: parley-sql [OPTION] [CONNECTION]
@@ -100,7 +98,7 @@ fn main() -> eframe::Result {
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Parley SQL")
-        .with_app_id("parley-sql")
+        .with_app_id(PARLEY_SQL_ID)
         .with_inner_size([1100.0, 720.0])
         .with_min_inner_size([640.0, 400.0]);
     match parley_app::window_icon() {

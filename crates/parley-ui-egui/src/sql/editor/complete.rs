@@ -12,10 +12,34 @@ pub struct Item {
     pub label: String,
     pub detail: String,
     pub insert: String,
+    /// A snippet of the Snippets panel, by its place there (R-SQL-64): it goes in by the panel,
+    /// with its placeholders, not as `insert`.
+    pub snippet: Option<usize>,
 }
 
 /// At most this many are offered.
 pub const MAX_ITEMS: usize = 50;
+
+/// At most this many keywords and this many snippets are offered (R-SQL-63, R-SQL-64).
+const MAX_KEYWORDS: usize = 10;
+const MAX_SNIPPETS: usize = 10;
+
+/// The list in its order (R-SQL-63): names (columns of the statement's tables first, as the
+/// schema browser gives them, then objects and libraries), snippets, then keywords; keywords
+/// keep their room however many names come first.
+pub fn arrange(found: Vec<Item>, snippets: Vec<Item>) -> Vec<Item> {
+    let (keywords, names): (Vec<Item>, Vec<Item>) =
+        found.into_iter().partition(|i| i.detail == "keyword");
+    let keywords: Vec<Item> = keywords.into_iter().take(MAX_KEYWORDS).collect();
+    let snippets: Vec<Item> = snippets.into_iter().take(MAX_SNIPPETS).collect();
+    let room = MAX_ITEMS.saturating_sub(keywords.len() + snippets.len());
+    names
+        .into_iter()
+        .take(room)
+        .chain(snippets)
+        .chain(keywords)
+        .collect()
+}
 
 /// The list while a name is typed.
 #[derive(Debug, Clone)]
@@ -142,6 +166,7 @@ mod tests {
             label: label.to_owned(),
             detail: String::new(),
             insert: label.to_owned(),
+            snippet: None,
         }
     }
 
@@ -160,5 +185,28 @@ mod tests {
         assert_eq!(popup.chosen, 1);
         popup.offer(vec![item("ÆØÅ")]);
         assert_eq!(popup.chosen, 0);
+    }
+
+    #[test]
+    fn keywords_keep_their_room_after_many_names_and_snippets_come_between_r_sql_63() {
+        let named = |label: &str, detail: &str| Item {
+            label: label.to_owned(),
+            detail: detail.to_owned(),
+            insert: label.to_owned(),
+            snippet: None,
+        };
+        let mut found: Vec<Item> = (0..80)
+            .map(|n| named(&format!("KOLONNE{n}"), "column"))
+            .collect();
+        found.push(named("SELECT", "keyword"));
+        let snippets = vec![Item {
+            snippet: Some(3),
+            ..named("Aktive job", "snippet")
+        }];
+        let list = arrange(found, snippets);
+        assert_eq!(list.len(), MAX_ITEMS);
+        assert_eq!(list.last().map(|i| i.label.as_str()), Some("SELECT"));
+        assert_eq!(list[MAX_ITEMS - 2].snippet, Some(3));
+        assert_eq!(list[0].label, "KOLONNE0");
     }
 }

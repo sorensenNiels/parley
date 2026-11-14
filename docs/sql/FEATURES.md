@@ -12,6 +12,16 @@
 
 ## In progress
 
+- **R-SQL-61..68** (2026-11-14): the editor, deeper (Phase 14, D28), built. **Automated** (`make test`): in
+  `parley-core` the word under the cursor and its places (quoted, unquoted, æøå, not in strings), Ctrl+D's next place
+  with wrapping, trailing blanks trimmed but not inside a string, the routine call and argument at the cursor
+  (nested, quoted, keywords and strings left out), the `SYSPARMS` query and its signatures; in the UI the outcomes kept
+  by statement text and said on hover, a statement's first line, the ▶ that selects and runs its statement, the
+  outcome of a run and of an error, Ctrl+Space and a list that stays open while typing, a snippet chosen from the list,
+  keywords kept in a long list, Ctrl+D, Save trimming the file and the script, the word's places on a background, the
+  call found and Esc hiding its box. **Left:** seen in the running app (both programs, light and dark, wrapped lines,
+  zoom); the `SYSPARMS` query checked on the owner's IBM i (`make probe-sql`, D22).
+
 - **R-SQL-60** (2026-11-14): Parley SQL's Shortcuts page, built. **Automated** (`make test`): every action has its
   own keys, which read back and are allowed; only changed actions are kept; typing and text-field keys are refused;
   Ctrl+Shift+F is taken as Format, not Find; a free key replaces or joins at once, a taken one moves only when

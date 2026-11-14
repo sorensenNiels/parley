@@ -23,6 +23,11 @@ pub enum Ask {
         library: String,
         table: String,
     },
+    /// The parameters of the routines called `name` in `library` (R-SQL-65).
+    Parameters {
+        library: String,
+        name: String,
+    },
     /// `title` names the script tab it opens in.
     Ddl {
         library: String,
@@ -37,6 +42,7 @@ impl Ask {
         match self {
             Ask::Objects(library) => catalog::objects(library),
             Ask::Columns { library, table } => catalog::columns(library, table),
+            Ask::Parameters { library, name } => catalog::parameters(library, name),
             Ask::Ddl {
                 library,
                 name,

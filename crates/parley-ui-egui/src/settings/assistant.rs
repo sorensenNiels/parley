@@ -50,8 +50,8 @@ impl Page {
         }
     }
 
-    /// The page; `needs_sql` when Parley's SQL add-on, which the assistant lives in, is off.
-    pub(super) fn show(&mut self, ui: &mut Ui, settings: &mut Settings, needs_sql: bool) {
+    /// The page, in Parley SQL only (R-SQL-69).
+    pub(super) fn show(&mut self, ui: &mut Ui, settings: &mut Settings) {
         let note = (
             "Ask for SQL in plain words in the SQL window.",
             "The model looks up the tables and columns it needs through the catalog; its SQL \
@@ -62,11 +62,6 @@ impl Page {
             let mut on = settings.addons.enabled(addon);
             rows.switch(addon.name(), Some(addon.about()), &mut on);
             settings.addons.set_enabled(addon, on);
-            if needs_sql {
-                rows.full_row(|ui| {
-                    theme::warning(ui, "Turn on the SQL add-on in Add-ons too.");
-                });
-            }
         });
         let config = &mut settings.assistant;
         let before = config.provider;

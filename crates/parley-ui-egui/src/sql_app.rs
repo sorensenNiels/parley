@@ -144,6 +144,7 @@ impl ParleySqlUi {
             self.helpers.as_deref(),
             &connection.user,
             &self.settings,
+            &self.settings,
         ) {
             Ok(window) => {
                 self.window = Some(window.embedded());
@@ -452,6 +453,9 @@ mod tests {
         harness.get_by_label("SQL").click();
         harness.run();
         harness.get_by_label("Rows at a time");
+        // R-SQL-12, R-SQL-69: the Java found and the helper are shown here, not in Parley.
+        harness.get_by_label("Found");
+        harness.get_by_label("SQL helper");
         let before = harness.get_by_label("Save").rect();
         harness.run_steps(5);
         assert_eq!(harness.get_by_label("Save").rect(), before, "D12");

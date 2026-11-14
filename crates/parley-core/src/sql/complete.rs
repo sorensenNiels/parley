@@ -13,7 +13,7 @@ pub struct Typed {
     pub qualifier: Option<String>,
 }
 
-fn is_name_char(c: char) -> bool {
+pub(super) fn is_name_char(c: char) -> bool {
     c.is_alphanumeric() || matches!(c, '_' | '#' | '$' | '@')
 }
 
@@ -210,6 +210,109 @@ pub fn tables_in(statement: &str) -> Vec<TableRef> {
     found
 }
 
+/// A routine being called at the cursor (R-SQL-65): its name, the name before a `.` in front
+/// of it, both in capitals unless quoted, and which argument the cursor is at, from 0.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallAt {
+    pub qualifier: Option<String>,
+    pub name: String,
+    pub argument: usize,
+}
+
+/// An open bracket while scanning: the routine before it, if a name is, and the commas since.
+struct Open {
+    routine: Option<(Option<String>, String)>,
+    commas: usize,
+}
+
+/// The routine whose brackets the cursor at byte `cursor` of `statement` is in, if a name is
+/// before them that is not a keyword; strings and comments are skipped.
+pub fn call_at(statement: &str, cursor: usize) -> Option<CallAt> {
+    let before = statement.get(..cursor)?;
+    let mut stack: Vec<Open> = Vec::new();
+    let mut chars = before.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        match c {
+            '\'' | '"' => {
+                if !chars.by_ref().any(|(_, d)| d == c) {
+                    return None;
+                }
+            }
+            '-' if chars.peek().is_some_and(|&(_, d)| d == '-') => {
+                if !chars.by_ref().any(|(_, d)| d == '\n') {
+                    return None;
+                }
+            }
+            '/' if chars.peek().is_some_and(|&(_, d)| d == '*') => {
+                chars.next();
+                let mut star = false;
+                let closed = chars.by_ref().any(|(_, d)| {
+                    let end = star && d == '/';
+                    star = d == '*';
+                    end
+                });
+                if !closed {
+                    return None;
+                }
+            }
+            '(' => stack.push(Open {
+                routine: routine_before(before.get(..i).unwrap_or_default()),
+                commas: 0,
+            }),
+            ')' => {
+                stack.pop();
+            }
+            ',' => {
+                if let Some(open) = stack.last_mut() {
+                    open.commas += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    let open = stack.pop()?;
+    let (qualifier, name) = open.routine?;
+    Some(CallAt {
+        qualifier,
+        name,
+        argument: open.commas,
+    })
+}
+
+/// The name just before a `(` at the end of `text` (blanks between allowed) and its qualifier;
+/// `None` for a keyword or no name.
+fn routine_before(text: &str) -> Option<(Option<String>, String)> {
+    let text = text.trim_end();
+    let (name, rest) = name_back(text)?;
+    if KEYWORDS.contains(&name.as_str()) {
+        return None;
+    }
+    let qualifier = rest
+        .strip_suffix('.')
+        .or_else(|| rest.strip_suffix('/'))
+        .and_then(|r| name_back(r).map(|(q, _)| q));
+    Some((qualifier, name))
+}
+
+/// The name at the end of `text` (quoted: as written; else in capitals) and the text before it.
+fn name_back(text: &str) -> Option<(String, &str)> {
+    if let Some(inner) = text.strip_suffix('"') {
+        let open = inner.rfind('"')?;
+        return Some((inner.get(open + 1..)?.to_owned(), inner.get(..open)?));
+    }
+    let start = text
+        .char_indices()
+        .rev()
+        .take_while(|&(_, c)| is_name_char(c))
+        .last()?
+        .0;
+    let name = text.get(start..)?;
+    if name.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    Some((name.to_uppercase(), text.get(..start)?))
+}
+
 /// The SQL keywords starting with `prefix` (in capitals), in order.
 pub fn keywords(prefix: &str) -> impl Iterator<Item = &'static str> {
     KEYWORDS
@@ -303,5 +406,30 @@ mod tests {
     fn keywords_are_offered_by_prefix_but_not_the_word_typed_r_sql_36() {
         assert!(keywords("SEL").any(|k| k == "SELECT"));
         assert_eq!(keywords("SELECT").count(), 0);
+    }
+
+    #[test]
+    fn the_routine_and_the_argument_at_the_cursor_are_found_r_sql_65() {
+        let call = |text: &str| call_at(text, text.len());
+        assert_eq!(
+            call("CALL qgpl.opdater_kunde(1, 'a,b', "),
+            Some(CallAt {
+                qualifier: Some("QGPL".to_owned()),
+                name: "OPDATER_KUNDE".to_owned(),
+                argument: 2,
+            })
+        );
+        let nested = call("SELECT beløb(x, rund(y, 2), ").expect("a call");
+        assert_eq!((nested.name.as_str(), nested.argument), ("BELØB", 2));
+        let inner = call("SELECT beløb(x, rund(y, ").expect("a call");
+        assert_eq!((inner.name.as_str(), inner.argument), ("RUND", 1));
+        assert_eq!(call("SELECT f(x) "), None, "closed");
+        assert_eq!(call("SELECT * FROM t WHERE a IN ("), None, "a keyword");
+        assert_eq!(call("SELECT 'f(x"), None, "in a string");
+        assert_eq!(call("SELECT (1 + "), None, "no name");
+        let quoted = call("CALL \"Min lib\".\"Gør det\"(").expect("a call");
+        assert_eq!(quoted.qualifier.as_deref(), Some("Min lib"));
+        assert_eq!(quoted.name, "Gør det");
+        assert_eq!(call(""), None);
     }
 }

@@ -230,6 +230,80 @@ pub fn columns_from(rows: &[Row]) -> Vec<ColumnInfo> {
         .collect()
 }
 
+/// The parameters of the procedures and functions called `name` in `library` (SQL names), a
+/// row each, by specific name and position: specific name, position, mode, name, type, length,
+/// precision and scale; a routine without parameters has one row of nulls after its specific
+/// name (R-SQL-65). Read with [`signatures_from`].
+pub fn parameters(library: &str, name: &str) -> String {
+    format!(
+        "SELECT R.SPECIFIC_NAME, P.ORDINAL_POSITION, P.PARAMETER_MODE, P.PARAMETER_NAME, \
+         P.DATA_TYPE, P.CHARACTER_MAXIMUM_LENGTH, P.NUMERIC_PRECISION, P.NUMERIC_SCALE \
+         FROM QSYS2.SYSROUTINES R LEFT JOIN QSYS2.SYSPARMS P \
+         ON P.SPECIFIC_SCHEMA = R.SPECIFIC_SCHEMA AND P.SPECIFIC_NAME = R.SPECIFIC_NAME \
+         AND P.ROW_TYPE = 'P' \
+         WHERE R.ROUTINE_SCHEMA = {} AND R.ROUTINE_NAME = {} \
+         ORDER BY R.SPECIFIC_NAME, P.ORDINAL_POSITION",
+        literal(library),
+        literal(name)
+    )
+}
+
+/// A parameter of a routine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parameter {
+    /// IN, OUT or INOUT; empty for a function's.
+    pub mode: String,
+    pub name: String,
+    pub data_type: String,
+}
+
+/// One signature of a routine: its specific name and its parameters, in order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Signature {
+    pub specific_name: String,
+    pub parameters: Vec<Parameter>,
+}
+
+/// The rows of [`parameters`], a signature per specific name.
+pub fn signatures_from(rows: &[Row]) -> Vec<Signature> {
+    let mut out: Vec<Signature> = Vec::new();
+    for row in rows {
+        let specific_name = cell(row, 0);
+        if specific_name.is_empty() {
+            continue;
+        }
+        if out.last().is_none_or(|s| s.specific_name != specific_name) {
+            out.push(Signature {
+                specific_name,
+                parameters: Vec::new(),
+            });
+        }
+        let kind = cell(row, 4);
+        if kind.is_empty() {
+            continue;
+        }
+        let data_type = type_text(&kind, &cell(row, 5), &cell(row, 6), &cell(row, 7));
+        if let Some(signature) = out.last_mut() {
+            signature.parameters.push(Parameter {
+                mode: cell(row, 2),
+                name: cell(row, 3),
+                data_type,
+            });
+        }
+    }
+    out
+}
+
+/// A type as written in SQL from its kind, length, precision and scale.
+fn type_text(kind: &str, length: &str, precision: &str, scale: &str) -> String {
+    match kind {
+        "DECIMAL" | "NUMERIC" => format!("{kind}({precision}, {})", scale_or_zero(scale)),
+        "CHAR" | "VARCHAR" | "GRAPHIC" | "VARGRAPHIC" | "BINARY" | "VARBINARY" | "CHARACTER"
+        | "CHARACTER VARYING" => format!("{kind}({length})"),
+        _ => kind.to_owned(),
+    }
+}
+
 fn scale_or_zero(scale: &str) -> &str {
     if scale.is_empty() { "0" } else { scale }
 }
@@ -366,5 +440,58 @@ mod tests {
         assert_eq!(identifier("a\"b"), "\"a\"\"b\"");
         assert_eq!(identifier("ÆØÅ"), "\"ÆØÅ\"");
         assert_eq!(identifier("#OK_1"), "#OK_1");
+    }
+
+    #[test]
+    fn parameters_are_asked_by_name_with_quotes_doubled_r_sql_65() {
+        let sql = parameters("QGPL", "O'HARA");
+        assert!(sql.contains("ROUTINE_NAME = 'O''HARA'"), "{sql}");
+        assert!(sql.contains("ROW_TYPE = 'P'"), "{sql}");
+    }
+
+    #[test]
+    fn signatures_are_read_a_specific_name_each_r_sql_65() {
+        let rows = [
+            row(&[
+                Some("BELØB1"),
+                Some("1"),
+                Some("IN"),
+                Some("KUNDE"),
+                Some("DECIMAL"),
+                None,
+                Some("9"),
+                Some("0"),
+            ]),
+            row(&[
+                Some("BELØB1"),
+                Some("2"),
+                Some("OUT"),
+                Some("NAVN"),
+                Some("VARCHAR"),
+                Some("50"),
+                None,
+                None,
+            ]),
+            row(&[Some("BELØB2"), None, None, None, None, None, None, None]),
+            row(&[None]),
+        ];
+        let signatures = signatures_from(&rows);
+        assert_eq!(signatures.len(), 2);
+        assert_eq!(
+            signatures[0].parameters,
+            [
+                Parameter {
+                    mode: "IN".to_owned(),
+                    name: "KUNDE".to_owned(),
+                    data_type: "DECIMAL(9, 0)".to_owned()
+                },
+                Parameter {
+                    mode: "OUT".to_owned(),
+                    name: "NAVN".to_owned(),
+                    data_type: "VARCHAR(50)".to_owned()
+                },
+            ]
+        );
+        assert!(signatures[1].parameters.is_empty(), "no parameters");
     }
 }

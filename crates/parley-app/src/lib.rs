@@ -16,6 +16,27 @@ pub mod snippets;
 
 use eframe::egui;
 
+/// Parley SQL's eframe storage id: where its connections and settings are kept (D26).
+pub const PARLEY_SQL_ID: &str = "parley-sql";
+
+/// Where Parley SQL keeps its settings in its eframe storage.
+pub const SETTINGS_KEY: &str = "settings";
+
+/// Parley SQL's saved settings, which the SQL window Parley opens uses too (R-SQL-69); `None`
+/// while Parley SQL has saved none. A file that cannot be read or decoded counts as none, as
+/// eframe itself treats it: the window then opens with the default settings.
+#[must_use]
+pub fn parley_sql_settings() -> Option<parley_ui_egui::Settings> {
+    let file = eframe::storage_dir(PARLEY_SQL_ID)?.join("app.ron");
+    settings_in(&std::fs::read_to_string(file).ok()?)
+}
+
+/// The settings in the text of an eframe storage file: a map of keys to RON values.
+fn settings_in(storage: &str) -> Option<parley_ui_egui::Settings> {
+    let values: std::collections::HashMap<String, String> = ron::from_str(storage).ok()?;
+    ron::from_str(values.get(SETTINGS_KEY)?).ok()
+}
+
 /// The window icon.
 ///
 /// # Errors
@@ -47,4 +68,31 @@ pub fn update_checker() -> parley_ui_egui::Checker {
         )
         .map_err(|e| e.to_string())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parley_sql_settings_are_read_from_its_storage_file_r_sql_69() {
+        let settings = parley_ui_egui::Settings {
+            java_path: "/opt/java/æøå".to_owned(),
+            sql_rows: 250,
+            ..parley_ui_egui::Settings::default()
+        };
+        let value = ron::to_string(&settings).expect("settings serialize");
+        let values = std::collections::HashMap::from([(SETTINGS_KEY.to_owned(), value)]);
+        let file = ron::to_string(&values).expect("a map of strings serializes");
+        let read = settings_in(&file).expect("the settings are found");
+        assert_eq!(read.java_path, "/opt/java/æøå");
+        assert_eq!(read.sql_rows, 250);
+    }
+
+    #[test]
+    fn an_empty_or_broken_storage_file_has_no_settings_r_sql_69() {
+        assert!(settings_in("").is_none());
+        assert!(settings_in("{\"settings\": \"(not settings\"}").is_none());
+        assert!(settings_in("{}").is_none());
+    }
 }

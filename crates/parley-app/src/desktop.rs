@@ -76,6 +76,7 @@ pub fn run() -> eframe::Result {
                 ui.set_settings(settings);
             }
             ui.set_sql_helpers(parley_app::helpers::sql_helpers());
+            ui.set_sql_settings_reader(Box::new(parley_app::parley_sql_settings));
             ui.set_file_saver(Box::new(parley_app::helpers::SqlFileWindow));
             ui.set_api_keys(std::sync::Arc::new(parley_app::api_keys::Keychain));
             ui.set_snippet_store(Box::new(

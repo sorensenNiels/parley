@@ -19,6 +19,8 @@ pub struct Marks {
     pub current: Option<Range<usize>>,
     /// The bracket at the cursor and its partner, if it has one (R-SQL-56).
     pub bracket: Option<(usize, Option<usize>)>,
+    /// Every place of the name under the cursor (R-SQL-66).
+    pub words: Vec<Range<usize>>,
 }
 
 impl Marks {
@@ -28,9 +30,15 @@ impl Marks {
         if start < end {
             return Self::default();
         }
+        let words = if text.len() <= MAX_COLOURED {
+            parley_core::sql::edit::occurrences(text, start)
+        } else {
+            Vec::new()
+        };
         Self {
             current: text::statement_at(text, start),
             bracket: parley_core::sql::edit::matching_bracket(text, start),
+            words,
         }
     }
 }
@@ -54,6 +62,15 @@ pub fn coloured(ui: &Ui, text: &str, font: &FontId, wrap_width: f32, marks: &Mar
     let mut cuts_at: Vec<usize> = Vec::new();
     if let Some(c) = &current {
         cuts_at.extend([c.start, c.end]);
+    }
+    let words: Vec<Range<usize>> = marks
+        .words
+        .iter()
+        .filter(|r| r.end <= text.len())
+        .cloned()
+        .collect();
+    for word in &words {
+        cuts_at.extend([word.start, word.end]);
     }
     if let Some((at, partner)) = bracket {
         cuts_at.extend([at, at + 1]);
@@ -80,6 +97,9 @@ pub fn coloured(ui: &Ui, text: &str, font: &FontId, wrap_width: f32, marks: &Mar
             let mut format = TextFormat::simple(font.clone(), color);
             if current.as_ref().is_some_and(|c| c.start <= a && b <= c.end) {
                 format.background = p.surface_hover;
+            }
+            if words.iter().any(|w| w.start <= a && b <= w.end) {
+                format.background = p.accent.gamma_multiply(0.15);
             }
             match bracket {
                 Some((at, Some(partner))) if a == at || a == partner => {
@@ -137,7 +157,7 @@ mod tests {
             crate::test_support::install_fonts(ui);
             let marks = Marks {
                 current: Some(current.clone()),
-                bracket: None,
+                ..Marks::default()
             };
             let job = coloured(ui, text, &monospace(ui), 400.0, &marks);
             let shaded = picked(&job, text, |f| f.background != Color32::TRANSPARENT);
@@ -157,8 +177,8 @@ mod tests {
             crate::test_support::install_fonts(ui);
             let text = "f('æ', (x))";
             let marks = Marks {
-                current: None,
                 bracket: parley_core::sql::edit::matching_bracket(text, 2),
+                ..Marks::default()
             };
             let job = coloured(ui, text, &monospace(ui), 400.0, &marks);
             assert_eq!(
@@ -167,12 +187,25 @@ mod tests {
             );
             let text = "f((x)";
             let marks = Marks {
-                current: None,
                 bracket: parley_core::sql::edit::matching_bracket(text, 2),
+                ..Marks::default()
             };
             let job = coloured(ui, text, &monospace(ui), 400.0, &marks);
             let fail = theme::palette(ui).fail;
             assert_eq!(picked(&job, text, |f| f.color == fail), "(");
+        });
+        harness.run();
+    }
+
+    #[test]
+    fn every_place_of_the_name_under_the_cursor_is_on_a_background_r_sql_66() {
+        let mut harness = egui_kittest::Harness::new_ui(|ui| {
+            crate::test_support::install_fonts(ui);
+            let text = "SELECT navn FROM kunder WHERE NAVN = 'navn'";
+            let marks = Marks::at(text, (9, 9));
+            let job = coloured(ui, text, &monospace(ui), 400.0, &marks);
+            let accent = theme::palette(ui).accent.gamma_multiply(0.15);
+            assert_eq!(picked(&job, text, |f| f.background == accent), "navnNAVN");
         });
         harness.run();
     }

@@ -263,7 +263,7 @@ impl SnippetPanel {
     }
 
     /// Uses snippet `i`: at once, or after the placeholder form (R-SQL-26).
-    fn start(&mut self, i: usize, run: bool) -> Option<Use> {
+    pub fn start(&mut self, i: usize, run: bool) -> Option<Use> {
         let sql = self.entries.get(i)?.snippet.sql.clone();
         let placeholders = snippet::placeholders(&sql);
         if placeholders.is_empty() {
@@ -300,13 +300,38 @@ impl SnippetPanel {
         });
     }
 
-    /// The panel's dialogs, drawn over the SQL window: save or edit, placeholders, delete.
+    /// The snippets whose title or a tag has a word starting with `prefix` (in capitals), for
+    /// the completion list (R-SQL-64); all of them for an empty prefix.
+    pub fn completions(&self, prefix: &str) -> Vec<super::editor::Item> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| {
+                std::iter::once(&e.snippet.title)
+                    .chain(&e.snippet.tags)
+                    .flat_map(|t| t.split(|c: char| !c.is_alphanumeric() && c != '_'))
+                    .any(|word| word.to_uppercase().starts_with(prefix))
+            })
+            .map(|(i, e)| super::editor::Item {
+                label: e.snippet.title.clone(),
+                detail: "snippet".to_owned(),
+                insert: String::new(),
+                snippet: Some(i),
+            })
+            .collect()
+    }
+
+    /// The panel's dialogs, drawn over the SQL window: save or edit, placeholders, delete. The
+    /// snippets are read first if they were not, for the completion list (R-SQL-64).
     pub fn dialogs(
         &mut self,
         ctx: &egui::Context,
         store: Option<&dyn SnippetStore>,
         shared: &str,
     ) -> Option<Use> {
+        if !self.loaded {
+            self.load(store, shared);
+        }
         self.edit_dialog(ctx, store, shared);
         self.delete_dialog(ctx, store, shared);
         self.placeholder_dialog(ctx)

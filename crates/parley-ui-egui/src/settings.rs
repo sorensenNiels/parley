@@ -175,9 +175,6 @@ impl Page {
                 for addon in AddOn::ON_ADDONS_PAGE {
                     settings.addons.set_enabled(addon, addon.on_by_default());
                 }
-                settings.java_path = defaults.java_path;
-                settings.sql_rows = defaults.sql_rows;
-                settings.sql_timeout = defaults.sql_timeout;
             }
             Self::Sql => {
                 settings.java_path = defaults.java_path;
@@ -194,13 +191,13 @@ impl Page {
 /// The pages under their headings, in the order the list shows them.
 type Sections = &'static [(&'static str, &'static [Page])];
 
-/// Parley's pages.
+/// Parley's pages: none of Parley SQL's, whose settings its SQL window uses (R-SQL-69).
 const SECTIONS: Sections = &[
     (
         "General",
         &[Page::Appearance, Page::Terminal, Page::Keyboard],
     ),
-    ("App", &[Page::AddOns, Page::Assistant, Page::About]),
+    ("App", &[Page::AddOns, Page::About]),
 ];
 
 /// Parley SQL's pages (R-SQL-47): no terminal, keyboard maps or add-on list; its own
@@ -209,6 +206,11 @@ const SQL_SECTIONS: Sections = &[
     ("General", &[Page::Appearance, Page::Shortcuts]),
     ("App", &[Page::Sql, Page::Assistant, Page::About]),
 ];
+
+/// Said under Parley's add-ons while SQL is on (R-SQL-69).
+pub(crate) const SQL_SETTINGS_ELSEWHERE: &str = "The SQL window uses Parley SQL's settings: Java, rows at a \
+     time, query timeout, where results go, shared snippets and the SQL assistant. Change them \
+     in Parley SQL's Settings.";
 
 /// Where the source and the issues are.
 const REPOSITORY: &str = "https://github.com/sorensenNiels/parley";
@@ -387,26 +389,21 @@ impl Dialog {
     fn page_content(&mut self, ui: &mut Ui, settings: &mut Settings, updates: &UpdateStatus) {
         match self.page {
             Page::Appearance => {
-                let sql = self.program == Program::ParleySql || settings.addons.enabled(AddOn::Sql);
-                appearance_page(ui, settings, sql);
+                appearance_page(ui, settings, self.program == Program::ParleySql);
             }
             Page::Terminal => self.terminal_page(ui, settings),
             Page::Keyboard => self.keyboard.show(ui, settings),
             Page::Shortcuts => self.sql_keys.show(ui, settings),
-            Page::AddOns => self.addons_page(ui, settings),
+            Page::AddOns => Self::addons_page(ui, settings),
             Page::Sql => self.sql_page(ui, settings),
-            Page::Assistant => {
-                let needs_sql =
-                    self.program == Program::Parley && !settings.addons.enabled(AddOn::Sql);
-                self.assistant.show(ui, settings, needs_sql);
-            }
+            Page::Assistant => self.assistant.show(ui, settings),
             Page::About => self.about_page(ui, settings, updates),
         }
     }
 
-    /// A switch per add-on (R-ADD-1), as Tortuga's Settings → Add-ons; then, while SQL is on,
-    /// which Java runs its helper (R-SQL-12).
-    fn addons_page(&mut self, ui: &mut Ui, settings: &mut Settings) {
+    /// A switch per add-on (R-ADD-1), as Tortuga's Settings → Add-ons; while SQL is on, where
+    /// its settings are (R-SQL-69).
+    fn addons_page(ui: &mut Ui, settings: &mut Settings) {
         let note = (
             "An add-on that is off is not loaded. Changes take effect when you save.",
             "Add-ons are parts of Parley not everyone needs. Turning one on adds its menu items; \
@@ -420,18 +417,14 @@ impl Dialog {
             }
         });
         if settings.addons.enabled(AddOn::Sql) {
-            self.sql_group(ui, settings);
+            theme::hint(ui, SQL_SETTINGS_ELSEWHERE);
         }
     }
 
-    /// Parley SQL's SQL page (R-SQL-47): the Java and the SQL window's limits. SQL itself is
-    /// always on; the assistant has a page of its own (R-SQL-48).
+    /// Parley SQL's SQL page (R-SQL-47): the Java for the SQL helper, the SQL window's limits,
+    /// what was found, and whether the helper is installed. SQL itself is always on; the
+    /// assistant has a page of its own (R-SQL-48).
     fn sql_page(&mut self, ui: &mut Ui, settings: &mut Settings) {
-        self.sql_group(ui, settings);
-    }
-
-    /// The Java for the SQL helper, what was found, and whether the helper is installed.
-    fn sql_group(&mut self, ui: &mut Ui, settings: &mut Settings) {
         let note = (
             "The SQL window runs its work in Java, with IBM's JTOpen.",
             "Parley does not include Java. Install Java 11 or later, for example the free \

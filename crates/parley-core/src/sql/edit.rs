@@ -5,6 +5,7 @@
 
 use std::ops::Range;
 
+use super::complete::is_name_char;
 use super::text::{self, Kind};
 
 /// One level of indentation: the formatter's (R-SQL-22).
@@ -474,6 +475,147 @@ pub fn keyword_case(text: &str, range: Range<usize>, case: Case) -> String {
     out
 }
 
+/// The unquoted name around byte `at` (the cursor may be just after it); `None` off a name or
+/// on a number.
+fn word_at(text: &str, at: usize) -> Option<Range<usize>> {
+    let (at, _) = clamp(text, (at, at));
+    let start = text
+        .get(..at)?
+        .char_indices()
+        .rev()
+        .take_while(|&(_, c)| is_name_char(c))
+        .last()
+        .map_or(at, |(i, _)| i);
+    let end = text
+        .get(at..)?
+        .char_indices()
+        .find(|&(_, c)| !is_name_char(c))
+        .map_or(text.len(), |(i, _)| at + i);
+    let word = text.get(start..end)?;
+    (!word.is_empty() && !word.starts_with(|c: char| c.is_ascii_digit())).then_some(start..end)
+}
+
+/// Whether `a` and `b` are the same text, ignoring case.
+fn same_ignoring_case(a: &str, b: &str) -> bool {
+    a.chars()
+        .flat_map(char::to_lowercase)
+        .eq(b.chars().flat_map(char::to_lowercase))
+}
+
+/// The strings, delimited names and comments of `text`.
+fn literals(text: &str) -> Vec<(Range<usize>, Kind)> {
+    text::highlight(text)
+        .into_iter()
+        .filter(|(_, k)| matches!(k, Kind::String | Kind::Name | Kind::Comment))
+        .collect()
+}
+
+/// Every place of the name under the cursor at `cursor` (R-SQL-66): unquoted names in any case
+/// and only whole, quoted ones exactly; none in strings or comments. Empty when the name is
+/// there only once, or the cursor is not on a name.
+pub fn occurrences(text: &str, cursor: usize) -> Vec<Range<usize>> {
+    let literals = literals(text);
+    let inside = |at: usize| literals.iter().find(|(r, _)| r.start < at && at < r.end);
+    if let Some((range, kind)) = inside(cursor) {
+        if *kind != Kind::Name {
+            return Vec::new();
+        }
+        let name = text.get(range.clone()).unwrap_or_default();
+        let found: Vec<Range<usize>> = literals
+            .iter()
+            .filter(|(r, k)| *k == Kind::Name && text.get(r.clone()) == Some(name))
+            .map(|(r, _)| r.clone())
+            .collect();
+        return if found.len() > 1 { found } else { Vec::new() };
+    }
+    let Some(word) = word_at(text, cursor) else {
+        return Vec::new();
+    };
+    if literals.iter().any(|(r, _)| r.contains(&word.start)) {
+        return Vec::new();
+    }
+    let name = text.get(word).unwrap_or_default();
+    let mut found = Vec::new();
+    let mut at = 0;
+    while at < text.len() {
+        let Some(rest) = text.get(at..) else { break };
+        let Some(c) = rest.chars().next() else { break };
+        let starts_name = c.is_alphabetic() || matches!(c, '_' | '#' | '$' | '@');
+        let fresh = !text
+            .get(..at)
+            .and_then(|b| b.chars().next_back())
+            .is_some_and(is_name_char);
+        if starts_name && fresh {
+            let end = rest
+                .char_indices()
+                .find(|&(_, c)| !is_name_char(c))
+                .map_or(text.len(), |(i, _)| at + i);
+            let outside = !literals.iter().any(|(r, _)| r.contains(&at));
+            if outside
+                && text
+                    .get(at..end)
+                    .is_some_and(|w| same_ignoring_case(w, name))
+            {
+                found.push(at..end);
+            }
+            at = end;
+        } else {
+            at += c.len_utf8();
+        }
+    }
+    if found.len() > 1 { found } else { Vec::new() }
+}
+
+/// Ctrl+D (R-SQL-67): the name under the cursor without a selection; with one, the next place
+/// of the same text after it, from the top again after the last, ignoring case.
+pub fn select_next(text: &str, selection: (usize, usize)) -> Option<(usize, usize)> {
+    let (start, end) = clamp(text, selection);
+    if start == end {
+        let word = word_at(text, start)?;
+        return Some((word.start, word.end));
+    }
+    let wanted = text.get(start..end)?;
+    let length = wanted.chars().count();
+    let matches_at = |at: usize| -> Option<usize> {
+        let rest = text.get(at..)?;
+        let piece_end = rest
+            .char_indices()
+            .nth(length)
+            .map_or(text.len(), |(i, _)| at + i);
+        let piece = text.get(at..piece_end)?;
+        (piece.chars().count() == length && same_ignoring_case(piece, wanted)).then_some(piece_end)
+    };
+    let starts = text.char_indices().map(|(i, _)| i);
+    let after = starts.clone().filter(|&i| i >= end);
+    let before = starts.filter(|&i| i < end);
+    after
+        .chain(before)
+        .find_map(|i| matches_at(i).map(|e| (i, e)))
+}
+
+/// Save (R-SQL-68): `text` without spaces and tabs at the ends of its lines, but in a string
+/// that goes on to the next line; and where byte `cursor` is afterwards.
+pub fn trim_trailing(text: &str, cursor: usize) -> (String, usize) {
+    let strings: Vec<Range<usize>> = literals(text)
+        .into_iter()
+        .filter(|(_, k)| *k == Kind::String)
+        .map(|(r, _)| r)
+        .collect();
+    let mut changes = Changes::new();
+    let mut at = 0;
+    for line in text.split('\n') {
+        let end = at + line.len();
+        let kept = line.trim_end_matches([' ', '\t']).len();
+        let in_string = strings.iter().any(|r| r.start < end && end < r.end);
+        if kept < line.len() && !in_string {
+            changes.remove(at + kept, line.len() - kept);
+        }
+        at = end + 1;
+    }
+    let (cursor, _) = clamp(text, (cursor, cursor));
+    (changes.apply(text), changes.moved(cursor))
+}
+
 /// How many lines `text` has (an empty text has one).
 pub fn line_count(text: &str) -> usize {
     text.matches('\n').count() + 1
@@ -685,5 +827,53 @@ mod tests {
         assert_eq!(line_start(text, 99), 5);
         assert_eq!(line_count(""), 1);
         assert_eq!(line_start("", 4), 0);
+    }
+
+    #[test]
+    fn every_place_of_the_name_under_the_cursor_is_found_r_sql_66() {
+        let text = "SELECT navn, Navn2 FROM kunder k WHERE k.NAVN = 'navn' -- navn\n AND æøå = ÆØÅ";
+        let found: Vec<&str> = occurrences(text, 9).into_iter().map(|r| &text[r]).collect();
+        assert_eq!(found, ["navn", "NAVN"]);
+        let at = text.find("æøå").expect("there") + 2;
+        let found: Vec<&str> = occurrences(text, at)
+            .into_iter()
+            .map(|r| &text[r])
+            .collect();
+        assert_eq!(found, ["æøå", "ÆØÅ"]);
+        assert!(
+            occurrences(text, text.find("'navn'").expect("there") + 2).is_empty(),
+            "a string"
+        );
+        assert!(
+            occurrences(text, text.find("kunder").expect("there") + 1).is_empty(),
+            "once"
+        );
+        let quoted = "SELECT \"a b\", \"a b\", \"A B\" FROM t";
+        assert_eq!(occurrences(quoted, 9).len(), 2);
+        assert_eq!(occurrences("", 0), Vec::<Range<usize>>::new());
+    }
+
+    #[test]
+    fn ctrl_d_takes_the_word_then_the_next_place_and_wraps_r_sql_67() {
+        let text = "a navn, b Navn, c NAVN";
+        assert_eq!(select_next(text, (4, 4)), Some((2, 6)));
+        assert_eq!(select_next(text, (2, 6)), Some((10, 14)));
+        assert_eq!(select_next(text, (18, 22)), Some((2, 6)));
+        assert_eq!(select_next("æø æø", (0, 4)), Some((5, 9)));
+        assert_eq!(select_next("a + b", (2, 2)), None);
+    }
+
+    #[test]
+    fn trailing_blanks_go_but_not_inside_a_string_r_sql_68() {
+        let text = "SELECT 'a  \nb' \t\nFROM t   \næ  ";
+        let cursor = text.find("FROM").expect("there") + 6;
+        let (trimmed, at) = trim_trailing(text, cursor);
+        assert_eq!(trimmed, "SELECT 'a  \nb'\nFROM t\næ");
+        assert_eq!(
+            &trimmed[at..=at],
+            "\n",
+            "the cursor stays at its line's end"
+        );
+        assert_eq!(trim_trailing("", 0), (String::new(), 0));
     }
 }

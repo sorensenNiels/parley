@@ -35,6 +35,7 @@ use parley_core::sql::protocol::{
 use parley_core::sql::runner::{Event, Runner};
 use parley_core::sql::text::{self, Risk};
 
+use editor::gutter;
 use grid::ResultView;
 
 use crate::{dialog, icons, theme};
@@ -211,6 +212,8 @@ pub struct SqlWindow {
     /// Statements still to run (Run all).
     queue: VecDeque<String>,
     waiting: Option<(u64, Waiting)>,
+    /// When the statement running was sent, for its outcome's time (R-SQL-62).
+    run_started: Option<std::time::Instant>,
     results: results::Results,
     tab: Tab,
     side: Side,
@@ -287,6 +290,7 @@ impl SqlWindow {
             scripts: editor::Scripts::restore(scripts),
             queue: VecDeque::new(),
             waiting: None,
+            run_started: None,
             results: results::Results::reading(config.code_page),
             tab: Tab::Results,
             side: Side::History,
@@ -488,6 +492,14 @@ impl SqlWindow {
                 }
                 CentralPanel::default().show(ui, |ui| self.work(ui, around));
             }
+        }
+        if self.scripts.take_run_asked() {
+            self.run_current();
+        }
+        if let Some(i) = self.scripts.take_snippet_chosen()
+            && let Some(used) = self.snippets.start(i, false)
+        {
+            self.use_snippet(used);
         }
         let used = self
             .snippets
@@ -750,14 +762,38 @@ impl SqlWindow {
             .as_ref()
             .map(|j| (Some(j.schema.clone()), j.libraries.clone()))
             .unwrap_or_default();
-        let items = self.browser.candidates(
+        let found = self.browser.candidates(
             &typed,
             &statement,
             schema.as_deref(),
             &libraries,
             &mut self.database,
         );
-        self.scripts.offer(items);
+        // Snippets by name, but not for a column after `alias.` (R-SQL-64).
+        let snippets = if typed.qualifier.is_none() {
+            self.snippets.completions(&typed.prefix)
+        } else {
+            Vec::new()
+        };
+        self.scripts.offer(editor::arrange(found, snippets));
+    }
+
+    /// The parameters of the routine called at the cursor, from the catalog (R-SQL-65).
+    fn signatures(&mut self, ctx: &egui::Context) {
+        let found = self.scripts.calling(ctx).and_then(|call| {
+            let schema = self.job.as_ref().map(|j| j.schema.clone());
+            let signatures = self
+                .browser
+                .signatures(
+                    call.qualifier.as_deref(),
+                    &call.name,
+                    schema.as_deref(),
+                    &mut self.database,
+                )?
+                .to_vec();
+            Some((call, signatures))
+        });
+        self.scripts.set_signatures(found);
     }
 
     /// What hovering a name in the editor shows, from the schema browser (R-SQL-37).
@@ -856,6 +892,7 @@ impl SqlWindow {
         }
         self.keys(ui, around.files);
         self.complete();
+        self.signatures(ui.ctx());
         self.describe();
         match around.results.arrangement(ui.available_width()) {
             layout::Arrangement::Stacked => self.stacked(ui, around),
@@ -1204,6 +1241,9 @@ impl SqlWindow {
     }
 
     fn send(&mut self, request: Request, waiting: Waiting) {
+        if matches!(waiting, Waiting::Run(_) | Waiting::RunHere(_)) {
+            self.run_started = Some(std::time::Instant::now());
+        }
         if let Some(runner) = &mut self.runner {
             let tag = runner.send(request);
             self.waiting = Some((tag, waiting));
@@ -1365,6 +1405,13 @@ impl SqlWindow {
                 rows,
                 more,
             }) => {
+                self.note_outcome(
+                    statement,
+                    gutter::Outcome::Rows {
+                        count: rows.len(),
+                        more,
+                    },
+                );
                 self.messages.push((
                     false,
                     format!(
@@ -1378,12 +1425,14 @@ impl SqlWindow {
                 self.tab = Tab::Results;
             }
             Ok(Outcome::Count { .. }) if text::cl_command(statement).is_some() => {
+                self.note_outcome(statement, gutter::Outcome::Done);
                 self.messages.push((false, format!("{short}: done")));
                 if self.queue.is_empty() {
                     self.tab = Tab::Messages;
                 }
             }
             Ok(Outcome::Count { count }) => {
+                self.note_outcome(statement, gutter::Outcome::Changed(count));
                 self.messages
                     .push((false, format!("{short}: {count} rows changed")));
                 if !self.autocommit {
@@ -1394,12 +1443,23 @@ impl SqlWindow {
                 }
             }
             Err(e) => {
+                self.note_outcome(statement, gutter::Outcome::Failed(e.to_string()));
                 self.queue.clear();
                 self.fail(format!("{short}: {e}"));
                 return;
             }
         }
         self.next_statement();
+    }
+
+    /// Keeps how `statement` ended for the editor's gutter (R-SQL-62).
+    fn note_outcome(&mut self, statement: &str, outcome: gutter::Outcome) {
+        let took = self
+            .run_started
+            .take()
+            .map(|t| t.elapsed())
+            .unwrap_or_default();
+        self.scripts.outcomes.note(statement, outcome, took);
     }
 
     fn fail(&mut self, message: String) {
@@ -1552,6 +1612,48 @@ mod tests {
         assert_eq!(w.tab, Tab::Results);
         assert_eq!(w.take_ran(), ["SELECT NAME FROM T"]);
         assert!(w.waiting.is_none());
+    }
+
+    /// R-SQL-62: each run leaves its outcome for the gutter, an error too.
+    #[test]
+    fn a_run_leaves_its_outcome_for_the_gutter_r_sql_62() {
+        let mut w = window();
+        running(&mut w, "SELECT NAME FROM T");
+        answer(
+            &mut w,
+            r#"{"id":1,"ok":{"kind":"rows","cursor":3,"columns":[{"name":"NAME","type":"VARCHAR","length":10,"scale":0,"nullable":true,"numeric":false}],"rows":[["æøå"],[null]],"more":true}}"#,
+        );
+        running(&mut w, "DELETE FROM T WHERE A = 'å'");
+        answer(
+            &mut w,
+            r#"{"id":1,"error":{"message":"T i *LIBL findes ikke.","sqlstate":"42704","sqlcode":-204}}"#,
+        );
+        let outcomes = format!("{:?}", w.scripts.outcomes);
+        assert!(
+            outcomes.contains("Rows { count: 2, more: true }"),
+            "{outcomes}"
+        );
+        assert!(outcomes.contains("findes ikke"), "{outcomes}");
+    }
+
+    /// R-SQL-62: the ▶ on a statement's first line selects that statement and runs it.
+    #[test]
+    fn the_play_mark_in_the_gutter_runs_its_statement_r_sql_62() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut w = window().signed_on_for_tests();
+        w.scripts.set_text("VALUES 1;\n\nVALUES 'æøå';\n", 0);
+        let mut harness = drawn(w, Vec::new());
+        harness.run();
+        harness.get_by_label("Run the statement on line 3").click();
+        harness.run();
+        let script = "VALUES 1;\n\nVALUES 'æøå';\n";
+        let start = script.find("VALUES 'æøå'").expect("there");
+        assert_eq!(
+            harness.state().scripts.selection(),
+            (start, start + "VALUES 'æøå'".len())
+        );
+        assert!(harness.state().run_started.is_some(), "it was run");
     }
 
     #[test]
