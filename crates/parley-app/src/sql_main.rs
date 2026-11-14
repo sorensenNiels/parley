@@ -125,6 +125,7 @@ fn main() -> eframe::Result {
             }
             ui.set_sql_helpers(parley_app::helpers::sql_helpers());
             ui.set_file_saver(Box::new(parley_app::helpers::SqlFileWindow));
+            ui.set_api_keys(std::sync::Arc::new(parley_app::api_keys::Keychain));
             // The same snippet folder as Parley's SQL add-on (R-SQL-24).
             ui.set_snippet_store(Box::new(
                 parley_app::snippets::SnippetFolders::beside_settings(),

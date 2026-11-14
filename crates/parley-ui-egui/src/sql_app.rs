@@ -38,6 +38,8 @@ pub struct ParleySqlUi {
     logo: Logo,
     updates: updates::Updates,
     helpers: Option<std::path::PathBuf>,
+    /// The keychain the SQL assistant's API keys are kept in (R-SQL-48).
+    api_keys: Option<std::sync::Arc<dyn crate::ApiKeys>>,
     files: Option<Box<dyn sql::SqlFiles>>,
     snippets: Option<Box<dyn sql::snippets::SnippetStore>>,
     /// Why the window could not open, in a dialog (R-SQL-12).
@@ -63,6 +65,7 @@ impl ParleySqlUi {
             logo: Logo::default(),
             updates: updates::Updates::default(),
             helpers: None,
+            api_keys: None,
             files: None,
             snippets: None,
             notice: None,
@@ -91,6 +94,11 @@ impl ParleySqlUi {
     /// The folder of the SQL helper's jars; `None` when this installation has none (R-SQL-13).
     pub fn set_sql_helpers(&mut self, folder: Option<std::path::PathBuf>) {
         self.helpers = folder;
+    }
+
+    /// The keychain for the SQL assistant's API keys (R-SQL-48).
+    pub fn set_api_keys(&mut self, keys: std::sync::Arc<dyn crate::ApiKeys>) {
+        self.api_keys = Some(keys);
     }
 
     pub fn set_file_saver(&mut self, saver: Box<dyn sql::SqlFiles>) {
@@ -251,8 +259,9 @@ impl ParleySqlUi {
             shared: &self.settings.sql_snippets_shared,
             // One connection at a time: no Run on… (D26).
             systems: None,
+            results: self.settings.sql_results,
         };
-        window.set_assistant(assistant);
+        window.set_assistant(assistant, &self.settings.assistant, self.api_keys.as_ref());
         let open = window.show_in(ui, around);
         sql::hosting::keep(window, &name, &mut self.settings, &mut self.scripts_kept);
         self.remember_user(&name);
@@ -341,7 +350,8 @@ impl ParleySqlUi {
         }
         let dialog = settings::Dialog::open(ctx, &self.settings)
             .for_program(Program::ParleySql)
-            .with_sql_helpers(self.helpers.clone());
+            .with_sql_helpers(self.helpers.clone())
+            .with_api_keys(self.api_keys.clone());
         self.settings_dialog = Some(if about {
             dialog.on_about_page()
         } else {
@@ -429,7 +439,7 @@ mod tests {
         let mut harness = app_with(Vec::new());
         harness.get_by_label("Settings").click();
         harness.run();
-        for page in ["Appearance", "SQL", "About"] {
+        for page in ["Appearance", "SQL", "SQL assistant", "About"] {
             harness.get_by_label(page);
         }
         for page in ["Terminal", "Keyboard", "Add-ons"] {
@@ -437,7 +447,6 @@ mod tests {
         }
         harness.get_by_label("SQL").click();
         harness.run();
-        harness.get_by_label("SQL assistant");
         harness.get_by_label("Rows at a time");
         let before = harness.get_by_label("Save").rect();
         harness.run_steps(5);

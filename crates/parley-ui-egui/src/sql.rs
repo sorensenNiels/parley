@@ -3,13 +3,14 @@
 //! results. The helper runs on a thread of its own (`parley_core::sql::runner`), so the window
 //! never waits for the host.
 
-mod assistant;
+pub(crate) mod assistant;
 mod browser;
 mod chart;
 mod database;
 pub mod editor;
 pub mod grid;
 pub mod hosting;
+pub mod layout;
 mod parameters;
 pub mod results;
 pub mod snippets;
@@ -67,6 +68,9 @@ pub struct Around<'a> {
     /// The saved sessions, by name, that "Run on…" offers (R-SQL-43); `None` for no Run on…
     /// at all, as in Parley SQL (D26).
     pub systems: Option<&'a [(String, SessionConfig)]>,
+    /// Where the results go: below the editor, beside it, or beside it when there is room
+    /// (R-SQL-49).
+    pub results: layout::ResultsPlace,
 }
 
 /// How far the window is, for Parley SQL's status bar (R-SQL-45).
@@ -91,6 +95,10 @@ pub struct WindowStatus {
     /// The last error, if the window shows one.
     pub error: Option<String>,
 }
+
+/// Beside the results, the height the editor leaves below its text: the tab strip, the Run
+/// buttons and a line of error.
+const BELOW_THE_TEXT: f32 = 110.0;
 
 /// Where the window is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -219,6 +227,8 @@ pub struct SqlWindow {
     rows: u32,
     timeout: u32,
     place: Place,
+    /// Results beside the editor: the editor's share of the width (R-SQL-49).
+    editor_share: f32,
 }
 
 impl SqlWindow {
@@ -272,6 +282,7 @@ impl SqlWindow {
             rows: protocol::FIRST_ROWS,
             timeout: 0,
             place: Place::OwnWindow,
+            editor_share: layout::DEFAULT_SHARE,
         }
     }
 
@@ -318,9 +329,19 @@ impl SqlWindow {
         self
     }
 
-    /// Shows the SQL assistant while its add-on is on (R-ADD-3).
-    pub fn set_assistant(&mut self, on: bool) {
+    /// Shows the SQL assistant while it is on (R-ADD-3), asking `config`'s provider with a key
+    /// from the environment or `keys` (R-SQL-48).
+    pub fn set_assistant(
+        &mut self,
+        on: bool,
+        config: &parley_core::sql::assistant::AssistantConfig,
+        keys: Option<&std::sync::Arc<dyn assistant::ApiKeys>>,
+    ) {
         self.assistant.on = on;
+        if self.assistant.config != *config {
+            self.assistant.config.clone_from(config);
+        }
+        self.assistant.keys = keys.cloned();
     }
 
     /// The libraries pinned now, to keep in the settings.
@@ -765,22 +786,61 @@ impl SqlWindow {
 
     // ---------------------------------------------------------------- writing and running
 
+    /// The editor with its Run buttons, and the results below or beside it (R-SQL-49).
     fn work(&mut self, ui: &mut Ui, around: Around<'_>) {
-        let saver = around.files;
         self.keys(ui);
-        let height = (ui.available_height() * 0.38).clamp(90.0, 320.0);
+        self.complete();
+        self.describe();
+        match around.results.arrangement(ui.available_width()) {
+            layout::Arrangement::Stacked => {
+                let height = (ui.available_height() * 0.38).clamp(90.0, 320.0);
+                self.writing(ui, height, around);
+                ui.add_space(4.0);
+                self.results_and_messages(ui, around.files);
+            }
+            layout::Arrangement::SideBySide => self.side_by_side(ui, around),
+        }
+    }
+
+    /// The editor on the left, the results on the right, a divider between them (R-SQL-49).
+    fn side_by_side(&mut self, ui: &mut Ui, around: Around<'_>) {
+        let full = ui.available_rect_before_wrap();
+        let width = layout::editor_width(self.editor_share, full.width());
+        let left = egui::Rect::from_min_size(full.min, egui::vec2(width, full.height()));
+        {
+            let mut left_ui = ui.new_child(egui::UiBuilder::new().max_rect(left));
+            // Room for the tab strip, the Run buttons and a line of error below the text.
+            let height = (left.height() - BELOW_THE_TEXT).max(90.0);
+            self.writing(&mut left_ui, height, around);
+        }
+        let divider = egui::Rect::from_min_size(
+            egui::pos2(left.right(), full.top()),
+            egui::vec2(layout::DIVIDER, full.height()),
+        );
+        if let Some(share) = layout::divider(ui, divider, width, full.width()) {
+            self.editor_share = share;
+        }
+        let right = egui::Rect::from_min_max(egui::pos2(divider.right(), full.top()), full.max);
+        let mut right_ui = ui.new_child(egui::UiBuilder::new().max_rect(right));
+        self.results_and_messages(&mut right_ui, around.files);
+        ui.allocate_rect(full, egui::Sense::hover());
+    }
+
+    /// The Ask row, the editor with a text `height` tall, the Run buttons and the error line.
+    fn writing(&mut self, ui: &mut Ui, height: f32, around: Around<'_>) {
         if self.assistant.on {
             self.assistant_row(ui);
         }
-        self.complete();
-        self.describe();
-        self.scripts.show(ui, height, saver);
+        self.scripts.show(ui, height, around.files);
         ui.add_space(6.0);
         self.run_buttons(ui, around.systems);
         if let Some(error) = &self.error_line {
             theme::error(ui, error);
         }
-        ui.add_space(4.0);
+    }
+
+    /// The Results and Messages tabs.
+    fn results_and_messages(&mut self, ui: &mut Ui, saver: Option<&dyn SqlFiles>) {
         theme::segmented(
             ui,
             &mut self.tab,
@@ -1497,12 +1557,13 @@ mod tests {
         let mut harness = drawn(window(), Vec::new());
         harness.run_steps(2);
         assert!(
-            harness.query_by_label("Ask Claude").is_none(),
+            harness.query_by_label("Ask").is_none(),
             "off: nothing of it shows"
         );
-        harness.state_mut().set_assistant(true);
+        let config = parley_core::sql::assistant::AssistantConfig::default();
+        harness.state_mut().set_assistant(true, &config, None);
         harness.run_steps(2);
-        assert!(harness.query_by_label("Ask Claude").is_some());
+        assert!(harness.query_by_label("Ask").is_some());
     }
 
     #[test]
@@ -1693,6 +1754,74 @@ mod tests {
         let harness = drawn(window().signed_on_for_tests(), Vec::new());
         harness.get_by_label("Run all");
         assert!(harness.query_by_label("Run on…").is_none());
+    }
+
+    /// Draws a signed-on window `width` wide with its results placed as `results` asks.
+    fn drawn_with_results(
+        width: f32,
+        results: layout::ResultsPlace,
+    ) -> egui_kittest::Harness<'static, SqlWindow> {
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(width, 760.0))
+            .with_max_steps(16)
+            .build_ui_state(
+                move |ui, w: &mut SqlWindow| {
+                    crate::test_support::install_fonts(ui);
+                    let around = Around {
+                        results,
+                        ..Around::default()
+                    };
+                    // In the harness's whole width, as Parley SQL draws it.
+                    w.show_in(ui, around);
+                },
+                window().signed_on_for_tests(),
+            );
+        harness.run();
+        harness
+    }
+
+    /// R-SQL-49: below, the Results tab is under the Run button; beside, to its right, and the
+    /// divider between them stays put over a few frames.
+    #[test]
+    fn the_results_go_below_or_beside_the_editor_as_the_settings_ask_r_sql_49() {
+        use egui_kittest::kittest::Queryable;
+
+        let harness = drawn_with_results(1100.0, layout::ResultsPlace::Below);
+        let run = harness.get_by_label("Run").rect();
+        let tab = harness.get_by_label("Results").rect();
+        assert!(tab.top() > run.bottom(), "below: {tab:?} under {run:?}");
+        assert!(
+            harness
+                .query_by_label("Editor and results divider")
+                .is_none()
+        );
+
+        let mut harness = drawn_with_results(1100.0, layout::ResultsPlace::Beside);
+        let run = harness.get_by_label("Run").rect();
+        let tab = harness.get_by_label("Results").rect();
+        assert!(tab.left() > run.right(), "beside: {tab:?} right of {run:?}");
+        assert!(tab.top() < run.top(), "at the top: {tab:?}, {run:?}");
+        let divider = harness.get_by_label("Editor and results divider").rect();
+        harness.run_steps(3);
+        assert_eq!(
+            harness.get_by_label("Editor and results divider").rect(),
+            divider
+        );
+    }
+
+    /// R-SQL-49: automatic puts the results beside the editor only in a wide window.
+    #[test]
+    fn automatic_results_go_beside_in_a_wide_window_r_sql_49() {
+        use egui_kittest::kittest::Queryable;
+
+        let narrow = drawn_with_results(980.0, layout::ResultsPlace::Automatic);
+        assert!(
+            narrow
+                .query_by_label("Editor and results divider")
+                .is_none()
+        );
+        let wide = drawn_with_results(1600.0, layout::ResultsPlace::Automatic);
+        wide.get_by_label("Editor and results divider");
     }
 
     #[test]

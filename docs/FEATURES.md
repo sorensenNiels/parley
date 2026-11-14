@@ -13,6 +13,25 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
+- **R-SQL-49** (2026-11-14): results below or beside the editor, built. **Automated** (`make test`): Automatic is
+  below under 1100 points and beside from there; each column keeps its least width; the setting is kept by name; in
+  kittest the Results tab is under the Run button when Below and to its right when Beside, with a divider that stays
+  in place, and Automatic shows the divider only in a wide window. **Left:** seen in the running app (both programs,
+  light and dark, dragging the divider).
+
+- **R-SQL-48** (2026-11-14): the SQL assistant's settings page and providers, built. **Automated** (`make test`):
+  each provider has an address and model unless given, a local one needs no key; the Anthropic and OpenAI formats
+  build their requests and read tool calls, answers, words, refusals and cut-off replies from hand-built fixtures
+  (arguments as text or as an object, a call without an id); HTTP errors are said by provider (Gemini's list form);
+  without a needed key or an address nothing is sent; the key comes from the environment, then the keychain, and
+  never shows in `Debug` or the settings; in kittest the page turns the assistant on and keeps its place, a key is
+  saved to and removed from a keychain in memory, llama.cpp shows its address and the `--jinja` hint, and Parley's
+  Add-ons page no longer has the switch. **Seen** (WSL2): the engine, through `examples/askprobe.rs` and a
+  made-up library, asked the owner's `llama-server` (b8681, Qwen2.5-Coder-7B Q4_K_M): it listed the tables, read two
+  tables' columns and answered with a correct join in four rounds (~40 s). Without `tool_choice: "required"` that model
+  wrote its calls as text, so llama.cpp now forces calls. **Left:** the owner asks a question in the SQL window with
+  each provider (a real key, and the `llama-server`), checks the page in light and dark and the keychain on Windows, macOS and Linux,
+  then move it to REQUIREMENTS.md.
 - **R-SQL-45, R-SQL-46, R-SQL-47** (2026-11-14): Parley SQL, built (`make run-sql`). **Automated** (`make test`): in
   kittest, the header has the name, File and Help and a gear at the right end, and no Tools menu; the status bar says
   Offline; the gear opens Settings with Appearance, SQL and About only, and the SQL page keeps the dialog in place;

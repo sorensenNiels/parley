@@ -4,6 +4,7 @@
 //! right groups of rows, each a name with a short line about it and the control beside it.
 //! Changes show at once; Cancel puts the old ones back.
 
+mod assistant;
 mod keyboard;
 
 use egui::{Align, ComboBox, CornerRadius, Frame, Id, Layout, Margin, RichText, Stroke, Ui, vec2};
@@ -54,6 +55,8 @@ pub struct Settings {
     pub sql_timeout: u32,
     /// What the SQL window's column headings say (R-SQL-29).
     pub sql_header: crate::sql::grid::HeaderMode,
+    /// Where the SQL window's results go: below the editor, beside it, or automatic (R-SQL-49).
+    pub sql_results: crate::sql::layout::ResultsPlace,
     /// A folder of snippets shared with others, besides the operator's own; empty for none (R-SQL-24).
     pub sql_snippets_shared: String,
     /// The statements run in the SQL window, by saved session, oldest first (R-SQL-7).
@@ -62,6 +65,8 @@ pub struct Settings {
     pub sql_scripts: std::collections::BTreeMap<String, Vec<crate::sql::editor::SavedScript>>,
     /// The libraries pinned in the SQL window's schema browser, by saved session (R-SQL-34).
     pub sql_pinned: std::collections::BTreeMap<String, Vec<String>>,
+    /// The SQL assistant's provider, model and address; never a key (R-SQL-48, D27).
+    pub assistant: parley_core::sql::assistant::AssistantConfig,
 }
 
 impl Default for Settings {
@@ -78,10 +83,12 @@ impl Default for Settings {
             sql_rows: parley_core::sql::protocol::FIRST_ROWS,
             sql_timeout: 0,
             sql_header: crate::sql::grid::HeaderMode::default(),
+            sql_results: crate::sql::layout::ResultsPlace::default(),
             sql_snippets_shared: String::new(),
             sql_history: std::collections::BTreeMap::new(),
             sql_scripts: std::collections::BTreeMap::new(),
             sql_pinned: std::collections::BTreeMap::new(),
+            assistant: parley_core::sql::assistant::AssistantConfig::default(),
         }
     }
 }
@@ -119,8 +126,10 @@ pub enum Page {
     Terminal,
     Keyboard,
     AddOns,
-    /// Parley SQL's page for the SQL window and its assistant (R-SQL-47).
+    /// Parley SQL's page for the SQL window (R-SQL-47).
     Sql,
+    /// The SQL assistant: on or off, the provider and its key (R-SQL-48).
+    Assistant,
     About,
 }
 
@@ -132,6 +141,7 @@ impl Page {
             Self::Keyboard => "Keyboard",
             Self::AddOns => "Add-ons",
             Self::Sql => "SQL",
+            Self::Assistant => "SQL assistant",
             Self::About => "About",
         }
     }
@@ -149,20 +159,22 @@ impl Page {
             // The map shown gets the Default map's keys: see `keyboard::Page::restore`.
             Self::Keyboard => {}
             Self::AddOns => {
-                settings.addons = defaults.addons;
+                for addon in AddOn::ON_ADDONS_PAGE {
+                    settings.addons.set_enabled(addon, addon.on_by_default());
+                }
                 settings.java_path = defaults.java_path;
                 settings.sql_rows = defaults.sql_rows;
                 settings.sql_timeout = defaults.sql_timeout;
+                settings.sql_results = defaults.sql_results;
             }
             Self::Sql => {
-                settings
-                    .addons
-                    .set_enabled(AddOn::Assistant, AddOn::Assistant.on_by_default());
                 settings.java_path = defaults.java_path;
                 settings.sql_rows = defaults.sql_rows;
                 settings.sql_timeout = defaults.sql_timeout;
                 settings.sql_snippets_shared = defaults.sql_snippets_shared;
+                settings.sql_results = defaults.sql_results;
             }
+            Self::Assistant => assistant::restore_defaults(settings),
             Self::About => settings.check_for_updates = defaults.check_for_updates,
         }
     }
@@ -177,13 +189,13 @@ const SECTIONS: Sections = &[
         "General",
         &[Page::Appearance, Page::Terminal, Page::Keyboard],
     ),
-    ("App", &[Page::AddOns, Page::About]),
+    ("App", &[Page::AddOns, Page::Assistant, Page::About]),
 ];
 
 /// Parley SQL's pages (R-SQL-47): no terminal, keyboard maps or add-on list.
 const SQL_SECTIONS: Sections = &[
     ("General", &[Page::Appearance]),
-    ("App", &[Page::Sql, Page::About]),
+    ("App", &[Page::Sql, Page::Assistant, Page::About]),
 ];
 
 /// Where the source and the issues are.
@@ -210,6 +222,8 @@ pub struct Dialog {
     java_found: Option<(String, std::result::Result<String, String>)>,
     /// Parley or Parley SQL: which pages, and the name on About.
     program: Program,
+    /// The SQL assistant's page, with the keychain (R-SQL-48).
+    assistant: assistant::Page,
 }
 
 /// How the dialog closed.
@@ -233,6 +247,7 @@ impl Dialog {
             sql_helpers: None,
             java_found: None,
             program: Program::Parley,
+            assistant: assistant::Page::default(),
         }
     }
 
@@ -252,6 +267,13 @@ impl Dialog {
     /// The folder of the SQL helper's jars, for the SQL add-on's rows (R-SQL-12).
     pub fn with_sql_helpers(mut self, folder: Option<std::path::PathBuf>) -> Self {
         self.sql_helpers = folder;
+        self
+    }
+
+    /// The keychain the SQL assistant's page saves API keys in (R-SQL-48); without one, the
+    /// page says to use the environment.
+    pub fn with_api_keys(mut self, keys: Option<std::sync::Arc<dyn crate::ApiKeys>>) -> Self {
+        self.assistant = assistant::Page::new(keys);
         self
     }
 
@@ -353,6 +375,11 @@ impl Dialog {
             Page::Keyboard => self.keyboard.show(ui, settings),
             Page::AddOns => self.addons_page(ui, settings),
             Page::Sql => self.sql_page(ui, settings),
+            Page::Assistant => {
+                let needs_sql =
+                    self.program == Program::Parley && !settings.addons.enabled(AddOn::Sql);
+                self.assistant.show(ui, settings, needs_sql);
+            }
             Page::About => self.about_page(ui, settings, updates),
         }
     }
@@ -366,7 +393,7 @@ impl Dialog {
              turning it off removes them and stops what it is doing.",
         );
         group(ui, "Add-ons", Some(note), |rows| {
-            for addon in AddOn::ALL {
+            for addon in AddOn::ON_ADDONS_PAGE {
                 let mut on = settings.addons.enabled(addon);
                 rows.switch(addon.name(), Some(addon.about()), &mut on);
                 settings.addons.set_enabled(addon, on);
@@ -377,15 +404,9 @@ impl Dialog {
         }
     }
 
-    /// Parley SQL's SQL page (R-SQL-47): the assistant, which stays an add-on that is off until
-    /// turned on (R-ADD-3), then the Java and the SQL window's limits. SQL itself is always on.
+    /// Parley SQL's SQL page (R-SQL-47): the Java and the SQL window's limits. SQL itself is
+    /// always on; the assistant has a page of its own (R-SQL-48).
     fn sql_page(&mut self, ui: &mut Ui, settings: &mut Settings) {
-        group(ui, "Assistant", None, |rows| {
-            let addon = AddOn::Assistant;
-            let mut on = settings.addons.enabled(addon);
-            rows.switch(addon.name(), Some(addon.about()), &mut on);
-            settings.addons.set_enabled(addon, on);
-        });
         self.sql_group(ui, settings);
     }
 
@@ -406,6 +427,22 @@ impl Dialog {
                     let edit =
                         egui::TextEdit::singleline(&mut settings.java_path).hint_text("Automatic");
                     theme::sized_edit(ui, 260.0, edit).labelled_by(name_id);
+                },
+            );
+            rows.row(
+                "Results",
+                Some("Beside the editor, or below it; Automatic: beside when the window is wide."),
+                |ui, _| {
+                    use crate::sql::layout::ResultsPlace;
+                    theme::segmented(
+                        ui,
+                        &mut settings.sql_results,
+                        &[
+                            (ResultsPlace::Below, "Below"),
+                            (ResultsPlace::Beside, "Beside"),
+                            (ResultsPlace::Automatic, "Automatic"),
+                        ],
+                    );
                 },
             );
             rows.row(

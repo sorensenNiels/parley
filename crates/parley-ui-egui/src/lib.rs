@@ -35,6 +35,7 @@ pub use profile::Profile;
 use sessions::{Editor, Outcome};
 pub use settings::{Settings, Theme};
 pub use sql::SqlFiles;
+pub use sql::assistant::ApiKeys;
 pub use sql::editor::SavedScript;
 pub use sql::snippets::SnippetStore;
 pub use sql_app::{ParleySqlUi, SqlConnection};
@@ -87,6 +88,8 @@ pub struct ParleyUi {
     macro_manager: Option<macros::Manager>,
     /// The folder of the SQL helper's jars, if this installation has one (R-SQL-13).
     sql_helpers: Option<std::path::PathBuf>,
+    /// The keychain the SQL assistant's API keys are kept in (R-SQL-48).
+    api_keys: Option<std::sync::Arc<dyn ApiKeys>>,
     /// The SQL window, while open (R-SQL-6).
     sql_window: Option<sql::SqlWindow>,
     /// The user last typed in the SQL window, by session, for this run of Parley only.
@@ -135,6 +138,7 @@ impl ParleyUi {
             macro_password: None,
             macro_manager: None,
             sql_helpers: None,
+            api_keys: None,
             sql_window: None,
             sql_users: std::collections::BTreeMap::new(),
             sql_notice: None,
@@ -172,6 +176,12 @@ impl ParleyUi {
     /// Where the SQL helper's jars are (R-SQL-13); `None` when this installation has none.
     pub fn set_sql_helpers(&mut self, folder: Option<std::path::PathBuf>) {
         self.sql_helpers = folder;
+    }
+
+    /// The keychain for the SQL assistant's API keys (R-SQL-48); without one, keys come only
+    /// from the environment.
+    pub fn set_api_keys(&mut self, keys: std::sync::Arc<dyn ApiKeys>) {
+        self.api_keys = Some(keys);
     }
 
     /// How to ask for the latest release (R-UI-11). Without one, Parley doesn't look for
@@ -336,6 +346,7 @@ impl ParleyUi {
         settings::Dialog::open(ctx, &self.settings)
             .with_keyboard(&self.keyboard_map().name, macros, self.addon_on(AddOn::Sql))
             .with_sql_helpers(self.sql_helpers.clone())
+            .with_api_keys(self.api_keys.clone())
     }
 
     /// Sessions that used the map `old` use it under its new name.
@@ -671,8 +682,13 @@ impl ParleyUi {
                 snippets: self.snippet_store.as_deref(),
                 shared: &self.settings.sql_snippets_shared,
                 systems: Some(&systems),
+                results: self.settings.sql_results,
             };
-            window.set_assistant(assistant_on);
+            window.set_assistant(
+                assistant_on,
+                &self.settings.assistant,
+                self.api_keys.as_ref(),
+            );
             let open = window.show(ctx, around);
             if !window.user.trim().is_empty() {
                 self.sql_users
@@ -915,6 +931,50 @@ pub(crate) mod test_support {
     use parley_core::macros::{Macro, Step};
 
     use crate::{MacroStore, Profile, StoredMacro};
+
+    /// A keychain in memory, for tests.
+    #[derive(Default)]
+    pub struct FakeKeys(
+        pub  std::sync::Mutex<
+            std::collections::HashMap<parley_core::sql::assistant::Provider, String>,
+        >,
+    );
+
+    impl std::fmt::Debug for FakeKeys {
+        /// Like a real keychain's: the keys are not shown.
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("FakeKeys")
+        }
+    }
+
+    impl crate::ApiKeys for FakeKeys {
+        fn get(
+            &self,
+            provider: parley_core::sql::assistant::Provider,
+        ) -> Result<Option<String>, String> {
+            Ok(self
+                .0
+                .lock()
+                .map_err(|e| e.to_string())?
+                .get(&provider)
+                .cloned())
+        }
+        fn set(
+            &self,
+            provider: parley_core::sql::assistant::Provider,
+            key: &str,
+        ) -> Result<(), String> {
+            self.0
+                .lock()
+                .map_err(|e| e.to_string())?
+                .insert(provider, key.to_owned());
+            Ok(())
+        }
+        fn delete(&self, provider: parley_core::sql::assistant::Provider) -> Result<(), String> {
+            self.0.lock().map_err(|e| e.to_string())?.remove(&provider);
+            Ok(())
+        }
+    }
 
     /// Parley's fonts, once per context, for a widget tested on its own: the icons and
     /// `theme::semibold` need them.
@@ -1785,6 +1845,26 @@ mod tests {
             .get_by_role_and_label(egui::accesskit::Role::CheckBox, name)
             .click();
         harness.run();
+    }
+
+    #[test]
+    fn the_assistant_is_turned_on_on_its_own_page_not_in_add_ons_r_sql_48() {
+        let mut harness = app_with(Vec::new());
+        switch_add_on_in_settings(&mut harness, "SQL");
+        assert!(
+            harness
+                .query_by_role_and_label(egui::accesskit::Role::CheckBox, "SQL assistant")
+                .is_none(),
+            "not on the Add-ons page"
+        );
+        harness.get_by_label("SQL assistant").click();
+        harness.run();
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::CheckBox, "SQL assistant")
+            .click();
+        harness.get_by_label("Save").click();
+        harness.run();
+        assert!(harness.state().addon_on(AddOn::Assistant));
     }
 
     #[test]

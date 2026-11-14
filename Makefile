@@ -23,7 +23,7 @@ endif
 RUN_ENV := $(if $(IS_WSL),GALLIUM_DRIVER=$${GALLIUM_DRIVER:-d3d12} ,)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup run run-sql probe probe-sql jt400 helper build release package icons test test-core test-ui lint \
+.PHONY: help setup run run-sql probe probe-sql jt400 helper llama build release package icons test test-core test-ui lint \
         fmt fmt-check deny verify doc clean outdated update upgrade \
         release-patch release-minor release-major
 
@@ -38,6 +38,8 @@ help:
 	@echo "    probe-sql     Ask HOST which SQL routes it offers, without signing on (R-NET-8)"
 	@echo "    jt400         Fetch JTOpen (pinned, checked) for the SQL helper into target/helpers"
 	@echo "    helper        Build and check the SQL helper (needs a JDK 11+)"
+	@echo "    llama         Serve a local model with llama.cpp on 127.0.0.1:LLAMA_PORT (apt/brew/winget install llama.cpp)"
+	@echo "                  LLAMA_MODEL=repo:quant (Hugging Face) or a .gguf file; LLAMA_ARGS= more flags"
 	@echo ""
 	@echo "  Quality"
 	@echo "    verify        Everything CI checks: fmt-check, lint, test, deny"
@@ -108,6 +110,38 @@ helper:
 # make probe-sql HOST=... ARGS="--sign-on USER [--tls] [--ccsid 277]": one recorded sign-on (R-NET-9)
 probe-sql:
 	cargo run -q -p $(CORE) --example sqlprobe -- $(HOST) $(ARGS)
+
+# A local model behind llama.cpp's OpenAI-compatible server, for trying models out. Needs llama-server
+# on PATH: sudo apt install llama.cpp (recent Ubuntu and Debian), brew install llama.cpp, winget install
+# llama.cpp, or a release from github.com/ggml-org/llama.cpp.
+# LLAMA_MODEL is a Hugging Face repo:quant, downloaded once into llama.cpp's cache, or a local .gguf file.
+# The default is a 7B coder model at 4 bits (~4.7 GB): it runs on a CPU with 16 GB of memory.
+# --jinja applies the model's own chat template, which tool calls need.
+LLAMA_MODEL ?= bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M
+LLAMA_PORT ?= 8080
+LLAMA_CTX ?= 16384
+
+# Is llama-server on PATH? Expanded only when `make llama` runs. `where` prints the full path on
+# Windows (in cmd and Git Bash alike; paths with spaces split into words, so match the last one).
+ifeq ($(PLATFORM),windows)
+  LLAMA_FOUND = $(filter %llama-server.exe,$(shell where llama-server 2>&1))
+else
+  LLAMA_FOUND = $(shell command -v llama-server 2>/dev/null)
+endif
+LLAMA_INSTALL_linux := sudo apt install llama.cpp   (Ubuntu and Debian; or: brew install llama.cpp)
+LLAMA_INSTALL_macos := brew install llama.cpp
+LLAMA_INSTALL_windows := winget install llama.cpp   (then open a new terminal)
+define LLAMA_MISSING
+llama-server (llama.cpp) is not installed or not on PATH. Install it with:
+
+    $(LLAMA_INSTALL_$(PLATFORM))
+
+or unpack a release from https://github.com/ggml-org/llama.cpp/releases and put its folder on PATH.
+endef
+
+llama:
+	$(if $(LLAMA_FOUND),,$(info $(LLAMA_MISSING))$(error llama-server not found))
+	llama-server $(if $(filter %.gguf,$(LLAMA_MODEL)),-m,-hf) $(LLAMA_MODEL) --host 127.0.0.1 --port $(LLAMA_PORT) -c $(LLAMA_CTX) --jinja $(LLAMA_ARGS)
 
 # ---------------------------------------------------------------- build
 
