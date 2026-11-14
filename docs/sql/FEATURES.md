@@ -12,7 +12,18 @@
 
 ## In progress
 
-None.
+- **R-SQL-71..73** (2026-11-15): data transfer (Phase 15, D31), built. **Automated** (`make test`, `make helper`): in
+  `parley-core` CSV lines quoted as RFC 4180, a CSV download written batch by batch, a stopped download leaving no file,
+  a folder that is not there named in the error, an Excel workbook (checked once by unzipping: a frozen bold header,
+  DECIMAL as a number, DATE and TIMESTAMP as Excel dates, a 19-digit BIGINT as text), significant digits, sheet names;
+  the CSV reader (quotes, separators and line breaks in quotes, BOM, blank lines, an unclosed quote naming its line),
+  the separator found, columns matched by name or position, the columns a table needs, NULL for empty fields, the
+  upload's requests and answers; in the helper's self-test the failed row of a batch. In the UI a tab's download
+  writing the rows fetched then the rest, Cancel removing the file, a table's download with IBM i headings, a host
+  error removing the file, an upload committing and saying how many, a failed row named by its line with SQL7008
+  explained, Cancel rolling back, and both dialogs keeping their buttons in place. **Not checked:** against an IBM i
+  (upload writes, and Claude may only read on the owner's system, D22). **Left:** the owner downloads a result and a
+  table to CSV and Excel and uploads a CSV into a journaled test table, in the running app.
 
 ## Implemented
 

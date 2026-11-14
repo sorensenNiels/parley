@@ -18,6 +18,8 @@ rustls-platform-verifier.workspace = true
 des.workspace = true
 sha1.workspace = true
 getrandom.workspace = true
+# Excel files for Download (R-SQL-72, D31); constant memory keeps large downloads small.
+rust_xlsxwriter = { version = "0.102", default-features = false, features = ["constant_memory"] }
 
 [dev-dependencies]
 # Reads the password without showing it in examples/sqlprobe.rs (R-NET-9).

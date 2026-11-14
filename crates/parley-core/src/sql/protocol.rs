@@ -9,7 +9,7 @@ use crate::error::{Error, Result};
 use crate::password::Password;
 
 /// The protocol version this Parley speaks; the helper names its own in [`Hello`].
-pub const PROTOCOL: u32 = 2;
+pub const PROTOCOL: u32 = 3;
 
 /// Rows fetched for a query at first, and with each "Fetch more" (R-SQL-8).
 pub const FIRST_ROWS: u32 = 1000;
@@ -37,6 +37,20 @@ pub enum Request {
     },
     Autocommit {
         on: bool,
+    },
+    /// Starts an upload (R-SQL-73): autocommit off and `sql`, an `INSERT` with markers,
+    /// prepared. Every row then goes in one transaction.
+    InsertBegin {
+        sql: String,
+    },
+    /// Rows for the upload's `INSERT`, run as one JDBC batch; `None` for null. On a failure the
+    /// helper rolls back and ends the upload itself.
+    InsertRows {
+        rows: Vec<Vec<Option<String>>>,
+    },
+    /// Ends the upload: commit, or roll back; autocommit as it was before.
+    InsertEnd {
+        commit: bool,
     },
     Commit,
     Rollback,
@@ -111,6 +125,18 @@ impl Request {
             Self::Autocommit { on } => {
                 put("on", (*on).into());
                 "autocommit"
+            }
+            Self::InsertBegin { sql } => {
+                put("sql", sql.clone().into());
+                "insert_begin"
+            }
+            Self::InsertRows { rows } => {
+                put("rows", rows.clone().into());
+                "insert_rows"
+            }
+            Self::InsertEnd { commit } => {
+                put("commit", (*commit).into());
+                "insert_end"
             }
             Self::Commit => "commit",
             Self::Rollback => "rollback",
@@ -259,6 +285,24 @@ pub enum Outcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub struct Done {}
 
+/// The answer to [`Request::InsertRows`] (R-SQL-73).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Inserted {
+    /// Rows of this batch that went in.
+    pub inserted: u64,
+    /// The row of this batch that failed (from 0) and why; the upload is then rolled back.
+    #[serde(default)]
+    pub failure: Option<Failure>,
+}
+
+/// A row an upload could not insert.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Failure {
+    /// The row of the batch, from 0; `None` when the driver could not tell which.
+    pub index: Option<u64>,
+    pub error: SqlError,
+}
+
 /// The answer to [`Request::Fetch`].
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct MoreRows {
@@ -283,6 +327,41 @@ mod tests {
         assert_eq!(value["params"], serde_json::json!(["æøå", null]));
         let value: Value = serde_json::from_str(&run(Vec::new()).line(2)).expect("JSON");
         assert!(value.get("params").is_none(), "a plain run as before");
+    }
+
+    #[test]
+    fn an_upload_sends_its_rows_with_nulls_and_reads_a_failure_r_sql_73() {
+        let rows = Request::InsertRows {
+            rows: vec![vec![Some("æøå".to_owned()), None]],
+        };
+        let value: Value = serde_json::from_str(&rows.line(4)).expect("JSON");
+        assert_eq!(value["op"], "insert_rows");
+        assert_eq!(value["rows"], serde_json::json!([["æøå", null]]));
+        let end: Value =
+            serde_json::from_str(&Request::InsertEnd { commit: true }.line(5)).expect("JSON");
+        assert_eq!(
+            (end["op"].clone(), end["commit"].clone()),
+            ("insert_end".into(), true.into())
+        );
+        let ok = Answer::parse(r#"{"id":4,"ok":{"inserted":2}}"#).expect("an answer");
+        assert_eq!(
+            ok.into_result::<Inserted>().expect("inserted"),
+            Inserted {
+                inserted: 2,
+                failure: None
+            }
+        );
+        let failed = Answer::parse(
+            r#"{"id":4,"ok":{"inserted":1,"failure":{"index":1,"error":{"message":"SQL7008","sqlstate":"55019","sqlcode":-7008}}}}"#,
+        )
+        .expect("an answer");
+        let failure = failed
+            .into_result::<Inserted>()
+            .expect("read")
+            .failure
+            .expect("a failure");
+        assert_eq!(failure.index, Some(1));
+        assert_eq!(failure.error.sqlcode, -7008);
     }
 
     #[test]
@@ -331,7 +410,7 @@ mod tests {
         .expect("an answer");
         assert_eq!(hello.id, Some(1));
         let hello: Hello = hello.into_result().expect("hello");
-        assert_eq!(hello.protocol, PROTOCOL);
+        assert_eq!(hello.protocol, 2, "recorded before protocol 3 (R-SQL-73)");
 
         let refused = Answer::parse(
             r#"{"id":2,"error":{"message":"The application requester cannot establish the connection. (connect timed out)","sqlstate":"08001","sqlcode":-99999}}"#,

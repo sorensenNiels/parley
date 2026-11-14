@@ -86,6 +86,36 @@ impl parley_ui_egui::SqlFiles for SqlFileWindow {
         Ok(Some(path.display().to_string()))
     }
 
+    fn download_path(
+        &self,
+        suggested: &str,
+        format: parley_core::sql::transfer::Format,
+    ) -> Result<Option<std::path::PathBuf>, String> {
+        let (name, extension) = match format {
+            parley_core::sql::transfer::Format::Csv => ("CSV", "csv"),
+            parley_core::sql::transfer::Format::Excel => ("Excel", "xlsx"),
+        };
+        Ok(rfd::FileDialog::new()
+            .set_title("Download rows")
+            .add_filter(name, &[extension])
+            .set_file_name(suggested)
+            .save_file())
+    }
+
+    fn open_csv(&self) -> Result<Option<(String, String)>, String> {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Upload CSV")
+            .add_filter("CSV", &["csv", "txt"])
+            .pick_file()
+        else {
+            return Ok(None);
+        };
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        let text = String::from_utf8(bytes)
+            .map_err(|_| format!("{} is not UTF-8 text", path.display()))?;
+        Ok(Some((path.display().to_string(), text)))
+    }
+
     fn open_script(&self) -> Result<Option<(String, String)>, String> {
         let Some(path) = rfd::FileDialog::new()
             .set_title("Open SQL script")

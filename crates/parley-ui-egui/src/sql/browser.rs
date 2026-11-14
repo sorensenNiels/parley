@@ -35,6 +35,10 @@ pub enum Pick {
         text: String,
         run: bool,
     },
+    /// Download every row of a table or view (R-SQL-71).
+    Download { library: String, name: String },
+    /// Upload a CSV file into a table (R-SQL-73).
+    Upload { library: String, name: String },
 }
 
 /// The browser's state.
@@ -375,6 +379,20 @@ impl Browser {
                 });
                 ui.close();
             }
+            if object.kind.has_columns() && ui.button("Download…").clicked() {
+                picked = Some(Pick::Download {
+                    library: library.to_owned(),
+                    name: object.name.clone(),
+                });
+                ui.close();
+            }
+            if object.kind == catalog::Kind::Table && ui.button("Upload CSV…").clicked() {
+                picked = Some(Pick::Upload {
+                    library: library.to_owned(),
+                    name: object.name.clone(),
+                });
+                ui.close();
+            }
         });
         picked
     }
@@ -505,6 +523,58 @@ impl Browser {
         match self.columns.get(&key) {
             Some(Load::Ready(columns)) => Some(columns),
             Some(Load::Reading | Load::Failed(_)) | None => None,
+        }
+    }
+
+    /// The columns of the table or view `table` (its SQL name, as typed or upper case) in
+    /// `library`, for an upload (R-SQL-73): `None` while being read, else the table's SQL name
+    /// and its columns, or why there are none. What is missing is asked for.
+    pub fn table_columns(
+        &mut self,
+        library: &str,
+        table: &str,
+        db: &mut Database,
+    ) -> Option<Result<(String, Vec<ColumnInfo>), String>> {
+        let Some(library) = text::system_name(library) else {
+            return Some(Err(format!(
+                "\"{}\" is not an IBM i library name.",
+                library.trim()
+            )));
+        };
+        let wanted = table.trim().trim_matches('"');
+        if wanted.is_empty() {
+            return Some(Err("Name the table.".to_owned()));
+        }
+        if !self.objects.contains_key(&library) {
+            self.objects.insert(library.clone(), Load::Reading);
+            db.ask(Ask::Objects(library.clone()));
+        }
+        let object = match self.objects.get(&library)? {
+            Load::Reading => return None,
+            Load::Failed(why) => return Some(Err(why.clone())),
+            Load::Ready(objects) => objects
+                .iter()
+                .find(|o| {
+                    o.kind == catalog::Kind::Table
+                        && (o.name == wanted || o.name == wanted.to_uppercase())
+                })
+                .cloned(),
+        };
+        let Some(object) = object else {
+            return Some(Err(format!("There is no table {wanted} in {library}.")));
+        };
+        let key = (library, object.system_name);
+        if !self.columns.contains_key(&key) {
+            self.columns.insert(key.clone(), Load::Reading);
+            db.ask(Ask::Columns {
+                library: key.0.clone(),
+                table: key.1.clone(),
+            });
+        }
+        match self.columns.get(&key)? {
+            Load::Reading => None,
+            Load::Failed(why) => Some(Err(why.clone())),
+            Load::Ready(columns) => Some(Ok((object.name, columns.clone()))),
         }
     }
 

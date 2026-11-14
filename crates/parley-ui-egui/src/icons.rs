@@ -22,6 +22,7 @@ pub const CHECK_CIRCLE: &str = "\u{E184}";
 pub const CLIPBOARD: &str = "\u{E196}";
 pub const COPY: &str = "\u{E1CA}";
 pub const DATABASE: &str = "\u{E1DE}";
+pub const DOWNLOAD_SIMPLE: &str = "\u{E20C}";
 pub const ENVELOPE: &str = "\u{E218}";
 pub const ERASER: &str = "\u{E21E}";
 pub const EXPORT: &str = "\u{EAF0}";
@@ -46,13 +47,14 @@ pub const SIGN_OUT: &str = "\u{E42A}";
 pub const SQUARES_FOUR: &str = "\u{E464}";
 pub const STOP: &str = "\u{E46C}";
 pub const TERMINAL: &str = "\u{EAE8}";
+pub const UPLOAD_SIMPLE: &str = "\u{E4C0}";
 
 /// Every icon above, for the test that the font has them.
 #[cfg(test)]
-pub const ALL: [&str; 36] = [
+pub const ALL: [&str; 38] = [
+    ARROWS_CLOCKWISE,
     ARROW_DOWN,
     ARROW_UP,
-    ARROWS_CLOCKWISE,
     BELL,
     BOOKMARK_SIMPLE,
     CARET_DOWN,
@@ -62,6 +64,7 @@ pub const ALL: [&str; 36] = [
     CLIPBOARD,
     COPY,
     DATABASE,
+    DOWNLOAD_SIMPLE,
     ENVELOPE,
     ERASER,
     EXPORT,
@@ -86,6 +89,7 @@ pub const ALL: [&str; 36] = [
     SQUARES_FOUR,
     STOP,
     TERMINAL,
+    UPLOAD_SIMPLE,
 ];
 
 /// `icon` as text in the icon font, to colour or size like any [`RichText`].

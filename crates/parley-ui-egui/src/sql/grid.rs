@@ -9,8 +9,8 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
 use egui::{Align, Label, Layout, RichText, ScrollArea, Sense, Ui, vec2};
-use parley_core::sql::export;
 use parley_core::sql::protocol::{Column, Row};
+use parley_core::sql::{export, transfer};
 
 use crate::{icons, theme};
 
@@ -236,28 +236,17 @@ impl ResultView {
     /// The rows shown as CSV (RFC 4180, UTF-8 with a byte-order mark so spreadsheets read
     /// æøå): the column names, then the rows in the order shown; NULL as an empty field.
     pub fn csv(&self) -> String {
-        let field = |s: &str| {
-            if s.contains([',', '"', '\n', '\r']) {
-                format!("\"{}\"", s.replace('"', "\"\""))
-            } else {
-                s.to_owned()
-            }
-        };
-        let mut out = String::from('\u{FEFF}');
         let names: Vec<String> = self
             .columns
             .iter()
-            .map(|c| field(&header_text(c, self.header)))
+            .map(|c| header_text(c, self.header))
             .collect();
-        out.push_str(&names.join(","));
-        out.push_str("\r\n");
+        let mut out = String::from('\u{FEFF}');
+        out.push_str(&transfer::csv_line(names.iter().map(String::as_str)));
         for (_, row) in self.shown() {
-            let cells: Vec<String> = row
-                .iter()
-                .map(|v| field(v.as_deref().unwrap_or("")))
-                .collect();
-            out.push_str(&cells.join(","));
-            out.push_str("\r\n");
+            out.push_str(&transfer::csv_line(
+                row.iter().map(|v| v.as_deref().unwrap_or("")),
+            ));
         }
         out
     }

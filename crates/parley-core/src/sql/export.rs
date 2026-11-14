@@ -48,7 +48,7 @@ pub fn markdown(names: &[String], columns: &[Column], rows: &[&Row]) -> String {
 }
 
 /// The table the columns come from, when they all come from one (R-SQL-29's library and table).
-fn source_table(columns: &[Column]) -> Option<String> {
+pub(crate) fn source_table(columns: &[Column]) -> Option<String> {
     let first = columns.first()?;
     let (schema, table) = (first.schema.as_deref()?, first.table.as_deref()?);
     let same = columns

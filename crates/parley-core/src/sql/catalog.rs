@@ -36,11 +36,12 @@ pub fn objects(library: &str) -> String {
 }
 
 /// The columns of `table` in `library` (system names), in order: name, type, length, scale,
-/// nullable, heading and text (R-SQL-34). Read with [`columns_from`].
+/// nullable, heading, text and whether it has a default (R-SQL-34, R-SQL-73). Read with
+/// [`columns_from`].
 pub fn columns(library: &str, table: &str) -> String {
     format!(
         "SELECT COLUMN_NAME, DATA_TYPE, LENGTH, NUMERIC_SCALE, IS_NULLABLE, COLUMN_HEADING, \
-         COLUMN_TEXT FROM QSYS2.SYSCOLUMNS WHERE SYSTEM_TABLE_SCHEMA = {} \
+         COLUMN_TEXT, HAS_DEFAULT FROM QSYS2.SYSCOLUMNS WHERE SYSTEM_TABLE_SCHEMA = {} \
          AND SYSTEM_TABLE_NAME = {} ORDER BY ORDINAL_POSITION",
         literal(library),
         literal(table)
@@ -173,6 +174,9 @@ pub struct ColumnInfo {
     /// The type as written in SQL: `DECIMAL(9, 2)`, `VARCHAR(50)`, `DATE`.
     pub data_type: String,
     pub nullable: bool,
+    /// It has a default (or is an identity or row-change column): an `INSERT` may leave it out
+    /// (R-SQL-73). `HAS_DEFAULT` is N for none.
+    pub has_default: bool,
     /// The heading, its three 20-character lines joined with blanks.
     pub heading: String,
     pub text: String,
@@ -220,6 +224,7 @@ pub fn columns_from(rows: &[Row]) -> Vec<ColumnInfo> {
                 name: cell(row, 0),
                 data_type,
                 nullable: cell(row, 4) == "Y",
+                has_default: !matches!(cell(row, 7).as_str(), "N" | ""),
                 heading: cell(row, 5)
                     .split_whitespace()
                     .collect::<Vec<_>>()

@@ -1135,6 +1135,16 @@ mod tests {
         fn open_script(&self) -> Result<Option<(String, String)>, String> {
             Ok(None)
         }
+        fn open_csv(&self) -> Result<Option<(String, String)>, String> {
+            Ok(None)
+        }
+        fn download_path(
+            &self,
+            _: &str,
+            _: parley_core::sql::transfer::Format,
+        ) -> Result<Option<std::path::PathBuf>, String> {
+            Ok(None)
+        }
         fn save_script(
             &self,
             _: Option<&str>,

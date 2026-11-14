@@ -43,6 +43,8 @@ pub struct Results {
 pub enum Ask {
     /// Fetch more rows from this cursor.
     Fetch(u64),
+    /// Download every row of the tab shown (R-SQL-71).
+    Download,
 }
 
 impl Results {
@@ -72,6 +74,24 @@ impl Results {
         if let Some(tab) = self.tabs.iter_mut().find(|t| t.view.cursor == Some(cursor)) {
             tab.view.append(rows, more);
         }
+    }
+
+    /// The columns of the tab shown.
+    pub fn shown_columns(&self) -> Option<&[parley_core::sql::protocol::Column]> {
+        self.tabs.get(self.shown).map(|t| t.view.columns.as_slice())
+    }
+
+    /// For a download of the tab shown (R-SQL-71): its columns, its rows in the host's order,
+    /// and the cursor the rest comes from, which the download takes: the grid fetches no more.
+    pub fn take_for_download(
+        &mut self,
+    ) -> Option<(
+        Vec<parley_core::sql::protocol::Column>,
+        Vec<Row>,
+        Option<u64>,
+    )> {
+        let view = &mut self.tabs.get_mut(self.shown)?.view;
+        Some((view.columns.clone(), view.rows.clone(), view.cursor.take()))
     }
 
     #[cfg(test)]
@@ -306,6 +326,14 @@ fn bar(
         }
         theme::button_row(ui, |ui| {
             if let Some(saver) = saver {
+                // R-SQL-71: every row, not only those fetched, to CSV or Excel.
+                let download = icons::button(icons::DOWNLOAD_SIMPLE, "Download…");
+                if icons::add_named(ui, idle, download, "Download…")
+                    .on_hover_text("Every row of the query, to a CSV or Excel file")
+                    .clicked()
+                {
+                    ask = Some(Ask::Download);
+                }
                 let export = icons::button(icons::EXPORT, "Export…");
                 if icons::add_named(ui, true, export, "Export…")
                     .on_hover_text("The rows shown, as CSV")

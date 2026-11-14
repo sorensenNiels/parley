@@ -7,6 +7,7 @@ pub(crate) mod assistant;
 mod browser;
 mod chart;
 mod database;
+mod download;
 pub mod editor;
 pub mod grid;
 pub mod hosting;
@@ -16,6 +17,7 @@ mod parameters;
 pub mod results;
 pub mod snippets;
 mod tools;
+mod upload;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -43,6 +45,15 @@ pub trait SqlFiles: std::fmt::Debug {
     fn export_csv(&self, suggested: &str, bytes: &[u8]) -> Result<Option<String>, String>;
     /// A `.sql` file the operator picks: its path and text.
     fn open_script(&self) -> Result<Option<(String, String)>, String>;
+    /// A CSV file the operator picks for an upload (R-SQL-73): its path and text (UTF-8).
+    fn open_csv(&self) -> Result<Option<(String, String)>, String>;
+    /// Where a download of every row goes (R-SQL-71): a file the operator chooses for
+    /// `format`, offered as `suggested`.
+    fn download_path(
+        &self,
+        suggested: &str,
+        format: parley_core::sql::transfer::Format,
+    ) -> Result<Option<PathBuf>, String>;
     /// Saves `text` to `path`, or where the operator chooses when `path` is `None`; the path.
     fn save_script(
         &self,
@@ -166,6 +177,14 @@ enum Waiting {
     JobLog,
     /// The current schema and library list (R-SQL-32).
     Job,
+    /// A table's `SELECT *` for a download (R-SQL-71).
+    DownloadRun,
+    /// More rows from this cursor for a download (R-SQL-71).
+    DownloadFetch(u64),
+    /// An upload's start, a batch of this many rows, and its end, committing or not (R-SQL-73).
+    UploadBegin,
+    UploadRows(usize),
+    UploadEnd(bool),
 }
 
 /// Results or messages under the editor.
@@ -233,6 +252,10 @@ pub struct SqlWindow {
     param_values: std::collections::BTreeMap<String, Vec<parameters::Value>>,
     /// The second connection, for the catalog (R-SQL-33, D21).
     database: database::Database,
+    /// Download every row: the dialog and the download under way (R-SQL-71).
+    transfer: download::Transfer,
+    /// Upload a CSV file: the dialog and the upload under way (R-SQL-73).
+    upload: upload::Upload,
     /// The SQL assistant (R-SQL-44), shown while its add-on is on (R-ADD-3).
     assistant: assistant::Assistant,
     /// The same sign-on for it, held until the first has signed on, then sent or dropped.
@@ -295,6 +318,8 @@ impl SqlWindow {
             ran: Vec::new(),
             pending_connect: None,
             database: database::Database::default(),
+            transfer: download::Transfer::default(),
+            upload: upload::Upload::default(),
             pending_catalog: None,
             parameters: None,
             assistant: assistant::Assistant::default(),
@@ -467,6 +492,8 @@ impl SqlWindow {
             self.use_snippet(used);
         }
         self.confirm_dialog(ui.ctx());
+        self.download_dialog(ui.ctx(), around.files);
+        self.upload_dialog(ui.ctx(), around.files);
         self.parameters_dialog(ui.ctx());
         self.closing_dialog(ui.ctx());
     }
@@ -512,6 +539,15 @@ impl SqlWindow {
                 }
                 if self.stage == Stage::Ready {
                     self.commit_controls(ui);
+                    // R-SQL-73: a CSV file into a table, asked for in the dialog.
+                    let upload = icons::button(icons::UPLOAD_SIMPLE, "Upload CSV…");
+                    let idle = self.waiting.is_none() && self.queue.is_empty();
+                    if icons::add_named(ui, idle, upload, "Upload CSV…")
+                        .on_hover_text("Rows from a CSV file into a table, all or nothing")
+                        .clicked()
+                    {
+                        self.upload.ask("", "");
+                    }
                 }
             });
         });
@@ -773,6 +809,10 @@ impl SqlWindow {
     fn use_pick(&mut self, pick: browser::Pick) {
         match pick {
             browser::Pick::Insert(text) => self.scripts.insert(&text),
+            browser::Pick::Download { library, name } => {
+                self.transfer.ask(download::Source::Table { library, name });
+            }
+            browser::Pick::Upload { library, name } => self.upload.ask(&library, &name),
             browser::Pick::Script { title, text, run } => {
                 self.scripts.open_new(&title, &text);
                 if run {
@@ -976,7 +1016,13 @@ impl SqlWindow {
             }
             if !idle {
                 ui.spinner();
-                theme::hint(ui, "Running…");
+                match (self.transfer.progress(), self.upload.progress()) {
+                    (Some(rows), _) => theme::hint(ui, format!("Downloading… {rows} rows")),
+                    (None, Some((sent, of))) => {
+                        theme::hint(ui, format!("Uploading… {sent} of {of} rows"));
+                    }
+                    (None, None) => theme::hint(ui, "Running…"),
+                }
             }
             theme::button_row(ui, |ui| {
                 // R-SQL-25: what Run would run, kept as a snippet.
@@ -1089,6 +1135,8 @@ impl SqlWindow {
 
     fn cancel(&mut self) {
         self.queue.clear();
+        self.cancel_download();
+        self.cancel_upload();
         if let Some(runner) = &self.runner
             && self.waiting.is_some()
         {
@@ -1111,12 +1159,16 @@ impl SqlWindow {
     fn results(&mut self, ui: &mut Ui, saver: Option<&dyn SqlFiles>) {
         let idle = self.waiting.is_none();
         let asked = self.results.show(ui, idle, &mut self.header, saver);
-        if let Some(results::Ask::Fetch(cursor)) = asked {
-            let fetch = Request::Fetch {
-                cursor,
-                max_rows: self.rows,
-            };
-            self.send(fetch, Waiting::Fetch(cursor));
+        match asked {
+            Some(results::Ask::Fetch(cursor)) => {
+                let fetch = Request::Fetch {
+                    cursor,
+                    max_rows: self.rows,
+                };
+                self.send(fetch, Waiting::Fetch(cursor));
+            }
+            Some(results::Ask::Download) => self.transfer.ask(download::Source::Tab),
+            None => {}
         }
     }
 
@@ -1147,6 +1199,11 @@ impl SqlWindow {
             Waiting::Run(statement) => self.on_run(&statement, event),
             Waiting::Explain { index, id, file } => self.on_explain(index, &id, file, event),
             Waiting::JobLog => self.on_job_log(event),
+            Waiting::DownloadRun => self.on_download_run(event),
+            Waiting::DownloadFetch(_) => self.on_download_fetch(event),
+            Waiting::UploadBegin => self.on_upload_begin(event),
+            Waiting::UploadRows(count) => self.on_upload_rows(count, event),
+            Waiting::UploadEnd(commit) => self.on_upload_end(commit, event),
             Waiting::Fetch(cursor) => match event
                 .result
                 .and_then(parley_core::sql::protocol::Answer::into_result::<MoreRows>)
@@ -1398,6 +1455,9 @@ impl SqlWindow {
 
     /// Ends the helper: the connection closes with it.
     fn finish(&mut self) {
+        // A download that did not end leaves no part of its file (R-SQL-71).
+        self.cancel_download();
+        self.end_download(None);
         if let Some(mut runner) = self.runner.take() {
             runner.send(Request::Close);
         }

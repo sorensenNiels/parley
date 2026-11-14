@@ -19,6 +19,7 @@ final class SelfTest {
         binaryIsHex();
         timesKeepTheirSeconds();
         headingsJoinTheirThreeParts();
+        anUploadNamesTheRowThatFailed();
         if (failures == 0) {
             System.out.println("parley-sql self-test: ok");
         }
@@ -84,5 +85,13 @@ final class SelfTest {
         check(Helper.Values.TIME.format(java.time.LocalTime.of(9, 43)).equals("09:43:00"), "time");
         check(Helper.Values.TIMESTAMP.format(java.time.LocalDateTime.of(2026, 11, 13, 9, 43, 7, 1000))
                 .equals("2026-11-13 09:43:07.000001"), "timestamp");
+    }
+
+    private static void anUploadNamesTheRowThatFailed() {
+        // R-SQL-73: JDBC marks a failed row, or stops after the rows that went in.
+        int failed = java.sql.Statement.EXECUTE_FAILED;
+        check(Long.valueOf(1).equals(Helper.firstFailed(new int[] {1, failed, 1})), "marked");
+        check(Long.valueOf(2).equals(Helper.firstFailed(new int[] {1, 1})), "stopped after two");
+        check(Helper.firstFailed(null) == null, "unknown");
     }
 }

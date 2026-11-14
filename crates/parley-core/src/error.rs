@@ -58,6 +58,11 @@ pub enum Error {
     #[error("{0}")]
     Macro(String),
 
+    /// A download or upload file that cannot be written or read (R-SQL-71..73): a sentence
+    /// for the operator, naming the file.
+    #[error("{0}")]
+    Transfer(String),
+
     #[error("the connection failed: {0}")]
     Io(#[from] io::Error),
 }

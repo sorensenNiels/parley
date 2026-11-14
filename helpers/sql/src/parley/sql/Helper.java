@@ -11,6 +11,8 @@
 //            {"id":4,"op":"fetch","cursor":1,"max_rows":1000}   {"id":5,"op":"close_cursor","cursor":1}
 //            {"id":6,"op":"autocommit","on":false}   {"id":7,"op":"commit"}   {"id":8,"op":"rollback"}
 //            {"op":"cancel"} (no answer; stops the statement running)   {"id":9,"op":"close"}
+//            {"id":10,"op":"insert_begin","sql":"INSERT ... VALUES (?, ?)"}
+//            {"id":11,"op":"insert_rows","rows":[["a",null]]}   {"id":12,"op":"insert_end","commit":true}
 // Answers:   {"id":n,"ok":{...}}  or  {"id":n,"error":{"message":"...","sqlstate":"...","sqlcode":-204}}
 package parley.sql;
 
@@ -19,6 +21,7 @@ import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.sql.BatchUpdateException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ParameterMetaData;
@@ -40,7 +43,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 public final class Helper {
     /** The protocol's version; Parley checks it in the answer to hello. */
-    static final int PROTOCOL = 2;
+    static final int PROTOCOL = 3;
 
     /** Seconds to give up connecting (R-SQL-3); a property so tests can shorten it. */
     private static final int LOGIN_TIMEOUT = Integer.getInteger("parley.sql.loginTimeout", 30);
@@ -64,6 +67,24 @@ public final class Helper {
             this.rows = rows;
         }
     }
+
+    /**
+     * An upload under way (R-SQL-73, D31): its prepared INSERT, the types of its markers, and
+     * autocommit as it was before, put back when it ends.
+     */
+    private static final class Upload {
+        final PreparedStatement statement;
+        final int[] types;
+        final boolean autocommit;
+
+        Upload(PreparedStatement statement, int[] types, boolean autocommit) {
+            this.statement = statement;
+            this.types = types;
+            this.autocommit = autocommit;
+        }
+    }
+
+    private Upload upload;
 
     private Helper(PrintStream out) {
         this.out = out;
@@ -161,6 +182,14 @@ public final class Helper {
                 return new LinkedHashMap<>();
             case "autocommit":
                 connected().setAutoCommit(Boolean.TRUE.equals(request.get("on")));
+                return new LinkedHashMap<>();
+            case "insert_begin":
+                insertBegin(text(request, "sql"));
+                return new LinkedHashMap<>();
+            case "insert_rows":
+                return insertRows(request.get("rows"));
+            case "insert_end":
+                insertEnd(Boolean.TRUE.equals(request.get("commit")));
                 return new LinkedHashMap<>();
             case "commit":
                 connected().commit();
@@ -457,7 +486,145 @@ public final class Helper {
         }
     }
 
+    /** Starts an upload: autocommit off, the INSERT prepared (R-SQL-73). */
+    private void insertBegin(String sql) throws SQLException {
+        if (upload != null) {
+            throw new IllegalArgumentException("an upload is already under way");
+        }
+        Connection c = connected();
+        boolean autocommit = c.getAutoCommit();
+        c.setAutoCommit(false);
+        try {
+            PreparedStatement statement = c.prepareStatement(sql);
+            ParameterMetaData meta = statement.getParameterMetaData();
+            int[] types = new int[meta.getParameterCount()];
+            for (int i = 0; i < types.length; i++) {
+                try {
+                    types[i] = meta.getParameterType(i + 1);
+                } catch (SQLException e) {
+                    types[i] = Types.VARCHAR; // IBM i did not say: VARCHAR converts to most types.
+                }
+            }
+            upload = new Upload(statement, types, autocommit);
+        } catch (SQLException e) {
+            c.setAutoCommit(autocommit);
+            throw e;
+        }
+    }
+
+    /**
+     * Runs rows of the upload as one batch. A row that fails rolls the whole upload back and
+     * ends it; the answer then names that row of the batch (null when the driver cannot tell).
+     */
+    private Map<String, Object> insertRows(Object value) throws SQLException {
+        Upload u = upload;
+        if (u == null) {
+            throw new IllegalArgumentException("no upload is under way");
+        }
+        if (!(value instanceof List)) {
+            throw new IllegalArgumentException("\"rows\" must be a list");
+        }
+        List<?> rows = (List<?>) value;
+        Long failed = null;
+        try {
+            for (int r = 0; r < rows.size(); r++) {
+                failed = (long) r;
+                Object row = rows.get(r);
+                if (!(row instanceof List) || ((List<?>) row).size() != u.types.length) {
+                    throw new SQLException("The row does not have " + u.types.length + " values.");
+                }
+                List<?> values = (List<?>) row;
+                for (int i = 0; i < values.size(); i++) {
+                    Object v = values.get(i);
+                    if (v == null) {
+                        u.statement.setNull(i + 1, u.types[i]);
+                    } else {
+                        u.statement.setString(i + 1, String.valueOf(v));
+                    }
+                }
+                u.statement.addBatch();
+            }
+            failed = null;
+            running = u.statement;
+            try {
+                u.statement.executeBatch();
+            } finally {
+                running = null;
+            }
+        } catch (BatchUpdateException e) {
+            return failure(firstFailed(e.getUpdateCounts()), e);
+        } catch (SQLException e) {
+            return failure(failed, e);
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("inserted", (long) rows.size());
+        return result;
+    }
+
+    /** The row of a batch that failed: the first marked failed, else the one after the last done. */
+    static Long firstFailed(int[] counts) {
+        if (counts == null) {
+            return null;
+        }
+        for (int i = 0; i < counts.length; i++) {
+            if (counts[i] == Statement.EXECUTE_FAILED) {
+                return (long) i;
+            }
+        }
+        return (long) counts.length;
+    }
+
+    private Map<String, Object> failure(Long index, SQLException e) {
+        endUpload(false);
+        Map<String, Object> failure = new LinkedHashMap<>();
+        failure.put("index", index);
+        failure.put("error", error(e.getMessage(), e.getSQLState(), e.getErrorCode()).get("error"));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("inserted", 0L); // rolled back: nothing of the upload went in
+        result.put("failure", failure);
+        return result;
+    }
+
+    /** Ends the upload: commit or roll back, autocommit as before. */
+    private void insertEnd(boolean commit) throws SQLException {
+        if (upload == null) {
+            throw new IllegalArgumentException("no upload is under way");
+        }
+        if (commit) {
+            try {
+                connected().commit();
+            } catch (SQLException e) {
+                endUpload(false);
+                throw e;
+            }
+        }
+        endUpload(commit);
+    }
+
+    /** Rolls back unless committed, puts autocommit back and frees the statement. */
+    private void endUpload(boolean committed) {
+        Upload u = upload;
+        upload = null;
+        if (u == null || connection == null) {
+            return;
+        }
+        try {
+            if (!committed) {
+                connection.rollback();
+            }
+        } catch (SQLException e) {
+            // The connection is gone: the host rolls back what was not committed.
+        }
+        try {
+            u.statement.close();
+            connection.setAutoCommit(u.autocommit);
+        } catch (SQLException e) {
+            // As above: nothing is left to free or put back.
+        }
+    }
+
     private void closeAll() {
+        endUpload(false);
         for (Long id : new ArrayList<>(cursors.keySet())) {
             closeCursor(id);
         }

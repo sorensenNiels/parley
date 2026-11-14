@@ -16,3 +16,5 @@ pub mod protocol;
 pub mod runner;
 pub mod snippet;
 pub mod text;
+pub mod transfer;
+pub mod upload;
