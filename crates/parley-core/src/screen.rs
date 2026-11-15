@@ -227,6 +227,16 @@ pub struct Field {
     pub format: FieldFormat,
     /// The modified data tag (MDT): the field is sent to the host by Read MDT Fields.
     pub modified: bool,
+    /// The self-check field control word, if the field has one (R-KEY-10).
+    pub self_check: Option<SelfCheck>,
+}
+
+/// A self-check field's algorithm (SC30-3533-04 §15.6.12.2, FCW X'B1A0' and X'B140'; DDS
+/// CHECK(M10F) and CHECK(M11F)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfCheck {
+    Modulus10,
+    Modulus11,
 }
 
 impl Field {
@@ -591,6 +601,7 @@ mod tests {
             len: 5,
             format: FieldFormat(0x4000),
             modified: false,
+            self_check: None,
         });
         let cells = screen.cells(CodePage::Ccsid37);
         assert!(cells[10..15].iter().all(|c| c.style.underline));
@@ -609,6 +620,7 @@ mod tests {
             len: 5,
             format: FieldFormat(0x4000),
             modified: false,
+            self_check: None,
         });
         screen.put(10, 0xC1);
         let cells = screen.cells(CodePage::Ccsid37);
@@ -637,6 +649,7 @@ mod tests {
             len: 5,
             format: FieldFormat(0x4000),
             modified: false,
+            self_check: None,
         });
         screen.put(15, 0x28);
         screen.put(16, 0xC1);
@@ -679,6 +692,7 @@ mod tests {
             len,
             format: FieldFormat(0x4000),
             modified: false,
+            self_check: None,
         };
         screen.add_field(field(100, 5));
         screen.add_field(field(10, 5));

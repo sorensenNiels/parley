@@ -322,6 +322,7 @@ mod tests {
                 len,
                 format: FieldFormat(0x4000),
                 modified: false,
+                self_check: None,
             });
         }
         screen

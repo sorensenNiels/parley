@@ -7,7 +7,7 @@
 use super::{MAX_SAVED_SCREENS, ReadKind, SavedScreen, Session};
 use crate::error::{Error, Result};
 use crate::record::Opcode;
-use crate::screen::{Field, FieldFormat, ScreenSize, is_attribute};
+use crate::screen::{Field, FieldFormat, ScreenSize, SelfCheck, is_attribute};
 
 pub(super) const ESC: u8 = 0x04;
 
@@ -294,6 +294,7 @@ impl Session {
     /// is output only: its attribute is written but it does not go in the format table.
     fn start_of_field(&mut self, r: &mut Reader<'_>, address: &mut usize) -> Result<()> {
         let first = r.byte("Start of Field")?;
+        let mut self_check = None;
         let (format, attribute) = if is_attribute(first) {
             (None, first)
         } else {
@@ -303,8 +304,15 @@ impl Session {
                 )));
             }
             let second = r.byte("Start of Field")?;
+            // Field control words: of each type only the first counts (SC30-3533-04 §15.6.12.2).
             while r.peek().is_some_and(|b| !is_attribute(b)) {
-                r.take(2, "a field control word")?;
+                let fcw = r.take(2, "a field control word")?;
+                let check = match fcw {
+                    [0xB1, 0xA0] => Some(SelfCheck::Modulus10),
+                    [0xB1, 0x40] => Some(SelfCheck::Modulus11),
+                    _ => None,
+                };
+                self_check = self_check.or(check);
             }
             let attribute = r.byte("Start of Field")?;
             (
@@ -321,6 +329,7 @@ impl Session {
                 len,
                 format,
                 modified: format.modified(),
+                self_check,
             });
         }
         *address = start;

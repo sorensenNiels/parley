@@ -2,6 +2,7 @@
 //! [`Session::key`] takes the operator's keys, and [`Session::take_outbound`] gives the bytes
 //! to send back. [`crate::net::Connection`] runs one over a socket.
 
+mod checks;
 mod datastream;
 mod input;
 mod playback;
@@ -99,6 +100,16 @@ pub enum OperatorError {
     NoRoomToInsert,
     FieldMinusNotAllowed,
     SignPosition,
+    /// Enter with a mandatory enter field empty (R-KEY-10).
+    MandatoryEnter,
+    /// Field Exit past an empty mandatory enter field (R-KEY-10).
+    MandatoryEnterExit,
+    /// Leaving a mandatory fill field half filled (R-KEY-10).
+    MandatoryFill,
+    /// Field Exit in a half-filled mandatory fill field (R-KEY-10).
+    MandatoryFillExit,
+    /// A self-check field's number and check digit do not agree (R-KEY-10).
+    CheckDigit,
     /// The host wrote an error message (Write Error Code).
     Host,
 }
@@ -116,6 +127,13 @@ impl OperatorError {
             Self::NoRoomToInsert => "No room to insert: the field is full.",
             Self::FieldMinusNotAllowed => "Field- is only allowed in numeric fields.",
             Self::SignPosition => "This is the sign position: use Field+ or Field-.",
+            Self::MandatoryEnter => "This field must have data before Enter.",
+            Self::MandatoryEnterExit => "This field must have data before you leave it.",
+            Self::MandatoryFill => "Fill the whole field before leaving it.",
+            Self::MandatoryFillExit => {
+                "Fill the whole field, or use Field Exit from its first position."
+            }
+            Self::CheckDigit => "The check digit does not match the number.",
             Self::Host => "See the message from the host.",
         }
     }
@@ -133,6 +151,11 @@ impl OperatorError {
             Self::SignPosition => Some("0011"),
             Self::NoRoomToInsert => Some("0012"),
             Self::FieldMinusNotAllowed => Some("0016"),
+            Self::MandatoryEnter => Some("0007"),
+            Self::MandatoryFill => Some("0014"),
+            Self::CheckDigit => Some("0015"),
+            Self::MandatoryFillExit => Some("0017"),
+            Self::MandatoryEnterExit => Some("0021"),
             Self::NotInCodePage | Self::Host => None,
         }
     }

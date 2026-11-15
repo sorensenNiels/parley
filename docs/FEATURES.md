@@ -235,3 +235,11 @@ Checked by the owner in the running app (2026-11-15); `make verify` on Linux und
   host's message; the status bar shows "X 0012 No room to insert: the field is full.". The codes come from ASNA's
   5250 Terminal Error Codes (which says they are the standard 5250 ones); only 0012 is also in IBM's SC30-3533-04.
   Not seen in the running app; marked done by the owner (2026-11-15).
+
+- **R-KEY-10** (2026-11-15): mandatory enter, mandatory fill and self-check fields (IDEA-3). **Automated** (`make
+  test`): modulus 10 and 11 against IBM's DDS example (13739 → 1) and the Luhn example, remainder 1 has no check
+  digit, letters by their low bits, an empty field passes; on a built screen: Enter with an empty mandatory enter
+  field is 0007, puts the cursor there, sends nothing and waits for Reset, and is not enforced when nothing was
+  typed; Field Exit past it is 0021; a half-filled mandatory fill field is 0014 with Tab and 0017 with Field Exit,
+  and Field Exit from its first position empties it; a wrong check digit is 0015 with the cursor back at the field,
+  a right one moves on. Not tried on a real screen; marked done by the owner (2026-11-15).

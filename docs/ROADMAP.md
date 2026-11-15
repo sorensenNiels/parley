@@ -38,7 +38,7 @@ modern take on what surrounds the screen: sessions, keyboard mapping, copy and p
 | Phase 4: a modern look | Done (2026-11-15): verified on Windows, macOS, Linux and WSL (FEATURES.md): icons (R-UI-13, D17), an interactive status bar (R-UI-14), one header with the session (R-UI-15), the 5250 keys in a Keys menu in the status bar (R-UI-16), a shortcut sheet (R-UI-17), no error for a key in a protected area (R-KEY-8); both commands after installing (R-NF-2). |
 | Phases 5–19: SQL | Parley SQL's phases: [sql/ROADMAP.md](sql/ROADMAP.md). |
 | Phase 20: everyday screen work | Done (2026-11-15): checked by the owner in the running app (FEATURES.md): R-UI-20..23, R-NET-10. |
-| Phase 21: protocol gaps | Started (2026-11-15): R-DS-6, R-DS-7 (IDEA-7), R-DS-8 (IDEA-4) done; R-UI-24, R-UI-25 (IDEA-6) done; R-KEY-9 (IDEA-2) done; IDEA-3, 5, 14 to come. |
+| Phase 21: protocol gaps | Started (2026-11-15): R-DS-6, R-DS-7 (IDEA-7), R-DS-8 (IDEA-4) done; R-UI-24, R-UI-25 (IDEA-6) done; R-KEY-9 (IDEA-2) done; R-KEY-10 (IDEA-3) done; IDEA-5, 14 to come. |
 
 ## 4. Phases
 
@@ -147,4 +147,4 @@ Decisions D19–D27 are about SQL and are in [sql/ROADMAP.md](sql/ROADMAP.md) §
   (`D`), phases and ideas (`IDEA`, in [IDEAS.md](IDEAS.md)) take their next number here, whichever roadmap uses it,
   so a number never means two things.
 
-Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-11` · `R-DS-9` · `R-EBC-2` · `R-KEY-10` · `R-UI-26` · `R-ADD-4` · `R-NF-3` · `D38` · `Phase 22` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); ideas: last line of IDEAS.md).
+Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-11` · `R-DS-9` · `R-EBC-2` · `R-KEY-11` · `R-UI-26` · `R-ADD-4` · `R-NF-3` · `D38` · `Phase 22` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); ideas: last line of IDEAS.md).

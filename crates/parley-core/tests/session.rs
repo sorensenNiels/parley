@@ -889,6 +889,107 @@ fn an_operator_error_has_the_standard_5250_code_r_key_9() {
     );
 }
 
+/// R-KEY-10: a mandatory enter field at row 5, a mandatory fill field (5 long) at row 6, a
+/// digits-only modulus 10 self-check field (2 long) at row 7, and a plain field at row 8.
+fn checked_screen() -> Session {
+    let mut o = vec![SBA, 5, 9];
+    o.extend(field([0x40, 0x08], 0x24, 5)); // FFW bit 12: mandatory enter
+    o.extend([SBA, 6, 9]);
+    o.extend(field([0x40, 0x07], 0x24, 5)); // FFW bits 13-15 = 111: mandatory fill
+    o.extend([SBA, 7, 9]);
+    o.extend([0x1D, 0x45, 0x00, 0xB1, 0xA0, 0x24, 0x00, 2]); // digits only, FCW modulus 10
+    o.extend([SBA, 8, 9]);
+    o.extend(field([0x40, 0x00], 0x24, 5));
+    o.extend([0x13, 8, 10]); // Insert Cursor: the plain field
+    let mut s = session();
+    s.receive(&host(&screen_with(&o)));
+    assert_eq!(s.notice(), None);
+    s
+}
+
+fn error_code(s: &Session) -> Option<&'static str> {
+    match s.keyboard() {
+        KeyboardState::Error(e) => e.code(),
+        KeyboardState::Unlocked | KeyboardState::Locked => None,
+    }
+}
+
+fn cursor(s: &Session) -> (usize, usize) {
+    s.screen().row_column(s.screen().cursor)
+}
+
+#[test]
+fn enter_with_a_mandatory_enter_field_empty_is_0007_and_goes_to_it_r_key_10() {
+    let mut s = checked_screen();
+    keys(&mut s, "x");
+    s.key(Key::Aid(Aid::ENTER));
+    assert_eq!(error_code(&s), Some("0007"));
+    assert_eq!(cursor(&s), (4, 9), "on the mandatory enter field");
+    assert!(sent(&mut s).is_empty(), "nothing goes to the host");
+    s.key(Key::Char('y'));
+    assert_eq!(error_code(&s), Some("0007"), "keys wait for Reset");
+    s.key(Key::Reset);
+    keys(&mut s, "a");
+    s.key(Key::Aid(Aid::ENTER));
+    assert_eq!(s.keyboard(), KeyboardState::Locked, "now it is sent");
+}
+
+#[test]
+fn with_nothing_typed_on_the_screen_mandatory_enter_is_not_enforced_r_key_10() {
+    let mut s = checked_screen();
+    s.key(Key::Aid(Aid::ENTER));
+    assert_eq!(s.keyboard(), KeyboardState::Locked);
+}
+
+#[test]
+fn field_exit_past_an_empty_mandatory_enter_field_is_0021_r_key_10() {
+    let mut s = checked_screen();
+    s.key(Key::MoveTo { row: 4, column: 9 });
+    s.key(Key::FieldExit);
+    assert_eq!(error_code(&s), Some("0021"));
+    assert_eq!(cursor(&s), (4, 9));
+}
+
+#[test]
+fn a_half_filled_mandatory_fill_field_cannot_be_left_r_key_10() {
+    let mut s = checked_screen();
+    s.key(Key::MoveTo { row: 5, column: 9 });
+    keys(&mut s, "ab");
+    s.key(Key::Tab);
+    assert_eq!(error_code(&s), Some("0014"));
+    s.key(Key::Reset);
+    s.key(Key::FieldExit);
+    assert_eq!(error_code(&s), Some("0017"));
+    s.key(Key::Reset);
+    keys(&mut s, "cde"); // filled: the cursor moves on by itself
+    assert_eq!(s.keyboard(), KeyboardState::Unlocked);
+    assert_eq!(cursor(&s), (6, 9));
+}
+
+#[test]
+fn field_exit_from_the_first_position_empties_a_mandatory_fill_field_r_key_10() {
+    let mut s = checked_screen();
+    s.key(Key::MoveTo { row: 5, column: 9 });
+    keys(&mut s, "ab");
+    s.key(Key::MoveTo { row: 5, column: 9 });
+    s.key(Key::FieldExit);
+    assert_eq!(s.keyboard(), KeyboardState::Unlocked);
+    assert_eq!(row_text(&s, 6), "");
+}
+
+#[test]
+fn a_wrong_check_digit_is_0015_and_the_cursor_goes_back_to_the_field_r_key_10() {
+    let mut s = checked_screen();
+    s.key(Key::MoveTo { row: 6, column: 9 });
+    keys(&mut s, "58"); // 5 doubled is 10, 1 + 0 = 1: the check digit is 9
+    assert_eq!(error_code(&s), Some("0015"));
+    assert_eq!(cursor(&s), (6, 9));
+    s.key(Key::Reset);
+    keys(&mut s, "59");
+    assert_eq!(s.keyboard(), KeyboardState::Unlocked);
+    assert_eq!(cursor(&s), (7, 9), "a good number moves on");
+}
+
 #[test]
 fn recording_leaves_out_refused_keys_and_the_reset_after_them_r_key_3() {
     let mut s = numeric_screen();

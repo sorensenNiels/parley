@@ -1,6 +1,7 @@
 //! The operator's keys (R-DS-3, R-KEY-1): typing into fields under their field format word,
 //! Field Exit, cursor movement, and AID keys that send input to the host.
 
+use super::checks::Leaving;
 use super::{OperatorError, Session};
 use crate::record::Opcode;
 use crate::record::flags;
@@ -124,10 +125,7 @@ impl Session {
         }
         let result = match key {
             Key::Char(c) => self.type_char(c),
-            Key::Aid(aid) => {
-                self.send_aid(aid);
-                Ok(())
-            }
+            Key::Aid(aid) => self.check_before_aid(aid).map(|()| self.send_aid(aid)),
             Key::FieldExit | Key::FieldPlus => self.field_exit(Sign::Plus),
             Key::FieldMinus => self.field_exit(Sign::Minus),
             Key::Delete => self.delete(),
@@ -140,9 +138,8 @@ impl Session {
                 self.insert = !self.insert;
                 Ok(())
             }
-            Key::Tab
-            | Key::BackTab
-            | Key::Up
+            Key::Tab | Key::BackTab => self.leave_field().map(|()| self.move_cursor(key)),
+            Key::Up
             | Key::Down
             | Key::Left
             | Key::Right
@@ -251,7 +248,12 @@ impl Session {
         self.mark_modified(index);
         if cursor + 1 < data_end {
             self.screen.cursor = cursor + 1;
-        } else if format.auto_enter() {
+            return Ok(());
+        }
+        // The last position: the field is being left (R-KEY-10).
+        let typed = self.screen.field(index).copied().unwrap_or(field);
+        self.check_leaving(&typed, Leaving::Moving)?;
+        if format.auto_enter() {
             self.send_aid(Aid::ENTER);
         } else if !format.exit_required() {
             self.advance_from(field.start);
@@ -269,6 +271,7 @@ impl Session {
         if sign == Sign::Minus && !matches!(shift, Shift::NumericOnly | Shift::SignedNumeric) {
             return Err(OperatorError::FieldMinusNotAllowed);
         }
+        Self::check_mandatory_enter_exit(&field)?;
         let data_end = field.data_end();
         let cursor = self.screen.cursor;
         if cursor < data_end {
@@ -298,12 +301,22 @@ impl Session {
             }
         }
         self.mark_modified(index);
+        let exited = self.screen.field(index).copied().unwrap_or(field);
+        self.check_leaving(&exited, Leaving::FieldExit)?;
         if field.format.auto_enter() {
             self.send_aid(Aid::ENTER);
         } else {
             self.advance_from(field.start);
         }
         Ok(())
+    }
+
+    /// Tab and Back Tab leave the input field the cursor is in, if any (R-KEY-10).
+    fn leave_field(&mut self) -> Result<(), OperatorError> {
+        match self.input_field_at_cursor() {
+            Some((_, field)) => self.check_leaving(&field, Leaving::Moving),
+            None => Ok(()),
+        }
     }
 
     /// Moves the text in `start..end` to the right, without nulls and trailing blanks, and
