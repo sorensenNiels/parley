@@ -201,6 +201,12 @@ fn left(ui: &mut Ui, status: &Status<'_>) -> Option<StatusAction> {
         }
     }
     processing_slot(ui, session.keyboard() == KeyboardState::Locked);
+    // R-KEY-11: the keys waiting for the host to finish.
+    let ahead = session.typed_ahead();
+    if ahead > 0 {
+        let keys = if ahead == 1 { "key" } else { "keys" };
+        ui.label(RichText::new(format!("{ahead} {keys} typed ahead")).color(p.muted));
+    }
     if let Some(key) = keys::keys_menu(ui, status.keymap, status.mac) {
         action = Some(StatusAction::Key(key));
     }

@@ -20,7 +20,6 @@
 | IDEA-5 | Extended attributes (Write Extended Attribute) and the GUI structured fields (windows, menus, scroll bars, WDSF): ignored now; Parley's query reply does not ask for them. |
 | IDEA-8 | Insert mode accepts trailing blanks as room, not only nulls as on a real 5250: kinder, but check it does not surprise people. |
 | IDEA-12 | *Dropped with auto sign-on (R-NET-7, D16): there is no bypass sign-on left to explain.* Startup Response Record (RFC 4777 section 10, `IBMSENDCONFREC`): show why a bypass sign-on failed (user unknown, password expired, and so on) instead of only the sign-on screen. *(Was → R-NET-6, dropped.)* |
-| IDEA-14 | Type-ahead: keys pressed while the keyboard is locked (X SYSTEM) are kept and replayed when the host unlocks it, as IBM's emulators can; Reset clears the buffer. Off by default, a setting to turn on. |
 
 ## Sessions and connection
 

@@ -7,6 +7,9 @@ mod datastream;
 mod input;
 mod playback;
 mod reply;
+mod typeahead;
+
+pub use typeahead::TYPE_AHEAD_KEYS;
 
 use serde::{Deserialize, Serialize};
 
@@ -235,6 +238,10 @@ pub struct Session {
     player: Option<playback::Player>,
     /// How often the host has unlocked the keyboard: a macro's `wait` step watches it.
     unlocks: u64,
+    /// Type-ahead is on (R-KEY-11).
+    type_ahead_on: bool,
+    /// Keys kept while the keyboard waits for the host (R-KEY-11).
+    typed_ahead: typeahead::TypedAhead,
 }
 
 impl Session {
@@ -260,6 +267,8 @@ impl Session {
             recording: None,
             player: None,
             unlocks: 0,
+            type_ahead_on: false,
+            typed_ahead: typeahead::TypedAhead::new(),
         }
     }
 
@@ -322,6 +331,7 @@ impl Session {
                 self.notice = Some(e.to_string());
             }
         }
+        self.replay_typed_ahead();
         self.advance_macro();
     }
 

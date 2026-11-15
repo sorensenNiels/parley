@@ -414,6 +414,9 @@ impl ParleyUi {
         }
         self.view.palette = self.palette();
         self.view.blinking = self.settings.blinking_text;
+        if let Some(session) = session.as_deref_mut() {
+            session.set_type_ahead(self.settings.type_ahead);
+        }
         if session
             .as_deref_mut()
             .is_some_and(parley_core::Session::take_alarm)
@@ -1804,6 +1807,31 @@ mod tests {
         session.key(parley_core::Key::Char('x'));
         let harness = status_harness(session, status::Clock::default(), 900.0);
         harness.get_by_label("X 0012 No room to insert: the field is full.");
+    }
+
+    #[test]
+    fn the_status_bar_counts_the_keys_typed_ahead_r_key_11() {
+        let mut session = test_support::waiting_session();
+        session.set_type_ahead(true);
+        session.key(parley_core::Key::Aid(parley_core::Aid::ENTER));
+        session.key(parley_core::Key::Char('a'));
+        session.key(parley_core::Key::Char('b'));
+        let harness = status_harness(session, status::Clock::default(), 900.0);
+        harness.get_by_label("2 keys typed ahead");
+    }
+
+    #[test]
+    fn the_terminal_page_turns_type_ahead_on_r_key_11() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("Terminal").click();
+        harness.run();
+        harness.get_by_label("Type-ahead").click();
+        harness.run();
+        harness.get_by_label("Save").click();
+        harness.run();
+        assert!(harness.state().settings().type_ahead);
     }
 
     #[test]

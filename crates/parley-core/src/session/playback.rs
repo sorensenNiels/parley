@@ -48,6 +48,9 @@ impl Session {
             }
             return;
         }
+        if self.hold_for_later(key) {
+            return;
+        }
         let hidden = self.cursor_in_hidden_field();
         let had_error = self.error.is_some();
         let locked = self.locked;

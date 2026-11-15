@@ -46,6 +46,8 @@ pub struct Settings {
     pub alarm: Alarm,
     /// Blinking text blinks; off, it shows steady in reverse image (R-UI-24).
     pub blinking_text: bool,
+    /// Keys typed while the host works are kept and carried out after (R-KEY-11).
+    pub type_ahead: bool,
     /// Look for a new version when Parley starts (R-UI-11).
     pub check_for_updates: bool,
     /// Which add-ons are on (R-ADD-1).
@@ -65,6 +67,7 @@ impl Default for Settings {
             custom_colors: terminal::CustomColors::default(),
             alarm: Alarm::default(),
             blinking_text: true,
+            type_ahead: false,
             check_for_updates: true,
             addons: AddOnSettings::default(),
             keyboard_maps: Vec::new(),
@@ -131,6 +134,7 @@ impl Page {
                 settings.custom_colors = defaults.custom_colors;
                 settings.alarm = defaults.alarm;
                 settings.blinking_text = defaults.blinking_text;
+                settings.type_ahead = defaults.type_ahead;
             }
             // The map shown gets the Default map's keys: see `keyboard::Page::restore`.
             Self::Keyboard => {}
@@ -330,6 +334,11 @@ impl Dialog {
                 "Blinking text",
                 Some("Off: blinking text shows steady in reverse image."),
                 &mut settings.blinking_text,
+            );
+            rows.switch(
+                "Type-ahead",
+                Some("Keys typed while the IBM i works (X SYSTEM) are kept and typed when it is done."),
+                &mut settings.type_ahead,
             );
             rows.full_row(|ui| {
                 let palette =

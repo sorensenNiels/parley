@@ -243,3 +243,9 @@ Checked by the owner in the running app (2026-11-15); `make verify` on Linux und
   typed; Field Exit past it is 0021; a half-filled mandatory fill field is 0014 with Tab and 0017 with Field Exit,
   and Field Exit from its first position empties it; a wrong check digit is 0015 with the cursor back at the field,
   a right one moves on. Not tried on a real screen; marked done by the owner (2026-11-15).
+
+- **R-KEY-11** (2026-11-15): type-ahead (IDEA-14). **Automated** (`make test`): off, keys while the host works are
+  dropped; on, they are typed when the next screen unlocks the keyboard (also `æ`); an Enter typed ahead goes and
+  leaves the rest for the screen after; Reset drops them; an error while replaying drops the rest; at most 256 are
+  kept and turning it off drops them; the status bar says "2 keys typed ahead"; the Terminal page saves the switch.
+  Not tried in the running app; marked done by the owner (2026-11-15).

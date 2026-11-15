@@ -990,6 +990,88 @@ fn a_wrong_check_digit_is_0015_and_the_cursor_goes_back_to_the_field_r_key_10() 
     assert_eq!(cursor(&s), (7, 9), "a good number moves on");
 }
 
+/// Signed on with type-ahead on, Enter pressed: the keyboard waits for the host (R-KEY-11).
+fn waiting_for_the_host() -> Session {
+    let mut s = signed_on();
+    s.set_type_ahead(true);
+    s.key(Key::Aid(Aid::ENTER));
+    assert_eq!(s.keyboard(), KeyboardState::Locked);
+    s.take_outbound();
+    s
+}
+
+#[test]
+fn without_type_ahead_keys_while_the_host_works_are_dropped_r_key_11() {
+    let mut s = signed_on();
+    s.key(Key::Aid(Aid::ENTER));
+    keys(&mut s, "yz");
+    assert_eq!(s.typed_ahead(), 0);
+    s.receive(&host(&menu_screen()));
+    assert_eq!(row_text(&s, 5), "");
+}
+
+#[test]
+fn keys_typed_ahead_are_carried_out_when_the_host_unlocks_r_key_11() {
+    let mut s = waiting_for_the_host();
+    keys(&mut s, "yzæ");
+    assert_eq!(s.typed_ahead(), 3);
+    s.receive(&host(&menu_screen()));
+    assert_eq!(s.typed_ahead(), 0);
+    assert_eq!(row_text(&s, 5).trim(), "yzæ");
+}
+
+#[test]
+fn a_key_typed_ahead_that_waits_for_the_host_leaves_the_rest_for_the_next_screen_r_key_11() {
+    let mut s = waiting_for_the_host();
+    keys(&mut s, "a");
+    s.key(Key::Aid(Aid::ENTER));
+    keys(&mut s, "b");
+    s.receive(&host(&menu_screen()));
+    assert_eq!(
+        s.keyboard(),
+        KeyboardState::Locked,
+        "the Enter typed ahead went"
+    );
+    assert_eq!(s.typed_ahead(), 1);
+    assert_eq!(sent(&mut s).len(), 1);
+    s.receive(&host(&menu_screen()));
+    assert_eq!(row_text(&s, 5).trim(), "b");
+}
+
+#[test]
+fn reset_drops_the_keys_typed_ahead_r_key_11() {
+    let mut s = waiting_for_the_host();
+    keys(&mut s, "yz");
+    s.key(Key::Reset);
+    assert_eq!(s.typed_ahead(), 0);
+    s.receive(&host(&menu_screen()));
+    assert_eq!(row_text(&s, 5), "");
+}
+
+#[test]
+fn an_error_while_replaying_drops_the_rest_r_key_11() {
+    let mut s = numeric_screen();
+    s.set_type_ahead(true);
+    s.key(Key::Aid(Aid::ENTER));
+    keys(&mut s, "q1");
+    let mut o = vec![SBA, 2, 10];
+    o.extend(field([0x45, 0x00], 0x24, 4));
+    s.receive(&host(&screen_with(&o)));
+    assert!(matches!(s.keyboard(), KeyboardState::Error(_)));
+    assert_eq!(s.typed_ahead(), 0, "the 1 after the refused q is dropped");
+}
+
+#[test]
+fn type_ahead_keeps_at_most_its_limit_r_key_11() {
+    let mut s = waiting_for_the_host();
+    for _ in 0..parley_core::session::TYPE_AHEAD_KEYS + 10 {
+        s.key(Key::Char('x'));
+    }
+    assert_eq!(s.typed_ahead(), parley_core::session::TYPE_AHEAD_KEYS);
+    s.set_type_ahead(false);
+    assert_eq!(s.typed_ahead(), 0, "turning it off drops them");
+}
+
 #[test]
 fn recording_leaves_out_refused_keys_and_the_reset_after_them_r_key_3() {
     let mut s = numeric_screen();
