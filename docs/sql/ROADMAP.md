@@ -126,7 +126,7 @@ panel folded away (R-SQL-51).
 
 Asked by the owner (2026-11-14): the small things a code editor is expected to do, on egui's text field as it is
 (R-SQL-52..59). Bigger editor work (line numbers, a gutter, an editor widget of Parley's own) is IDEA-34. The text
-changes are pure functions in `parley_core::sql::edit`, tested without the UI; the editor turns keys into them.
+changes are pure functions in `parley_sql_core::edit`, tested without the UI; the editor turns keys into them.
 
 ### Phase 14 — The editor, deeper (done)
 
@@ -183,6 +183,7 @@ rows from Parley's areas belong here too: `ADD` (the assistant's add-on switch) 
 |---|---|---|
 | R-SQL-87 | **Explorer and Current library** (2026-11-15; the owner, D34). The side panel's upper section, which holds the IBM i, its System node, the library list and the library groups (R-SQL-83), is headed "Explorer", not "Libraries"; its buttons say so ("Fold Explorer", "Show Explorer and Snippets"). The top bar's menu (R-SQL-32) reads "Current library MYLIB", not "Schema MYLIB"; its hover says it is where unqualified tables are looked for, the SQL current schema (`SET SCHEMA`), and a library in its list is made "the current library". What runs on the host is unchanged. *Changes R-SQL-32, R-SQL-82, R-SQL-83 and R-SQL-84 (their names only).* | UI clean-up |
 | R-SQL-88 | **Snippets as a tree** (2026-11-15; the owner, D34). The Snippets section (R-SQL-84) shows Mine, Shared and Did you know as groups that fold like the Explorer's library groups, each header with its count; a group with nothing to show, or nothing matching the search, is left out, and while a search is typed every group is open. Each snippet is one line: its title, and its tags in muted text on the right; while the pointer is on the line a Run button takes the tags' place. Double-click inserts it and the hover shows its about and SQL, as before; its right-click menu has Insert and Run, and for mine and shared ones Edit… and Delete… (asking first). *Changes R-SQL-25 (Run, Edit and Delete were buttons on every line, tags a line of their own).* | UI clean-up |
+| R-SQL-92 | **A compound statement is one statement** (2026-11-15; asked by the owner after the code audit. *Changes R-SQL-7:* statements end with `;` outside a compound statement.) A `;` inside `BEGIN … END` does not end the statement, so `CREATE PROCEDURE`, `CREATE FUNCTION`, `CREATE TRIGGER` (`BEGIN ATOMIC`) and a dynamic compound statement run whole, from Run, Run all and a selection. Nested `BEGIN … END`, `END IF`, `END WHILE`, `END LOOP`, `END FOR`, `END REPEAT`, `END CASE` and `CASE … END` expressions are told apart; `BEGIN` and `END` in strings, quoted names and comments count for nothing. A `BEGIN` never closed runs to the end of the text, and the host says what is wrong. A pure function in `parley_sql_core::text`, tested with procedures, triggers, functions, CASE expressions, `æøå` and unclosed text. | Code audit |
 
 ## 6. Decisions
 
@@ -219,4 +220,4 @@ Decisions D1–D18 (language, crates, TLS, the look, add-ons, no saved passwords
 - A choice that future work must respect becomes a decision in §6.
 - An idea is not a plan: it goes in [IDEAS.md](IDEAS.md) until it is picked, then becomes requirements here.
 
-Next free ID: `R-SQL-92` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).
+Next free ID: `R-SQL-93` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).

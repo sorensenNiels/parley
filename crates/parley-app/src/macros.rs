@@ -26,8 +26,11 @@ impl MacroFolder {
         Self { dir }
     }
 
-    fn path(&self, name: &str) -> PathBuf {
-        self.dir.join(format!("{name}.{EXTENSION}"))
+    /// The file of the macro `name`; a name that is not a macro's (`..`, `a/b`) is refused,
+    /// so no file outside the folder is read, written or deleted.
+    fn path(&self, name: &str) -> Result<PathBuf, String> {
+        check_macro_name(name)?;
+        Ok(self.dir.join(format!("{name}.{EXTENSION}")))
     }
 
     /// Copies each of `paths` in as a macro (R-KEY-7); see [`Self::import_file`].
@@ -43,7 +46,7 @@ impl MacroFolder {
         let name = check_macro_name(&stem).map_err(|e| format!("{shown}: {e}"))?;
         let text = fs::read_to_string(path).map_err(|e| format!("{shown}: {e}"))?;
         Macro::parse(&text).map_err(|e| format!("{shown}: {e}"))?;
-        if self.path(&name).exists() {
+        if self.path(&name)?.exists() {
             return Err(format!(
                 "{shown}: there is already a macro called \"{name}\""
             ));
@@ -52,11 +55,16 @@ impl MacroFolder {
         Ok(name)
     }
 
-    /// Copies the macro `name` to `path` (R-KEY-7).
+    /// Copies the macro `name` to `path` (R-KEY-7). Onto its own file it is already there:
+    /// `fs::copy` would empty the file before reading it.
     fn export_to(&self, name: &str, path: &Path) -> Result<(), String> {
-        fs::copy(self.path(name), path)
-            .map(drop)
-            .map_err(|e| e.to_string())
+        let source = self.path(name)?;
+        if let (Ok(from), Ok(to)) = (source.canonicalize(), path.canonicalize())
+            && from == to
+        {
+            return Ok(());
+        }
+        fs::copy(source, path).map(drop).map_err(|e| e.to_string())
     }
 }
 
@@ -91,28 +99,30 @@ impl MacroStore for MacroFolder {
     }
 
     fn read_text(&self, name: &str) -> Result<String, String> {
-        fs::read_to_string(self.path(name)).map_err(|e| e.to_string())
+        fs::read_to_string(self.path(name)?).map_err(|e| e.to_string())
     }
 
     fn save_text(&self, name: &str, text: &str) -> Result<(), String> {
+        let path = self.path(name)?;
         fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
-        fs::write(self.path(name), text).map_err(|e| e.to_string())
+        fs::write(path, text).map_err(|e| e.to_string())
     }
 
     fn delete(&self, name: &str) -> Result<(), String> {
-        match fs::remove_file(self.path(name)) {
+        match fs::remove_file(self.path(name)?) {
             Err(e) if e.kind() != ErrorKind::NotFound => Err(e.to_string()),
             _ => Ok(()),
         }
     }
 
     fn rename(&self, old: &str, new: &str) -> Result<(), String> {
-        let target = self.path(new);
+        let source = self.path(old)?;
+        let target = self.path(new)?;
         // A name differing only in case is the same file on Windows and macOS.
         if target.exists() && !old.eq_ignore_ascii_case(new) {
             return Err(format!("there is already a macro called \"{new}\""));
         }
-        fs::rename(self.path(old), target).map_err(|e| e.to_string())
+        fs::rename(source, target).map_err(|e| e.to_string())
     }
 
     fn folder(&self) -> Option<String> {
@@ -199,6 +209,31 @@ pub(crate) mod tests {
                 .export_to("Gone", &outside.join("gone.macro"))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn exporting_a_macro_onto_its_own_file_keeps_it_r_key_7() {
+        let temp = TempDir::new("macro-export-self");
+        let folder = MacroFolder::new(temp.0.join("macros"));
+        let text = "# mine æøå\nenter\n";
+        folder.save_text("Mine", text).expect("saved");
+        let own = temp.0.join("macros").join(".").join("Mine.macro");
+        folder.export_to("Mine", &own).expect("exported");
+        assert_eq!(folder.read_text("Mine").as_deref(), Ok(text));
+    }
+
+    #[test]
+    fn a_macro_name_cannot_reach_outside_the_folder_r_key_3() {
+        let temp = TempDir::new("macro-outside");
+        let folder = MacroFolder::new(temp.0.join("macros"));
+        fs::create_dir_all(&temp.0).expect("a folder");
+        fs::write(temp.0.join("keep.macro"), "enter\n").expect("written");
+        assert!(folder.save_text("../evil", "enter\n").is_err());
+        assert!(!temp.0.join("evil.macro").exists());
+        assert!(folder.read_text("../keep").is_err());
+        assert!(folder.delete("../keep").is_err());
+        assert!(folder.rename("../keep", "taken").is_err());
+        assert!(temp.0.join("keep.macro").exists());
     }
 
     #[test]

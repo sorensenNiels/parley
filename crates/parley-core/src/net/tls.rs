@@ -75,3 +75,69 @@ fn handshake_error(e: &std::io::Error) -> Error {
         Error::Tls(text)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A file in the system's temporary folder, removed when dropped.
+    struct TempFile(std::path::PathBuf);
+
+    impl TempFile {
+        fn with(name: &str, contents: &str) -> Self {
+            let path = std::env::temp_dir().join(format!("parley-{}-{name}", std::process::id()));
+            std::fs::write(&path, contents).expect("the temporary folder is writable");
+            Self(path)
+        }
+
+        fn path(&self) -> &str {
+            self.0.to_str().expect("a UTF-8 temporary path")
+        }
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            // Only a leftover file in the temporary folder if this fails.
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    fn message(result: Result<Vec<CertificateDer<'static>>>) -> String {
+        result.expect_err("not a usable CA file").to_string()
+    }
+
+    #[test]
+    fn a_missing_ca_file_is_an_error_that_names_it_r_net_2() {
+        let error = message(read_ca_file("/no/such/parley-ca-æøå.pem"));
+        assert!(error.contains("/no/such/parley-ca-æøå.pem"), "{error}");
+    }
+
+    #[test]
+    fn a_ca_file_without_a_certificate_is_an_error_r_net_2() {
+        let file = TempFile::with("empty.pem", "just text, æøå\n");
+        let error = message(read_ca_file(file.path()));
+        assert!(error.contains("holds no PEM certificate"), "{error}");
+    }
+
+    #[test]
+    fn a_ca_file_with_a_broken_certificate_is_an_error_r_net_2() {
+        let file = TempFile::with(
+            "broken.pem",
+            "-----BEGIN CERTIFICATE-----\n!!!not base64!!!\n-----END CERTIFICATE-----\n",
+        );
+        let error = message(read_ca_file(file.path()));
+        assert!(error.contains(file.path()), "{error}");
+    }
+
+    #[test]
+    fn a_certificate_failure_suggests_the_ca_file_r_net_2() {
+        let bad = std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid peer certificate");
+        assert!(
+            handshake_error(&bad)
+                .to_string()
+                .contains("CA certificate file")
+        );
+        let other = std::io::Error::new(std::io::ErrorKind::ConnectionReset, "reset");
+        assert_eq!(handshake_error(&other).to_string(), "TLS: reset");
+    }
+}

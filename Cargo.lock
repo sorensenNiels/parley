@@ -2718,8 +2718,11 @@ dependencies = [
  "eframe",
  "keyring",
  "parley-core",
+ "parley-sql-core",
+ "parley-sql-ui",
  "parley-ui-egui",
  "rfd",
+ "ron",
  "winresource",
 ]
 
@@ -2727,9 +2730,22 @@ dependencies = [
 name = "parley-core"
 version = "0.3.1"
 dependencies = [
+ "rustls",
+ "rustls-platform-verifier",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "ureq",
+]
+
+[[package]]
+name = "parley-sql-core"
+version = "0.3.1"
+dependencies = [
  "chrono",
  "des",
  "getrandom 0.3.4",
+ "parley-core",
  "rpassword",
  "rust_xlsxwriter",
  "rustls",
@@ -2742,12 +2758,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "parley-ui-egui"
+name = "parley-sql-ui"
 version = "0.3.1"
 dependencies = [
  "egui",
  "egui_kittest",
  "egui_plot",
+ "parley-core",
+ "parley-sql-core",
+ "parley-ui-egui",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "parley-ui-egui"
+version = "0.3.1"
+dependencies = [
+ "egui",
+ "egui_kittest",
  "fontique",
  "parley-core",
  "serde",

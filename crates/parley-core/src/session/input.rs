@@ -4,7 +4,7 @@
 use super::{OperatorError, Session};
 use crate::record::Opcode;
 use crate::record::flags;
-use crate::screen::{Adjust, Field, Shift};
+use crate::screen::{Adjust, BLANK, Field, MINUS, Shift, ZERO, negative_zone};
 
 /// An attention identifier: the key that sends input to the host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,6 +28,11 @@ impl Aid {
             13..=24 => Some(Self(0xB0 + n - 12)),
             _ => None,
         }
+    }
+
+    /// The AID with this code, as a macro file names one without a name (`aid-XX`).
+    pub(crate) const fn from_code(code: u8) -> Self {
+        Self(code)
     }
 
     pub const fn code(self) -> u8 {
@@ -69,20 +74,41 @@ pub enum Key {
     },
 }
 
-const MINUS: u8 = 0x60;
-const BLANK: u8 = 0x40;
-const ZERO: u8 = 0xF0;
+/// The sign Field Exit gives a number: Field Exit and Field+ make it positive, Field- negative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sign {
+    Plus,
+    Minus,
+}
 
 impl Session {
     /// Carries out a key, from the operator ([`Session::key`]) or a macro.
     pub(super) fn press(&mut self, key: Key) {
+        // Attention, System Request and Reset work while the keyboard is locked or in error.
         match key {
             Key::Attention => return self.send_record(flags::ATTENTION, Opcode::NoOperation, &[]),
             Key::SystemRequest => {
                 return self.send_record(flags::SYSTEM_REQUEST, Opcode::NoOperation, &[]);
             }
             Key::Reset => return self.reset(),
-            _ => {}
+            Key::Char(_)
+            | Key::Aid(_)
+            | Key::FieldExit
+            | Key::FieldPlus
+            | Key::FieldMinus
+            | Key::Tab
+            | Key::BackTab
+            | Key::Up
+            | Key::Down
+            | Key::Left
+            | Key::Right
+            | Key::Home
+            | Key::End
+            | Key::Backspace
+            | Key::Delete
+            | Key::ToggleInsert
+            | Key::EraseEof
+            | Key::MoveTo { .. } => {}
         }
         if self.error.is_some() || self.locked {
             return;
@@ -93,8 +119,8 @@ impl Session {
                 self.send_aid(aid);
                 Ok(())
             }
-            Key::FieldExit | Key::FieldPlus => self.field_exit(false),
-            Key::FieldMinus => self.field_exit(true),
+            Key::FieldExit | Key::FieldPlus => self.field_exit(Sign::Plus),
+            Key::FieldMinus => self.field_exit(Sign::Minus),
             Key::Delete => self.delete(),
             Key::Backspace => self.backspace(),
             Key::EraseEof => {
@@ -145,10 +171,13 @@ impl Session {
     /// The input field the cursor is in. `None` at a protected position: an editing key does
     /// nothing there, with no operator error to Reset (R-KEY-8, D18; a real 5250 inhibits the
     /// keyboard, IBM 5250 Functions Reference, operator error 0005). Tab still moves on.
-    fn input_field_at_cursor(&self) -> Option<usize> {
+    /// Gives the field's index in the format table and a copy of it.
+    fn input_field_at_cursor(&self) -> Option<(usize, Field)> {
+        let index = self.screen.field_at(self.screen.cursor)?;
         self.screen
-            .field_at(self.screen.cursor)
-            .filter(|&i| self.screen.field(i).is_some_and(Field::is_input))
+            .field(index)
+            .filter(|f| f.is_input())
+            .map(|f| (index, *f))
     }
 
     fn mark_modified(&mut self, index: usize) {
@@ -158,16 +187,13 @@ impl Session {
     }
 
     fn type_char(&mut self, c: char) -> Result<(), OperatorError> {
-        let Some(index) = self.input_field_at_cursor() else {
-            return Ok(());
-        };
-        let Some(field) = self.screen.field(index).copied() else {
+        let Some((index, field)) = self.input_field_at_cursor() else {
             return Ok(());
         };
         let format = field.format;
         let shift = format.shift();
         if shift == Shift::SignedNumeric && matches!(c, '+' | '-') {
-            return self.field_exit(c == '-');
+            return self.field_exit(if c == '-' { Sign::Minus } else { Sign::Plus });
         }
         let cursor = self.screen.cursor;
         let data_end = field.data_end();
@@ -226,15 +252,12 @@ impl Session {
 
     /// Field Exit, Field+ and Field-: nulls the rest of the field, adjusts it, sets the sign,
     /// and goes to the next field (or sends Enter in an auto-enter field).
-    fn field_exit(&mut self, minus: bool) -> Result<(), OperatorError> {
-        let Some(index) = self.input_field_at_cursor() else {
-            return Ok(());
-        };
-        let Some(field) = self.screen.field(index).copied() else {
+    fn field_exit(&mut self, sign: Sign) -> Result<(), OperatorError> {
+        let Some((index, field)) = self.input_field_at_cursor() else {
             return Ok(());
         };
         let shift = field.format.shift();
-        if minus && !matches!(shift, Shift::NumericOnly | Shift::SignedNumeric) {
+        if sign == Sign::Minus && !matches!(shift, Shift::NumericOnly | Shift::SignedNumeric) {
             return Err(OperatorError::FieldMinusNotAllowed);
         }
         let data_end = field.data_end();
@@ -253,13 +276,16 @@ impl Session {
             self.right_adjust(field.start, data_end, fill);
         }
         if shift == Shift::SignedNumeric && field.len > 0 {
-            self.screen.put(data_end, if minus { MINUS } else { BLANK });
+            let byte = match sign {
+                Sign::Plus => BLANK,
+                Sign::Minus => MINUS,
+            };
+            self.screen.put(data_end, byte);
         }
-        if shift == Shift::NumericOnly && minus && data_end > field.start {
-            // Field- in a numeric-only field makes the last digit negative (zone X'D').
-            let last = self.screen.get(data_end - 1);
-            if (ZERO..=0xF9).contains(&last) {
-                self.screen.put(data_end - 1, 0xD0 | (last & 0x0F));
+        if shift == Shift::NumericOnly && sign == Sign::Minus && data_end > field.start {
+            // Field- in a numeric-only field makes the last digit negative.
+            if let Some(negative) = negative_zone(self.screen.get(data_end - 1)) {
+                self.screen.put(data_end - 1, negative);
             }
         }
         self.mark_modified(index);
@@ -288,10 +314,7 @@ impl Session {
     }
 
     fn delete(&mut self) -> Result<(), OperatorError> {
-        let Some(index) = self.input_field_at_cursor() else {
-            return Ok(());
-        };
-        let Some(field) = self.screen.field(index).copied() else {
+        let Some((index, field)) = self.input_field_at_cursor() else {
             return Ok(());
         };
         let cursor = self.screen.cursor;
@@ -310,10 +333,7 @@ impl Session {
 
     fn backspace(&mut self) -> Result<(), OperatorError> {
         let cursor = self.screen.cursor;
-        let in_field = self
-            .input_field_at_cursor()
-            .and_then(|i| self.screen.field(i));
-        match in_field {
+        match self.input_field_at_cursor().map(|(_, f)| f) {
             Some(field) if cursor > field.start => {
                 self.screen.cursor = cursor - 1;
                 self.delete()
@@ -326,10 +346,7 @@ impl Session {
     }
 
     fn erase_eof(&mut self) {
-        let Some(index) = self.input_field_at_cursor() else {
-            return;
-        };
-        let Some(field) = self.screen.field(index).copied() else {
+        let Some((index, field)) = self.input_field_at_cursor() else {
             return;
         };
         if self.screen.cursor < field.data_end() {
@@ -352,10 +369,7 @@ impl Session {
         let cursor = screen.cursor;
         let positions = screen.buffer().len();
         let columns = usize::from(screen.size().columns());
-        let current = screen
-            .field_at(cursor)
-            .and_then(|i| screen.field(i))
-            .filter(|f| f.is_input());
+        let current = self.input_field_at_cursor().map(|(_, f)| f);
         let to = match key {
             Key::Tab => screen.next_input_field(cursor).map_or(cursor, |f| f.start),
             Key::BackTab => match current {
@@ -369,21 +383,40 @@ impl Session {
             Key::Left => screen.previous(cursor),
             Key::Right => screen.next(cursor),
             Key::Home => screen.home(),
-            Key::End => current.map_or(cursor, |f| {
-                let bytes = &screen.buffer()[f.start..f.data_end()];
-                let used = bytes
-                    .iter()
-                    .rposition(|&b| !matches!(b, 0 | BLANK))
-                    .map_or(0, |i| i + 1);
-                f.start + used.min(f.data_end() - f.start - 1)
-            }),
+            Key::End => current.map_or(cursor, |f| end_of_text(screen.field_bytes(&f), &f)),
             Key::MoveTo { row, column } if row < positions / columns && column < columns => {
                 row * columns + column
             }
-            _ => cursor,
+            Key::MoveTo { .. }
+            | Key::Char(_)
+            | Key::Aid(_)
+            | Key::FieldExit
+            | Key::FieldPlus
+            | Key::FieldMinus
+            | Key::Backspace
+            | Key::Delete
+            | Key::ToggleInsert
+            | Key::EraseEof
+            | Key::Reset
+            | Key::Attention
+            | Key::SystemRequest => cursor,
         };
         self.screen.cursor = to;
     }
+}
+
+/// Where End puts the cursor in `field` (whose bytes are `bytes`): after the last character
+/// that is not a null or blank, but not past the last position the operator can type in. A
+/// signed numeric field of one position has none, and End stays on its sign position.
+fn end_of_text(bytes: &[u8], field: &Field) -> usize {
+    let typeable = field.data_end() - field.start;
+    let used = bytes
+        .get(..typeable)
+        .unwrap_or(bytes)
+        .iter()
+        .rposition(|&b| !matches!(b, 0 | BLANK))
+        .map_or(0, |i| i + 1);
+    field.start + used.min(typeable.saturating_sub(1))
 }
 
 /// The upper case of a letter, when it is a single character (not "ß" → "SS").

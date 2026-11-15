@@ -16,7 +16,12 @@ use crate::macros::Step;
 use crate::record::{self, Opcode};
 use crate::screen::{Screen, ScreenSize, Style};
 use crate::telnet::{Received, Telnet};
-use crate::{CodePage, Result};
+use crate::{CodePage, Error, Result};
+
+/// TN5250's usual port over plain telnet (RFC 2877).
+pub const TELNET_PORT: u16 = 23;
+/// TN5250's usual port over TLS on IBM i (R-NET-2).
+pub const TLS_PORT: u16 = 992;
 
 /// Where and how to connect.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,7 +46,7 @@ impl Default for SessionConfig {
     fn default() -> Self {
         Self {
             host: String::new(),
-            port: 23,
+            port: TELNET_PORT,
             tls: false,
             ca_file: String::new(),
             code_page: CodePage::default(),
@@ -53,6 +58,11 @@ impl Default for SessionConfig {
 }
 
 impl SessionConfig {
+    /// The usual port for TN5250 with `tls` or without.
+    pub const fn default_port(tls: bool) -> u16 {
+        if tls { TLS_PORT } else { TELNET_PORT }
+    }
+
     /// The terminal type sent during negotiation (RFC 2877 section 4).
     pub const fn terminal_type(&self) -> &'static str {
         match self.screen_size {
@@ -241,11 +251,22 @@ impl Session {
         self.notice.as_deref()
     }
 
+    /// Shows `text` as the session's notice, as for a problem with the host's data.
+    pub(crate) fn set_notice(&mut self, text: String) {
+        self.notice = Some(text);
+    }
+
     /// Bytes from the host. Replies are queued for [`Session::take_outbound`].
     pub fn receive(&mut self, bytes: &[u8]) {
         let mut received = Received::default();
         self.telnet.receive(bytes, &mut received);
         self.outbound.extend(received.reply);
+        if received.dropped > 0 {
+            self.notice = Some(
+                Error::data("a record longer than a 5250 record can be; it was dropped")
+                    .to_string(),
+            );
+        }
         for bytes in received.records {
             if let Err(e) = self.process_record(&bytes) {
                 self.notice = Some(e.to_string());

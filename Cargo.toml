@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
-default-members = ["crates/parley-core"]
+default-members = ["crates/parley-core", "crates/parley-sql-core"]
 
 [workspace.package]
 version = "0.3.1"
@@ -12,6 +12,8 @@ authors = ["Niels P. Sørensen <niels.p.sorensen@softdesign.dk>"]
 
 [workspace.dependencies]
 parley-core = { path = "crates/parley-core" }
+parley-sql-core = { path = "crates/parley-sql-core" }
+parley-sql-ui = { path = "crates/parley-sql-ui" }
 parley-ui-egui = { path = "crates/parley-ui-egui" }
 des = "0.8"
 sha1 = "0.10"

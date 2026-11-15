@@ -72,7 +72,7 @@ mod tests {
 #[derive(Debug)]
 pub struct SqlFileWindow;
 
-impl parley_ui_egui::SqlFiles for SqlFileWindow {
+impl parley_sql_ui::SqlFiles for SqlFileWindow {
     fn export_csv(&self, suggested: &str, bytes: &[u8]) -> Result<Option<String>, String> {
         let Some(path) = rfd::FileDialog::new()
             .set_title("Export rows")
@@ -89,11 +89,11 @@ impl parley_ui_egui::SqlFiles for SqlFileWindow {
     fn download_path(
         &self,
         suggested: &str,
-        format: parley_core::sql::transfer::Format,
+        format: parley_sql_core::transfer::Format,
     ) -> Result<Option<std::path::PathBuf>, String> {
         let (name, extension) = match format {
-            parley_core::sql::transfer::Format::Csv => ("CSV", "csv"),
-            parley_core::sql::transfer::Format::Excel => ("Excel", "xlsx"),
+            parley_sql_core::transfer::Format::Csv => ("CSV", "csv"),
+            parley_sql_core::transfer::Format::Excel => ("Excel", "xlsx"),
         };
         Ok(rfd::FileDialog::new()
             .set_title("Download rows")

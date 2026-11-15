@@ -77,3 +77,26 @@ pub fn actions(ui: &mut Ui, confirm: egui::Button<'_>, confirm_enabled: bool) ->
         (cancel, confirm)
     })
 }
+
+/// A notice with an OK button while `notice` holds its text; `more` adds what follows the text,
+/// such as where to get what is missing. OK or the close button clears it.
+pub fn notice(
+    ctx: &Context,
+    id: &str,
+    title: &str,
+    notice: &mut Option<String>,
+    more: impl FnOnce(&mut Ui),
+) {
+    let Some(text) = notice.clone() else {
+        return;
+    };
+    let (close, ok) = dialog(ctx, id, title, 440.0, |ui| {
+        ui.label(&text);
+        more(ui);
+        ui.add_space(12.0);
+        theme::button_row(ui, |ui| ui.add(theme::primary_button(ui, "OK")).clicked())
+    });
+    if close || ok {
+        *notice = None;
+    }
+}

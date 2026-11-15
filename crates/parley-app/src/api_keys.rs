@@ -3,8 +3,8 @@
 //! KDE Wallet) on Linux. One entry per provider, shared by Parley and Parley SQL.
 
 use keyring::{Entry, Error};
-use parley_core::sql::assistant::Provider;
-use parley_ui_egui::ApiKeys;
+use parley_sql_core::assistant::Provider;
+use parley_sql_ui::ApiKeys;
 
 /// The keychain service the keys are filed under; the account is the provider's id.
 const SERVICE: &str = "Parley SQL assistant";

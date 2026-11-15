@@ -4,20 +4,12 @@
 //! another function has is moved only once the operator says so. Laid out as Tortuga's
 //! Settings ▸ Script editor keys.
 
-use egui::{ComboBox, Event, EventFilter, RichText, TextEdit, Ui};
+use egui::{ComboBox, RichText, TextEdit, Ui};
 
+use super::key_capture::{Pressed, Slot, key_button, take_key};
 use super::{Settings, group};
 use crate::keymap::{Chord, CtrlAlone, DEFAULT_MAP, Function, KeyMap, groups};
 use crate::theme;
-
-/// Where a pressed key goes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Slot {
-    /// In place of this key of the function.
-    Replace(Chord),
-    /// As one more key.
-    Add,
-}
 
 /// What the page says under a function after a key was pressed for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -353,72 +345,6 @@ impl Page {
         let alone = self.ctrl_alone.released(taken, modifiers);
         pressed.or_else(|| alone.then_some(Pressed::Chord(Chord::CtrlAlone)))
     }
-}
-
-/// A key, or + for one more (`slot`): click it, then press the key. While `waiting` it says so
-/// and keeps the keyboard, so Tab and the arrows can be pressed too. Returns whether it was
-/// clicked.
-pub(super) fn key_button(ui: &mut Ui, waiting: bool, slot: Slot, text: &str) -> bool {
-    let shown = if waiting { "Press a key…" } else { text };
-    let button = egui::Button::new(RichText::new(shown).monospace()).selected(waiting);
-    let hover = match slot {
-        Slot::Replace(_) => "Click, then press the new key",
-        Slot::Add => "Add a key: click, then press it",
-    };
-    let response = ui.add(button).on_hover_text(hover);
-    if waiting {
-        response.request_focus();
-        ui.memory_mut(|m| {
-            m.set_focus_lock_filter(
-                response.id,
-                EventFilter {
-                    tab: true,
-                    horizontal_arrows: true,
-                    vertical_arrows: true,
-                    escape: true,
-                },
-            );
-        });
-    }
-    response.clicked()
-}
-
-/// The key pressed this frame as `make` reads it, taken from the input so nothing else acts on
-/// it; also whether anything was taken, and the modifiers held.
-pub(super) fn take_key(
-    ui: &Ui,
-    make: fn(egui::Key, egui::Modifiers) -> Chord,
-) -> (Option<Pressed>, bool, egui::Modifiers) {
-    let (taken, modifiers) = ui.input_mut(|i| {
-        let mut taken = Vec::new();
-        i.events.retain(|e| match e {
-            Event::Key { .. } | Event::Text(_) | Event::Copy | Event::Cut | Event::Paste(_) => {
-                taken.push(e.clone());
-                false
-            }
-            _ => true,
-        });
-        (taken, i.modifiers)
-    });
-    let pressed = taken.iter().find_map(|e| match e {
-        Event::Key {
-            key,
-            pressed: true,
-            modifiers,
-            ..
-        } => Some(Pressed::Chord(make(*key, *modifiers))),
-        Event::Copy | Event::Cut | Event::Paste(_) => Some(Pressed::Clipboard),
-        _ => None,
-    });
-    (pressed, !taken.is_empty(), modifiers)
-}
-
-/// A key pressed while a function waits for one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Pressed {
-    Chord(Chord),
-    /// The system's copy, paste or cut key, which egui never shows as a key.
-    Clipboard,
 }
 
 /// Gives `function` the key `chord` in `slot` unless it cannot have it; returns what to say:

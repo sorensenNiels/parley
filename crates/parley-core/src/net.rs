@@ -3,7 +3,6 @@
 //! The thread owns the socket. It feeds what arrives into the session and sends what the
 //! session queued; the UI locks the session to draw it and to pass it keys.
 
-pub mod hostserver;
 mod tls;
 
 use std::fs::{File, OpenOptions};
@@ -99,8 +98,30 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-trait Stream: Read + Write + Send {}
+/// A connection to a host: TCP, or TLS over TCP.
+pub trait Stream: Read + Write + Send {}
 impl<T: Read + Write + Send> Stream for T {}
+
+/// Connects to `port` on `config`'s host, over TLS when `config` says so (R-NET-2), with
+/// `read_timeout` on reads. The terminal's link and the IBM i host servers (R-SQL-2) both
+/// connect this way.
+///
+/// # Errors
+/// When the host cannot be reached or the TLS handshake fails.
+pub fn open_stream(
+    config: &SessionConfig,
+    port: u16,
+    read_timeout: Duration,
+) -> Result<Box<dyn Stream>> {
+    let tcp = connect_tcp(&config.host, port)?;
+    tcp.set_nodelay(true)?;
+    Ok(if config.tls {
+        Box::new(tls::connect(config, tcp, read_timeout)?)
+    } else {
+        tcp.set_read_timeout(Some(read_timeout))?;
+        Box::new(tcp)
+    })
+}
 
 struct Link {
     session: Arc<Mutex<Session>>,
@@ -109,37 +130,47 @@ struct Link {
 }
 
 impl Link {
+    /// The trace file named by [`TRACE_VARIABLE`], if it is set. One that cannot be opened is
+    /// not a reason to refuse the connection: the session's notice says why there is no trace.
+    fn open_trace(&self) -> Option<File> {
+        let path = std::env::var_os(TRACE_VARIABLE)?;
+        match OpenOptions::new().create(true).append(true).open(&path) {
+            Ok(file) => Some(file),
+            Err(e) => {
+                lock(&self.session).set_notice(format!(
+                    "cannot open the trace file {}: {e}",
+                    path.to_string_lossy()
+                ));
+                None
+            }
+        }
+    }
+
     /// Returns why the connection ended normally; errors are the abnormal ends.
     fn run(&self, config: &SessionConfig, state: &Mutex<LinkState>) -> Result<String> {
-        let tcp = connect_tcp(&config.host, config.port)?;
-        tcp.set_nodelay(true)?;
-        let mut stream: Box<dyn Stream> = if config.tls {
-            Box::new(tls::connect(config, tcp, POLL)?)
-        } else {
-            tcp.set_read_timeout(Some(POLL))?;
-            Box::new(tcp)
-        };
+        let mut stream = open_stream(config, config.port, POLL)?;
         *lock(state) = LinkState::Connected;
         (self.wake)();
 
-        let mut trace = std::env::var_os(TRACE_VARIABLE)
-            .and_then(|path| OpenOptions::new().create(true).append(true).open(path).ok());
+        let mut trace = self.open_trace();
         let mut buf = vec![0; 16 * 1024];
         let mut last_sent = Instant::now();
         loop {
             if self.stop.load(Ordering::Relaxed) {
                 return Ok("Disconnected.".to_owned());
             }
-            let outbound = {
+            let (outbound, gave_up) = {
                 let mut session = lock(&self.session);
                 if config.keep_alive && last_sent.elapsed() >= KEEP_ALIVE {
                     session.keep_alive();
                 }
-                if session.check_macro_time(Instant::now()) {
-                    (self.wake)();
-                }
-                session.take_outbound()
+                let gave_up = session.check_macro_time(Instant::now());
+                (session.take_outbound(), gave_up)
             };
+            // The UI locks the session to redraw: wake it only after the lock is let go.
+            if gave_up {
+                (self.wake)();
+            }
             if !outbound.is_empty() {
                 stream.write_all(&outbound)?;
                 stream.flush()?;
@@ -161,7 +192,11 @@ impl Link {
     }
 }
 
-fn connect_tcp(host: &str, port: u16) -> Result<TcpStream> {
+/// A TCP connection to `host`:`port`, trying each of its addresses.
+///
+/// # Errors
+/// When the name cannot be resolved or no address answers.
+pub fn connect_tcp(host: &str, port: u16) -> Result<TcpStream> {
     let fail = |source| Error::Connect {
         host: host.to_owned(),
         port,

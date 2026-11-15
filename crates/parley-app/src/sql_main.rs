@@ -13,7 +13,7 @@
 
 use eframe::egui;
 use parley_app::{screenshot, sql_start};
-use parley_ui_egui::{ParleySqlUi, SqlConnection};
+use parley_sql_ui::{ParleySqlUi, SqlConnection};
 
 /// Where the saved connections are kept in eframe's storage (R-SQL-46).
 const CONNECTIONS_KEY: &str = "connections";
@@ -47,7 +47,7 @@ impl eframe::App for App {
 
     /// Every few seconds, so a crash loses little of the scripts (R-SQL-74).
     fn auto_save_interval(&self) -> std::time::Duration {
-        parley_ui_egui::SAVE_EVERY
+        parley_sql_ui::SAVE_EVERY
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

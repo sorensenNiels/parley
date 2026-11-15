@@ -6,6 +6,7 @@ mod editor;
 
 use egui::{Button, ScrollArea, TextEdit, Ui};
 use parley_core::macros::Macro;
+use parley_core::password::Password;
 
 use crate::{dialog, theme};
 
@@ -122,6 +123,8 @@ pub struct Macros {
     list: Vec<StoredMacro>,
     /// Why the list could not be read.
     problem: Option<String>,
+    /// The list is read: the Macros add-on is on (R-ADD-2).
+    loaded: bool,
 }
 
 impl Macros {
@@ -130,6 +133,7 @@ impl Macros {
             store,
             list: Vec::new(),
             problem: None,
+            loaded: false,
         };
         macros.reload();
         macros
@@ -141,6 +145,7 @@ impl Macros {
             store,
             list: Vec::new(),
             problem: None,
+            loaded: false,
         }
     }
 
@@ -148,9 +153,11 @@ impl Macros {
     pub fn unload(&mut self) {
         self.list.clear();
         self.problem = None;
+        self.loaded = false;
     }
 
     pub fn reload(&mut self) {
+        self.loaded = true;
         match self.store.list() {
             Ok(list) => {
                 self.list = list;
@@ -186,14 +193,15 @@ impl Macros {
         result
     }
 
-    /// Moves the macros of a renamed session along with it.
+    /// Moves the macros of a renamed session along with it, from the store itself: while
+    /// the Macros add-on is off the list is not read, but the files still name the session.
     pub fn rename_session(&mut self, old: &str, new: &str) -> Result<(), String> {
-        let moving: Vec<(String, Macro)> = self
-            .list
-            .iter()
-            .filter_map(|m| match &m.contents {
+        let stored = self.store.list()?;
+        let moving: Vec<(String, Macro)> = stored
+            .into_iter()
+            .filter_map(|m| match m.contents {
                 Ok(contents) if contents.session.as_deref() == Some(old) => {
-                    Some((m.name.clone(), contents.clone()))
+                    Some((m.name, contents))
                 }
                 _ => None,
             })
@@ -205,7 +213,9 @@ impl Macros {
                 result = Err(e);
             }
         }
-        self.reload();
+        if self.loaded {
+            self.reload();
+        }
         result
     }
 }
@@ -289,18 +299,27 @@ impl SaveDialog {
     }
 }
 
-/// What the password dialog ended with.
+/// What the password dialog ended with. [`Password`]'s `Debug` hides what was typed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PasswordAnswer {
-    Typed(String),
+    Typed(Password),
     Cancelled,
 }
 
 /// Asks for the password a macro's `password` step types: Parley keeps none (R-KEY-4, R-NET-7).
-#[derive(Debug)]
 pub struct PasswordDialog {
     macro_name: String,
     password: String,
+}
+
+/// Hides the password being typed, so it cannot reach a log by accident (R-NET-7).
+impl std::fmt::Debug for PasswordDialog {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PasswordDialog")
+            .field("macro_name", &self.macro_name)
+            .field("password", &Password::new(self.password.clone()))
+            .finish()
+    }
 }
 
 impl PasswordDialog {
@@ -338,7 +357,9 @@ impl PasswordDialog {
                 if cancel {
                     Some(PasswordAnswer::Cancelled)
                 } else if ok || entered {
-                    Some(PasswordAnswer::Typed(std::mem::take(&mut self.password)))
+                    Some(PasswordAnswer::Typed(Password::new(std::mem::take(
+                        &mut self.password,
+                    ))))
                 } else {
                     None
                 }
@@ -569,6 +590,20 @@ mod tests {
     use super::*;
     use crate::test_support::{MemoryMacros, macros_with};
 
+    #[test]
+    fn renaming_a_session_moves_its_macros_while_the_add_on_is_off_r_add_2() {
+        let store = MemoryMacros::default();
+        let mine = Macro {
+            session: Some("Old".into()),
+            steps: Vec::new(),
+        };
+        store.0.borrow_mut().insert("m".into(), mine);
+        let mut macros = Macros::unloaded(Box::new(store.clone()));
+        macros.rename_session("Old", "Ny æøå").expect("moved");
+        assert_eq!(store.0.borrow()["m"].session.as_deref(), Some("Ny æøå"));
+        assert!(macros.list().is_empty(), "still not read while off");
+    }
+
     fn recording() -> Macro {
         Macro {
             session: None,
@@ -701,8 +736,19 @@ mod tests {
         harness.run();
         assert_eq!(
             harness.state().1,
-            Some(PasswordAnswer::Typed("æøå".to_owned()))
+            Some(PasswordAnswer::Typed(Password::new("æøå".to_owned())))
         );
+    }
+
+    #[test]
+    fn the_password_dialog_hides_the_typed_password_in_debug_r_key_4() {
+        let mut dialog = PasswordDialog::new("Jobs");
+        dialog.password = "secret æøå".to_owned();
+        let shown = format!("{dialog:?}");
+        assert!(!shown.contains("secret"), "{shown}");
+        assert!(shown.contains("Jobs"), "{shown}");
+        let answer = PasswordAnswer::Typed(Password::new("secret".to_owned()));
+        assert!(!format!("{answer:?}").contains("secret"));
     }
 
     #[test]

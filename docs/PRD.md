@@ -64,6 +64,7 @@ tested against recorded host traffic.
 | R-P-2 | Correct before clever. |
 | R-P-3 | Secure by default. |
 | R-P-4 | One engine: all protocol logic in `parley-core`, with no UI or platform code. |
+| R-P-5 | Two programs, apart in the code: Parley's crates never use Parley SQL's. |
 
 ## 6. What Parley does
 
@@ -99,11 +100,11 @@ tested against recorded host traffic.
 
 ## 7. Solution overview
 
-Three crates, one engine (D2, R-P-4). The engine, `parley-core`, knows nothing about windows or sockets: it takes the
+One engine per program, in crates of their own (D2, R-P-4, R-P-5, D36): Parley's `parley-core` and `parley-ui-egui`, Parley SQL's `parley-sql-core` and `parley-sql-ui`, and the launcher `parley-app`. The engine, `parley-core`, knows nothing about windows or sockets: it takes the
 bytes the host sent and keys from the UI, and produces the bytes to send back (D4). That makes the protocol testable
 byte for byte without an IBM i.
 
-![Parley's three crates and the systems they talk to](images/architecture.svg)
+![Parley's crates and the systems they talk to](images/architecture.svg)
 
 At run time one connection is three parts: the UI thread draws the screen every frame and passes keys; the network
 thread owns the socket, reads with a 15 ms wait and writes whatever the session queued; the session sits between them

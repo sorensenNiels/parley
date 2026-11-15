@@ -31,6 +31,22 @@ const LOCAL_OPTIONS: [u8; 4] = [BINARY, TERMINAL_TYPE, END_OF_RECORD, NEW_ENVIRO
 /// Options Parley accepts for the host's side (WILL).
 const REMOTE_OPTIONS: [u8; 2] = [BINARY, END_OF_RECORD];
 
+/// The longest 5250 record: its length field is 16 bits (RFC 1205 section 3, "5250 Data
+/// Stream Header"). A host that sends more without IAC EOR is not speaking 5250.
+const MAX_RECORD: usize = 65_535;
+/// The longest sub-negotiation kept: the host's are a terminal-type or NEW-ENVIRON request
+/// of a few dozen bytes.
+const MAX_SUB: usize = 4096;
+
+/// Whether bytes are being kept in a buffer, or dropped because it outgrew its limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Keep {
+    Keeping,
+    /// Dropped until the end of the record (IAC EOR) or sub-negotiation (IAC SE): the next
+    /// one starts afresh.
+    Dropping,
+}
+
 /// Negotiation and record framing for one connection.
 #[derive(Debug)]
 pub struct Telnet {
@@ -40,7 +56,9 @@ pub struct Telnet {
     local: [bool; 256],
     remote: [bool; 256],
     record: Vec<u8>,
+    record_keep: Keep,
     sub: Vec<u8>,
+    sub_keep: Keep,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +78,8 @@ pub struct Received {
     pub records: Vec<Vec<u8>>,
     /// Negotiation replies to send to the host.
     pub reply: Vec<u8>,
+    /// How many records were dropped for being longer than a 5250 record can be.
+    pub dropped: usize,
 }
 
 impl Telnet {
@@ -73,7 +93,9 @@ impl Telnet {
             local: [false; 256],
             remote: [false; 256],
             record: Vec::new(),
+            record_keep: Keep::Keeping,
             sub: Vec::new(),
+            sub_keep: Keep::Keeping,
         }
     }
 
@@ -81,21 +103,22 @@ impl Telnet {
         for &b in bytes {
             self.state = match (self.state, b) {
                 (State::Data, IAC) => State::Iac,
-                (State::Data, _) => {
-                    self.record.push(b);
-                    State::Data
-                }
-                (State::Iac, IAC) => {
-                    self.record.push(IAC);
+                (State::Data, _) | (State::Iac, IAC) => {
+                    self.push_record(b);
                     State::Data
                 }
                 (State::Iac, EOR) => {
-                    out.records.push(std::mem::take(&mut self.record));
+                    let record = std::mem::take(&mut self.record);
+                    match std::mem::replace(&mut self.record_keep, Keep::Keeping) {
+                        Keep::Keeping => out.records.push(record),
+                        Keep::Dropping => out.dropped += 1,
+                    }
                     State::Data
                 }
                 (State::Iac, WILL | WONT | DO | DONT) => State::Option(b),
                 (State::Iac, SB) => {
                     self.sub.clear();
+                    self.sub_keep = Keep::Keeping;
                     State::Sub
                 }
                 (State::Option(verb), option) => {
@@ -103,22 +126,48 @@ impl Telnet {
                     State::Data
                 }
                 (State::Sub, IAC) => State::SubIac,
-                (State::Sub, _) => {
-                    self.sub.push(b);
-                    State::Sub
-                }
-                (State::SubIac, IAC) => {
-                    self.sub.push(IAC);
+                (State::Sub, _) | (State::SubIac, IAC) => {
+                    self.push_sub(b);
                     State::Sub
                 }
                 (State::SubIac, SE) => {
-                    self.subnegotiation(&mut out.reply);
+                    match self.sub_keep {
+                        Keep::Keeping => self.subnegotiation(&mut out.reply),
+                        Keep::Dropping => self.sub_keep = Keep::Keeping,
+                    }
+                    self.sub.clear();
                     State::Data
                 }
                 // NOP, GA and the other commands mean nothing to a 5250 session; anything else
                 // after IAC inside a sub-negotiation is not valid and is dropped.
                 (State::Iac | State::SubIac, _) => State::Data,
             };
+        }
+    }
+
+    /// Adds a byte to the record, unless it has grown past [`MAX_RECORD`]: then the record is
+    /// dropped up to its IAC EOR, so the next one is read from its start.
+    fn push_record(&mut self, b: u8) {
+        match self.record_keep {
+            Keep::Keeping if self.record.len() < MAX_RECORD => self.record.push(b),
+            Keep::Keeping => {
+                self.record = Vec::new();
+                self.record_keep = Keep::Dropping;
+            }
+            Keep::Dropping => {}
+        }
+    }
+
+    /// Adds a byte to the sub-negotiation, unless it has grown past [`MAX_SUB`]: then it is
+    /// dropped up to its IAC SE and not answered.
+    fn push_sub(&mut self, b: u8) {
+        match self.sub_keep {
+            Keep::Keeping if self.sub.len() < MAX_SUB => self.sub.push(b),
+            Keep::Keeping => {
+                self.sub = Vec::new();
+                self.sub_keep = Keep::Dropping;
+            }
+            Keep::Dropping => {}
         }
     }
 
@@ -354,6 +403,92 @@ mod tests {
         let mut t = telnet();
         assert_eq!(receive(&mut t, &[7, IAC]).records, Vec::<Vec<u8>>::new());
         assert_eq!(receive(&mut t, &[EOR]).records, vec![vec![7]]);
+    }
+
+    #[test]
+    fn a_record_longer_than_65535_bytes_is_dropped_and_the_next_one_still_arrives_r_net_1() {
+        let mut t = telnet();
+        let mut out = receive(&mut t, &vec![7; MAX_RECORD]);
+        assert_eq!(
+            t.record.len(),
+            MAX_RECORD,
+            "a record of the longest length is kept"
+        );
+        out.records.extend(receive(&mut t, &[8; 1000]).records);
+        assert!(t.record.capacity() < MAX_RECORD, "the buffer stops growing");
+        let end = receive(&mut t, &[IAC, EOR, 1, 2, IAC, EOR]);
+        assert_eq!(out.records, Vec::<Vec<u8>>::new());
+        assert_eq!(end.dropped, 1);
+        assert_eq!(
+            end.records,
+            vec![vec![1, 2]],
+            "the next record starts afresh"
+        );
+    }
+
+    #[test]
+    fn a_record_of_exactly_65535_bytes_arrives_r_net_1() {
+        let mut t = telnet();
+        let mut bytes = vec![7; MAX_RECORD];
+        bytes.extend([IAC, EOR]);
+        let out = receive(&mut t, &bytes);
+        assert_eq!(out.records.len(), 1);
+        assert_eq!(out.dropped, 0);
+    }
+
+    #[test]
+    fn an_overlong_sub_negotiation_is_dropped_unanswered_and_the_next_is_answered_r_net_1() {
+        let mut t = telnet();
+        let mut bytes = vec![IAC, SB, TERMINAL_TYPE, SEND];
+        bytes.extend(vec![0; MAX_SUB * 4]);
+        assert_eq!(receive(&mut t, &bytes).reply, Vec::<u8>::new());
+        assert!(t.sub.capacity() <= MAX_SUB, "the buffer stops growing");
+        assert_eq!(
+            receive(&mut t, &[IAC, SE]).reply,
+            Vec::<u8>::new(),
+            "not answered"
+        );
+        let out = receive(&mut t, &[IAC, SB, TERMINAL_TYPE, SEND, IAC, SE]);
+        assert!(out.reply.starts_with(&[IAC, SB, TERMINAL_TYPE, IS]));
+    }
+
+    #[test]
+    fn dont_and_wont_turn_an_option_off_once_r_net_1() {
+        let mut t = telnet();
+        receive(&mut t, &[IAC, DO, END_OF_RECORD, IAC, WILL, BINARY]);
+        let out = receive(&mut t, &[IAC, DONT, END_OF_RECORD, IAC, WONT, BINARY]);
+        assert_eq!(out.reply, [IAC, WONT, END_OF_RECORD, IAC, DONT, BINARY]);
+        let again = receive(&mut t, &[IAC, DONT, END_OF_RECORD, IAC, WONT, BINARY]);
+        assert_eq!(again.reply, Vec::<u8>::new(), "already off: no reply");
+    }
+
+    #[test]
+    fn dont_and_wont_for_options_never_on_get_no_reply_r_net_1() {
+        let out = receive(&mut telnet(), &[IAC, DONT, 31, IAC, WONT, 31]);
+        assert_eq!(out.reply, Vec::<u8>::new());
+    }
+
+    #[test]
+    fn a_sub_negotiation_split_inside_iac_se_is_answered_once_whole_r_net_1() {
+        let mut t = telnet();
+        let first = receive(&mut t, &[IAC, SB, TERMINAL_TYPE, SEND, IAC]);
+        assert_eq!(first.reply, Vec::<u8>::new());
+        let second = receive(&mut t, &[SE]);
+        assert!(second.reply.starts_with(&[IAC, SB, TERMINAL_TYPE, IS]));
+    }
+
+    #[test]
+    fn a_doubled_iac_inside_a_sub_negotiation_is_data_r_net_1() {
+        let mut t = telnet();
+        receive(&mut t, &[IAC, SB, 99, IAC, IAC, 1]);
+        assert_eq!(t.sub, [99, IAC, 1]);
+    }
+
+    #[test]
+    fn telnet_commands_between_records_are_ignored_r_net_1() {
+        let out = receive(&mut telnet(), &[1, IAC, NOP, 2, IAC, EOR]);
+        assert_eq!(out.records, vec![vec![1, 2]]);
+        assert_eq!(out.reply, Vec::<u8>::new());
     }
 
     #[test]

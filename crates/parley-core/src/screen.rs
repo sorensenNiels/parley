@@ -40,6 +40,26 @@ impl ScreenSize {
 /// The attribute a screen starts with: green, no highlighting.
 pub const NORMAL: u8 = 0x20;
 
+/// EBCDIC blank: what nulls are sent as, and the sign position of a positive number.
+pub(crate) const BLANK: u8 = 0x40;
+/// EBCDIC minus: the sign position of a negative number.
+pub(crate) const MINUS: u8 = 0x60;
+/// EBCDIC digit zero; the digits are X'F0' to X'F9'.
+pub(crate) const ZERO: u8 = 0xF0;
+/// Duplicate (DUP): shown as an overscored asterisk on a real display.
+const DUP: u8 = 0x1C;
+
+/// A digit with the negative zone X'D' (5494 Functions Reference SC30-3533-02, "Field Minus
+/// Key"): how Field- and a minus sign mark the last digit of a number. `None` if `byte` is not
+/// a digit.
+pub(crate) const fn negative_zone(byte: u8) -> Option<u8> {
+    if byte >= ZERO && byte <= ZERO + 9 {
+        Some(0xD0 | (byte & 0x0F))
+    } else {
+        None
+    }
+}
+
 pub(crate) const fn is_attribute(byte: u8) -> bool {
     byte >= 0x20 && byte <= 0x3F
 }
@@ -217,7 +237,13 @@ impl Field {
     pub fn data_end(&self) -> usize {
         match self.format.shift() {
             Shift::SignedNumeric => self.end().saturating_sub(1).max(self.start),
-            _ => self.end(),
+            Shift::AlphaShift
+            | Shift::AlphaOnly
+            | Shift::NumericShift
+            | Shift::NumericOnly
+            | Shift::Katakana
+            | Shift::DigitsOnly
+            | Shift::Io => self.end(),
         }
     }
 
@@ -428,8 +454,7 @@ impl Screen {
                     });
                 }
                 let ch = match byte {
-                    // DUP shows as an overscored asterisk on a real display.
-                    0x1C => '*',
+                    DUP => '*',
                     _ => code_page.to_char(byte),
                 };
                 Cell { ch, style }
@@ -578,6 +603,22 @@ mod tests {
         screen.put(15, 0x28);
         screen.put(16, 0xC1);
         assert_eq!(screen.cells(CodePage::Ccsid37)[16].style.color, Color::Red);
+    }
+
+    #[test]
+    fn only_digits_take_the_negative_zone_r_ds_3() {
+        assert_eq!(negative_zone(0xF0), Some(0xD0));
+        assert_eq!(negative_zone(0xF9), Some(0xD9));
+        assert_eq!(negative_zone(0xFA), None);
+        assert_eq!(negative_zone(BLANK), None);
+        assert_eq!(negative_zone(0), None);
+    }
+
+    #[test]
+    fn dup_shows_as_an_asterisk() {
+        let mut screen = Screen::new(ScreenSize::Standard);
+        screen.put(0, DUP);
+        assert_eq!(screen.cells(CodePage::Ccsid37)[0].ch, '*');
     }
 
     #[test]

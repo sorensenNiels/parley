@@ -2,15 +2,13 @@
 //! It asks for no user or password: Parley never signs on by itself (R-NET-7).
 
 use egui::{Button, ComboBox, DragValue, Grid, TextEdit, Ui};
+use parley_core::session::{TELNET_PORT, TLS_PORT};
 use parley_core::{CodePage, ScreenSize, SessionConfig};
 
 use crate::keymap::{DEFAULT_MAP, KeyMap};
 use crate::macros::Macros;
 use crate::profile::Profile;
 use crate::{dialog, theme};
-
-const TELNET_PORT: u16 = 23;
-const TLS_PORT: u16 = 992;
 
 const HELP: &str = "\
 Name: what the session is called in the File menu and on the start screen.
@@ -45,8 +43,17 @@ pub struct Editor {
     message: Option<String>,
     /// The body's height last frame (see [`dialog::fitting_scroll_area`]).
     body_height: f32,
-    /// A saved session renamed by Apply or Connect: (old name, new name).
-    renamed: Option<(String, String)>,
+    /// A saved session that Apply or Connect changed, since the last [`Self::take_saved`].
+    saved: Option<Saved>,
+}
+
+/// A saved session changed by the dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Saved {
+    /// Its name before the change: the session in use, and its macros, go by it.
+    pub old_name: String,
+    /// Where it is among the saved sessions.
+    pub index: usize,
 }
 
 impl Editor {
@@ -58,7 +65,7 @@ impl Editor {
             show_help: false,
             message: None,
             body_height: 0.0,
-            renamed: None,
+            saved: None,
         };
         editor.select(profiles, index);
         editor
@@ -200,9 +207,9 @@ impl Editor {
         });
     }
 
-    /// A rename the dialog saved since the last call: (old name, new name).
-    pub fn take_renamed(&mut self) -> Option<(String, String)> {
-        self.renamed.take()
+    /// A saved session the dialog changed since the last call.
+    pub fn take_saved(&mut self) -> Option<Saved> {
+        self.saved.take()
     }
 
     /// Delete and Help on the left; Connect (filled), Apply and Cancel on the right.
@@ -283,8 +290,8 @@ impl Editor {
             }
         }
         self.index = Some(index);
-        if let Some(old) = old_name.as_ref().filter(|old| **old != self.draft.name) {
-            self.renamed = Some((old.clone(), self.draft.name.clone()));
+        if let Some(old_name) = old_name {
+            self.saved = Some(Saved { old_name, index });
         }
         Some(index)
     }

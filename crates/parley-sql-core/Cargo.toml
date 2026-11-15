@@ -1,0 +1,33 @@
+[package]
+name = "parley-sql-core"
+description = "UI-agnostic engine for Parley SQL: the IBM i host servers, the SQL helper's protocol, SQL text, transfers and the assistant."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+parley-core.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
+des.workspace = true
+sha1.workspace = true
+getrandom.workspace = true
+# Excel files for Download (R-SQL-72, D31); constant memory keeps large downloads small.
+rust_xlsxwriter = { version = "0.102", default-features = false, features = ["constant_memory"] }
+# Local dates for the SQL history's day headings and times (R-SQL-90, D35): the clock only.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+[dev-dependencies]
+# The probe checks TLS routes itself (R-NET-8).
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
+# Reads the password without showing it in examples/sqlprobe.rs (R-NET-9).
+rpassword = "7"
+
+[lints]
+workspace = true

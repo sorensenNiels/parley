@@ -1,4 +1,4 @@
-//! Errors from the TN5250 engine.
+//! Errors from the TN5250 engine. Parley SQL's engine has its own (`parley_sql_core::Error`).
 
 use std::io;
 
@@ -19,36 +19,11 @@ pub enum Error {
         source: io::Error,
     },
 
-    /// A record from an IBM i host server is not valid (R-SQL-1).
-    #[error("invalid data from the IBM i host server: {what}")]
-    HostServer { what: String },
-
-    /// A sign-on that cannot be sent, or that the host refused (R-SQL-2): a sentence for the
-    /// operator. Never holds the password.
-    #[error("{0}")]
-    SignOn(String),
-
-    /// An SQL statement or connection the host refused (R-SQL-4): its message and SQLSTATE.
-    #[error("{0}")]
-    Sql(crate::sql::protocol::SqlError),
-
-    /// The SQL helper could not be run or talked to (R-SQL-11).
-    #[error("{0}")]
-    SqlHelper(String),
-
-    /// No usable Java for the SQL helper (R-SQL-12): a sentence for the operator.
-    #[error("{0}")]
-    Java(String),
-
     #[error("TLS: {0}")]
     Tls(String),
 
     #[error("cannot read the CA certificate file {path}: {message}")]
     CaFile { path: String, message: String },
-
-    /// The SQL assistant could not get an answer (R-SQL-44): a sentence for the operator.
-    #[error("{0}")]
-    Assistant(String),
 
     /// Asking GitHub for the latest release failed (R-UI-11).
     #[error("could not check for a new version: {0}")]
@@ -58,11 +33,6 @@ pub enum Error {
     #[error("{0}")]
     Macro(String),
 
-    /// A download or upload file that cannot be written or read (R-SQL-71..73): a sentence
-    /// for the operator, naming the file.
-    #[error("{0}")]
-    Transfer(String),
-
     #[error("the connection failed: {0}")]
     Io(#[from] io::Error),
 }
@@ -70,10 +40,6 @@ pub enum Error {
 impl Error {
     pub(crate) fn data(what: impl Into<String>) -> Self {
         Self::DataStream { what: what.into() }
-    }
-
-    pub(crate) fn host_server(what: impl Into<String>) -> Self {
-        Self::HostServer { what: what.into() }
     }
 
     pub(crate) fn unsupported(what: impl Into<String>) -> Self {

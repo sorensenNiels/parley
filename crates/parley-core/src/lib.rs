@@ -6,14 +6,12 @@
 
 pub mod ebcdic;
 pub mod error;
-pub mod hostserver;
 pub mod macros;
 pub mod net;
 pub mod password;
 pub mod record;
 pub mod screen;
 pub mod session;
-pub mod sql;
 pub mod telnet;
 pub mod update;
 

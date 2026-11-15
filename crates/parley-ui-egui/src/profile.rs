@@ -2,9 +2,8 @@
 //! around the session. No user or password: Parley never signs on by itself (R-NET-7).
 
 use parley_core::SessionConfig;
+use parley_core::session::TLS_PORT;
 use serde::{Deserialize, Serialize};
-
-const TLS_PORT: u16 = 992;
 
 /// One saved session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

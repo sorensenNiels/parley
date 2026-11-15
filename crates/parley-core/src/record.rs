@@ -139,6 +139,34 @@ mod tests {
     }
 
     #[test]
+    fn data_starts_after_a_longer_variable_header() {
+        // RFC 1205 section 3: the variable header length counts itself and what follows it.
+        let bytes = [0, 14, 0x12, 0xA0, 0, 0, 6, 0x40, 0, 3, 0xAA, 0xBB, 1, 2];
+        let record = parse(&bytes).expect("valid record");
+        assert_eq!(record.data, [1, 2]);
+        assert_eq!((record.flags, record.opcode), (0x40, Opcode::PutGet));
+    }
+
+    #[test]
+    fn every_opcode_reads_back() {
+        for opcode in [
+            Opcode::NoOperation,
+            Opcode::Invite,
+            Opcode::OutputOnly,
+            Opcode::PutGet,
+            Opcode::SaveScreen,
+            Opcode::RestoreScreen,
+            Opcode::ReadImmediate,
+            Opcode::ReadScreen,
+            Opcode::CancelInvite,
+            Opcode::MessageLightOn,
+            Opcode::MessageLightOff,
+        ] {
+            assert_eq!(Opcode::from_code(opcode.code()), Some(opcode));
+        }
+    }
+
+    #[test]
     fn short_and_foreign_records_are_errors() {
         assert!(parse(&[0, 4, 0x12, 0xA0]).is_err());
         assert!(parse(&[0, 10, 0x12, 0xA1, 0, 0, 4, 0, 0, 3]).is_err());

@@ -291,7 +291,10 @@ impl Function {
             (Self::CopyScreen, true) => Some("Cmd+C"),
             (Self::Paste, false) => Some("Ctrl+V"),
             (Self::Paste, true) => Some("Cmd+V"),
-            _ => None,
+            (
+                Self::Key(_) | Self::RecordMacro | Self::RunMacro(_) | Self::Shortcuts | Self::Sql,
+                _,
+            ) => None,
         }
     }
 }

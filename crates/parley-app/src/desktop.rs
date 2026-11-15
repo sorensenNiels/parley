@@ -21,12 +21,48 @@ Options:
   --version            Print the version and quit
   --help               Print this help and quit";
 
-/// What the command line asked for.
-#[derive(Debug, Default)]
+/// What Parley's command line asks for.
+#[derive(Debug, PartialEq, Eq)]
+enum Command {
+    Run(Args),
+    Version,
+    Help,
+}
+
+/// The window to open with.
+#[derive(Debug, Default, PartialEq, Eq)]
 struct Args {
     host: Option<(String, Option<u16>)>,
     tls: bool,
     screenshot: Option<String>,
+}
+
+/// Reads Parley's arguments (without the program's name and without `--sql`, which hands
+/// the rest to Parley SQL first).
+///
+/// # Errors
+/// An unknown option, a second host, or an option without its value, said for the terminal.
+fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> {
+    let mut parsed = Args::default();
+    let mut args = args.into_iter();
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--version" | "-V" => return Ok(Command::Version),
+            "--help" | "-h" => return Ok(Command::Help),
+            "--tls" => parsed.tls = true,
+            "--screenshot" => {
+                let file = args
+                    .next()
+                    .ok_or_else(|| format!("'{arg}' needs a value"))?;
+                parsed.screenshot = Some(file);
+            }
+            _ if !arg.starts_with('-') && parsed.host.is_none() => {
+                parsed.host = Some(host_port(&arg));
+            }
+            _ => return Err(format!("unknown option '{arg}'")),
+        }
+    }
+    Ok(Command::Run(parsed))
 }
 
 pub fn run() -> eframe::Result {
@@ -42,27 +78,21 @@ pub fn run() -> eframe::Result {
             }
         }
     }
-    let mut args = Args::default();
-    let mut command_line = all.into_iter();
-    while let Some(arg) = command_line.next() {
-        match arg.as_str() {
-            "--version" | "-V" => {
-                println!("parley {}", env!("CARGO_PKG_VERSION"));
-                return Ok(());
-            }
-            "--help" | "-h" => {
-                println!("{USAGE}");
-                return Ok(());
-            }
-            "--tls" => args.tls = true,
-            "--screenshot" => args.screenshot = command_line.next(),
-            _ if !arg.starts_with('-') && args.host.is_none() => args.host = Some(host_port(&arg)),
-            _ => {
-                eprintln!("parley: unknown option '{arg}'\n\n{USAGE}");
-                std::process::exit(2);
-            }
+    let args = match parse(all) {
+        Ok(Command::Run(args)) => args,
+        Ok(Command::Version) => {
+            println!("parley {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
         }
-    }
+        Ok(Command::Help) => {
+            println!("{USAGE}");
+            return Ok(());
+        }
+        Err(e) => {
+            eprintln!("parley: {e}\n\n{USAGE}");
+            std::process::exit(2);
+        }
+    };
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Parley")
@@ -100,7 +130,10 @@ pub fn run() -> eframe::Result {
                 Err(e) => eprintln!("parley: could not load the menu bar icon: {e}"),
             }
             let connect_on_start = match args.host {
-                Some((host, port)) => Some(command_line_profile(&ui, host, port, args.tls)),
+                Some((host, port)) => {
+                    let saved = ui.profile_for_host(&host);
+                    Some(command_line_profile(saved, host, port, args.tls))
+                }
                 None => ui.startup_profile().cloned(),
             };
             Ok(Box::new(App {
@@ -139,17 +172,29 @@ fn saved_profiles(storage: &dyn eframe::Storage) -> Vec<Profile> {
         .unwrap_or_default()
 }
 
-/// The saved session for a host on the command line, or a new unsaved one.
-fn command_line_profile(ui: &ParleyUi, host: String, port: Option<u16>, tls: bool) -> Profile {
-    let mut profile = ui.profile_for_host(&host).cloned().unwrap_or_else(|| {
+/// The session for a host on the command line: `saved`, the saved session for it, or a new
+/// unsaved one. A port on the command line wins; else the saved session keeps its own port
+/// unless `--tls` turned TLS on, which takes TLS's port.
+fn command_line_profile(
+    saved: Option<&Profile>,
+    host: String,
+    port: Option<u16>,
+    tls: bool,
+) -> Profile {
+    let mut profile = saved.cloned().unwrap_or_else(|| {
         Profile::for_config(SessionConfig {
             host,
             ..SessionConfig::default()
         })
     });
     let config = &mut profile.config;
+    let was_tls = config.tls;
     config.tls = tls || config.tls && port.is_none();
-    config.port = port.unwrap_or(if config.tls { 992 } else { 23 });
+    config.port = match port {
+        Some(port) => port,
+        None if saved.is_some() && config.tls == was_tls => config.port,
+        None => SessionConfig::default_port(config.tls),
+    };
     profile
 }
 
@@ -168,6 +213,73 @@ fn host_port(arg: &str) -> (String, Option<u16>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn run(args: &[&str]) -> Result<Command, String> {
+        parse(args.iter().map(|&a| a.to_owned()))
+    }
+
+    #[test]
+    fn the_command_line_is_read_into_host_tls_and_screenshot_r_ui_3() {
+        assert_eq!(
+            run(&["--tls", "pub400.com:992", "--screenshot", "æøå.ppm"]),
+            Ok(Command::Run(Args {
+                host: Some(("pub400.com".into(), Some(992))),
+                tls: true,
+                screenshot: Some("æøå.ppm".into()),
+            }))
+        );
+        assert_eq!(run(&[]), Ok(Command::Run(Args::default())));
+        assert_eq!(run(&["--version"]), Ok(Command::Version));
+        assert_eq!(run(&["-h", "--bogus"]), Ok(Command::Help));
+    }
+
+    #[test]
+    fn screenshot_without_a_file_is_refused_r_ui_3() {
+        let error = run(&["--screenshot"]).expect_err("a missing value");
+        assert!(error.contains("needs a value"), "{error}");
+    }
+
+    #[test]
+    fn an_unknown_option_or_a_second_host_is_refused_r_ui_3() {
+        assert!(run(&["--bogus"]).is_err());
+        assert!(run(&["one", "two"]).is_err());
+    }
+
+    fn saved(port: u16, tls: bool) -> Profile {
+        let mut profile = Profile::for_config(SessionConfig {
+            host: "ibmi".into(),
+            port,
+            tls,
+            ..SessionConfig::default()
+        });
+        profile.name = "Prod æøå".into();
+        profile
+    }
+
+    #[test]
+    fn a_saved_session_on_the_command_line_keeps_its_port_r_ui_3() {
+        for tls in [false, true] {
+            let saved = saved(2323, tls);
+            let profile = command_line_profile(Some(&saved), "ibmi".into(), None, false);
+            assert_eq!(profile.config.port, 2323);
+            assert_eq!(profile.config.tls, tls);
+            assert_eq!(profile.name, "Prod æøå");
+        }
+    }
+
+    #[test]
+    fn the_command_lines_port_and_tls_override_a_saved_session_r_ui_3() {
+        let plain = saved(2323, false);
+        let with_port = command_line_profile(Some(&plain), "ibmi".into(), Some(24), false);
+        assert_eq!(with_port.config.port, 24);
+        let with_tls = command_line_profile(Some(&plain), "ibmi".into(), None, true);
+        assert!(with_tls.config.tls);
+        assert_eq!(with_tls.config.port, 992);
+        let new = command_line_profile(None, "other".into(), None, false);
+        assert_eq!((new.config.host.as_str(), new.config.port), ("other", 23));
+        let new_tls = command_line_profile(None, "other".into(), None, true);
+        assert_eq!(new_tls.config.port, 992);
+    }
 
     #[test]
     fn host_and_port_are_split_from_the_command_line() {

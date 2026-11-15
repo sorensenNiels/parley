@@ -1,18 +1,20 @@
 # Parley architecture
 
 > How Parley is built, with pictures. The why behind each choice is a decision in [ROADMAP.md](ROADMAP.md) §7 (D1–D18) or
-> [sql/ROADMAP.md](sql/ROADMAP.md) §6 (D19–D27, the SQL window); the
+> [sql/ROADMAP.md](sql/ROADMAP.md) §6 (D19–D35, the SQL window; D36 splits the crates); the
 > product view is [PRD.md](PRD.md) and [sql/PRD.md](sql/PRD.md).
 
 ## Crates
 
-![Parley's three crates and the systems they talk to](images/architecture.svg)
+![Parley's crates and the systems they talk to](images/architecture.svg)
 
 | Crate | Holds | Never holds |
 |---|---|---|
-| `parley-core` | The TN5250 engine: telnet negotiation, 5250 records, the data stream, the screen model, EBCDIC, the macro format, the TCP/TLS connection thread, the version check. | UI code; printing. |
-| `parley-ui-egui` | Everything the user sees, in egui: the 5250 screen widget, keyboard map, menus, status bar, session, settings and macro dialogs. Reaches the macro folder through a trait (`MacroStore`), so tests use memory. | Platform code. |
-| `parley-app` | The `parley` binary: window, command line, the macro files, `--screenshot`, and deleting the passwords Parley 0.2 kept in the keychain. | Protocol logic. |
+| `parley-core` | The TN5250 engine: telnet negotiation, 5250 records, the data stream, the screen model, EBCDIC, the macro format, the TCP/TLS connection thread (`net::open_stream`, also Parley SQL's), the version check. | UI code; printing; anything of Parley SQL's. |
+| `parley-sql-core` | Parley SQL's engine (D20, D36): the IBM i host servers and port mapper, the Java helper's protocol and process, SQL text (split, colour, format, guard), completion, catalog and services queries, downloads and uploads, the SQL assistant's providers. Uses `parley-core` only to connect, for code pages and `Password`. | UI code; printing. |
+| `parley-ui-egui` | Parley's UI in egui: the 5250 screen widget, keyboard map, menus, status bar, session, settings and macro dialogs. Also the look Parley SQL shares (D12): `theme`, `dialog`, `icons`, `fonts`, the header (`menu`), the settings frame, Appearance and About (`settings::{layout, appearance, about}`). Reaches the macro folder through a trait (`MacroStore`), so tests use memory. | Platform code; anything of Parley SQL's (`cargo deny` checks, R-P-5). |
+| `parley-sql-ui` | Parley SQL's UI: the SQL window (editor, results, side panel, assistant, transfers) and the program around it (`app`: saved connections, header, status bar), with its own `Settings` and settings pages. | Platform code; Parley's terminal. |
+| `parley-app` | The `parley` and `parley-sql` binaries: windows, command lines, the macro and snippet folders, the SQL helper's jars, the keychain, `--screenshot`, and starting Parley SQL from Parley (`sql_start`, R-SQL-70). | Protocol logic. |
 
 ## One connection at run time
 

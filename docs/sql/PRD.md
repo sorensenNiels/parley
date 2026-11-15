@@ -72,7 +72,7 @@ library list, `LABEL ON` headings) in a fast desktop window.
 
 ## 6. Solution overview
 
-The window lives in `parley-ui-egui` (`sql`); its engine in `parley_core::sql`. The database work runs in a small
+The window and Parley SQL live in `parley-sql-ui`; its engine in `parley-sql-core`, apart from Parley's crates (D36). The database work runs in a small
 Java helper, started per window and spoken to in JSON lines over stdin/stdout, which uses IBM's JTOpen JDBC driver
 (D20). A second helper reads the catalog (D21). Parley SQL is a second binary over the same window (D26). More on the
 design: [../ARCHITECTURE.md](../ARCHITECTURE.md).

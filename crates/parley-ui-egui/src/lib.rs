@@ -3,30 +3,28 @@
 //! No platform code lives here: the launcher (`parley-app`) opens the window and hands the UI
 //! an [`egui::Ui`] to draw in each frame.
 
-mod addons;
-mod connect;
-mod dialog;
-mod fonts;
-mod icons;
-mod keymap;
+pub mod addons;
+pub mod connect;
+pub mod dialog;
+pub mod fonts;
+pub mod icons;
+pub mod keymap;
 mod keys;
 mod macros;
-mod menu;
+pub mod menu;
 mod profile;
 mod sessions;
-mod settings;
+pub mod settings;
 mod shortcuts;
-mod sql;
-mod sql_app;
-mod status;
+pub mod status;
 mod terminal;
-mod theme;
-mod updates;
+pub mod theme;
+pub mod updates;
 
 use egui::{CentralPanel, Frame, Margin, Panel, Ui, ViewportCommand};
 use parley_core::net::{Connection, LinkState};
 
-pub use addons::{AddOn, AddOnSettings};
+pub use addons::{AddOn, AddOnSettings, Toggle};
 use keymap::{Function, KeyInput, KeyMap};
 use macros::Macros;
 pub use macros::{MacroStore, NoMacroStore, StoredMacro, check_name as check_macro_name};
@@ -34,16 +32,12 @@ use menu::Action;
 pub use profile::Profile;
 use sessions::{Editor, Outcome};
 pub use settings::{Settings, Theme};
-pub use sql::SqlFiles;
-pub use sql::assistant::ApiKeys;
-pub use sql::editor::SavedScript;
-pub use sql::snippets::SnippetStore;
-pub use sql_app::{ParleySqlUi, SAVE_EVERY, SqlConnection};
 pub use theme::Density;
 pub use updates::Checker;
 
-/// How the launcher starts Parley SQL on a host (R-SQL-70); `Err` says why it could not.
-pub type StartSql = Box<dyn Fn(&SqlConnection) -> Result<(), String>>;
+/// How the launcher starts Parley SQL on the session named so, on its config's host
+/// (R-SQL-70); `Err` says why it could not. Parley knows no user and passes no password (D16).
+pub type StartSql = Box<dyn Fn(&str, &parley_core::SessionConfig) -> Result<(), String>>;
 
 /// Starts Parley SQL on a host (R-SQL-70): given by the launcher, which knows where it is.
 struct SqlStarter(StartSql);
@@ -348,21 +342,7 @@ impl ParleyUi {
 
     /// Draws one frame.
     pub fn ui(&mut self, ui: &mut Ui) {
-        // Ctrl+Plus and Ctrl+Minus are Field+ and Field- here, not zoom.
-        if ui.ctx().options(|o| o.zoom_with_keyboard) {
-            ui.ctx().options_mut(|o| o.zoom_with_keyboard = false);
-        }
-        if self.applied.is_none() && self.settings.check_for_updates {
-            self.updates.start(ui.ctx(), updates::Check::AtStart);
-        }
-        self.updates.collect();
-        if self.applied.as_ref() != Some(&self.settings) {
-            let note = settings::apply(ui.ctx(), self.applied.as_ref(), &self.settings);
-            if note.is_some() {
-                self.warning = note;
-            }
-            self.applied = Some(self.settings.clone());
-        }
+        self.apply_settings(ui.ctx());
         self.follow_link(ui.ctx());
         self.guard_exit(ui.ctx());
 
@@ -381,8 +361,52 @@ impl ParleyUi {
         {
             self.status_action(chosen, &mut actions);
         }
-        let mut asked = Vec::new();
+        let asked = self.central_panel(ui, session.as_deref_mut(), &mut actions);
+
+        let next = self.carry_out(ui.ctx(), actions, session.as_deref_mut());
         if let Some(session) = session.as_deref_mut() {
+            self.carry_out_keys(asked, session);
+        }
+        self.observe_keys_taken(ui.ctx(), session.as_deref());
+        if let Some(session) = session.as_deref_mut() {
+            self.macro_needs_password(session);
+        }
+        drop(session);
+        self.finish_connection(ui.ctx(), connection, &next);
+        self.show_dialogs(ui.ctx());
+    }
+
+    /// Turns off egui's keyboard zoom, starts the check for updates at start-up, and puts
+    /// changed settings into effect.
+    fn apply_settings(&mut self, ctx: &egui::Context) {
+        // Ctrl+Plus and Ctrl+Minus are Field+ and Field- here, not zoom.
+        if ctx.options(|o| o.zoom_with_keyboard) {
+            ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        }
+        if self.applied.is_none() && self.settings.check_for_updates {
+            self.updates.start(ctx, updates::Check::AtStart);
+        }
+        self.updates.collect();
+        if self.applied.as_ref() != Some(&self.settings) {
+            let old = self.applied.as_ref().map(Settings::look);
+            let note = settings::apply(ctx, old.as_ref(), &self.settings.look());
+            if note.is_some() {
+                self.warning = note;
+            }
+            self.applied = Some(self.settings.clone());
+        }
+    }
+
+    /// The session's screen, or the start screen without one; returns the functions the
+    /// keys typed on the screen asked for. What the start screen asks goes to `actions`.
+    fn central_panel(
+        &mut self,
+        ui: &mut Ui,
+        session: Option<&mut parley_core::Session>,
+        actions: &mut Vec<Action>,
+    ) -> Vec<Function> {
+        let mut asked = Vec::new();
+        if let Some(session) = session {
             CentralPanel::default()
                 .frame(
                     Frame::new()
@@ -412,16 +436,17 @@ impl ParleyUi {
                 }
             });
         }
+        asked
+    }
 
-        let next = self.carry_out(ui.ctx(), actions, session.as_deref_mut());
-        if let Some(session) = session.as_deref_mut() {
-            self.carry_out_keys(asked, session);
-        }
-        self.observe_keys_taken(ui.ctx(), session.as_deref());
-        if let Some(session) = session.as_deref_mut() {
-            self.macro_needs_password(session);
-        }
-        drop(session);
+    /// Puts the frame's connection back, or closes it, then connects as `next` says: only
+    /// now, so a new connection is not overwritten by the one taken for the frame.
+    fn finish_connection(
+        &mut self,
+        ctx: &egui::Context,
+        connection: Option<Connection>,
+        next: &Next,
+    ) {
         match connection {
             Some(connection) if next.disconnect => {
                 self.end_recording(&mut connection.session());
@@ -430,17 +455,25 @@ impl ParleyUi {
             }
             other => self.connection = other,
         }
-        // Only now: the connection taken for this frame is back, so a new one is not overwritten.
         if let Some(index) = next.connect {
-            self.connect_saved(ui.ctx(), index);
+            self.connect_saved(ctx, index);
         }
+    }
 
-        self.show_editor(ui.ctx());
-        self.show_settings(ui.ctx());
-        sql::hosting::notice_dialog(ui.ctx(), &mut self.sql_notice);
-        self.show_shortcut_sheet(ui.ctx());
-        self.show_macro_dialogs(ui.ctx());
-        self.show_exit_question(ui.ctx());
+    /// The dialogs that are open, in the order they stack.
+    fn show_dialogs(&mut self, ctx: &egui::Context) {
+        self.show_editor(ctx);
+        self.show_settings(ctx);
+        dialog::notice(
+            ctx,
+            "sql-notice",
+            "Parley SQL cannot start",
+            &mut self.sql_notice,
+            |_| {},
+        );
+        self.show_shortcut_sheet(ctx);
+        self.show_macro_dialogs(ctx);
+        self.show_exit_question(ctx);
     }
 
     /// The header (R-UI-15); returns what was chosen from it.
@@ -612,9 +645,8 @@ impl ParleyUi {
         let Some(profile) = self.current.as_ref() else {
             return;
         };
-        let connection = SqlConnection::for_session(&profile.name, &profile.config);
         let started = match &self.sql_starter {
-            Some(starter) => (starter.0)(&connection),
+            Some(starter) => (starter.0)(&profile.name, &profile.config),
             None => Err("This Parley cannot start Parley SQL.".to_owned()),
         };
         if let Err(e) = started {
@@ -673,6 +705,29 @@ impl ParleyUi {
         }
     }
 
+    /// The saved session once called `old` was changed at `index` (R-UI-5): its macros
+    /// follow a new name, and the session in use takes the change. While connected it keeps
+    /// the connection's settings: they take effect on the next connect.
+    fn session_saved(&mut self, old: &str, index: usize) {
+        let Some(saved) = self.profiles.get(index).cloned() else {
+            return;
+        };
+        if saved.name != old
+            && let Err(e) = self.macros.rename_session(old, &saved.name)
+        {
+            self.warning = Some(format!("Could not move the macros of \"{old}\": {e}"));
+        }
+        let connected = self.connection.is_some();
+        if let Some(current) = self.current.as_mut().filter(|c| c.name == old) {
+            let config = if connected {
+                current.config.clone()
+            } else {
+                saved.config.clone()
+            };
+            *current = Profile { config, ..saved };
+        }
+    }
+
     fn show_editor(&mut self, ctx: &egui::Context) {
         let macros_on = self.addon_on(AddOn::Macros);
         let Some(editor) = &mut self.editor else {
@@ -686,10 +741,9 @@ impl ParleyUi {
             macros_on.then_some(&self.macros),
             &self.settings.keyboard_maps,
         );
-        if let Some((old, new)) = editor.take_renamed()
-            && let Err(e) = self.macros.rename_session(&old, &new)
-        {
-            self.warning = Some(format!("Could not move the macros of \"{old}\": {e}"));
+        let saved = editor.take_saved();
+        if let Some(saved) = saved {
+            self.session_saved(&saved.old_name, saved.index);
         }
         match outcome {
             Some(Outcome::Close) => self.editor = None,
@@ -704,14 +758,14 @@ impl ParleyUi {
 
 /// Macros (R-KEY-3, R-KEY-4).
 impl ParleyUi {
-    /// The keys of a map that do something with macros (R-KEY-2): Record macro starts or
-    /// stops a recording, a macro's key runs it. Nothing while the add-on is off (R-ADD-2).
+    /// The keys of a map that do more than type (R-KEY-2): Record macro starts or stops a
+    /// recording and a macro's key runs it, only while the Macros add-on is on (R-ADD-2);
+    /// the shortcut sheet's and Parley SQL's keys work either way.
     fn carry_out_keys(&mut self, asked: Vec<Function>, session: &mut parley_core::Session) {
-        if !self.addon_on(AddOn::Macros) {
-            return;
-        }
+        let macros = self.addon_on(AddOn::Macros);
         for function in asked {
             match function {
+                Function::RecordMacro | Function::RunMacro(_) if !macros => {}
                 Function::RecordMacro => {
                     if session.macro_state() == parley_core::MacroState::Recording {
                         self.end_recording(session);
@@ -774,6 +828,17 @@ impl ParleyUi {
         }
     }
 
+    /// Keys and sessions that ran the macro `old` run it under its new name (R-KEY-2, R-KEY-4).
+    fn rename_macro(&mut self, old: &str, new: &str) {
+        for map in &mut self.settings.keyboard_maps {
+            map.rename_macro(old, new);
+        }
+        let profiles = self.profiles.iter_mut().chain(self.current.as_mut());
+        for profile in profiles.filter(|p| p.run_macro == old) {
+            new.clone_into(&mut profile.run_macro);
+        }
+    }
+
     /// A macro is at a `password` step: ask for it, as Parley keeps none (R-NET-7).
     fn macro_needs_password(&mut self, session: &parley_core::Session) {
         if session.macro_state() != parley_core::MacroState::NeedsPassword
@@ -795,9 +860,7 @@ impl ParleyUi {
         if let Some(dialog) = &mut self.macro_manager {
             let closed = dialog.show(ctx, &mut self.macros);
             if let Some((old, new)) = dialog.take_renamed() {
-                for map in &mut self.settings.keyboard_maps {
-                    map.rename_macro(&old, &new);
-                }
+                self.rename_macro(&old, &new);
             }
             if closed {
                 self.macro_manager = None;
@@ -810,9 +873,7 @@ impl ParleyUi {
             self.focus_terminal = true;
             if let Some(connection) = &self.connection {
                 let password = match answer {
-                    macros::PasswordAnswer::Typed(p) => {
-                        Some(parley_core::password::Password::new(p))
-                    }
+                    macros::PasswordAnswer::Typed(p) => Some(p),
                     macros::PasswordAnswer::Cancelled => None,
                 };
                 connection.session().give_macro_password(password.as_ref());
@@ -834,175 +895,8 @@ fn is_mac(ctx: &egui::Context) -> bool {
     ctx.os() == egui::os::OperatingSystem::Mac
 }
 
-/// Sessions for the UI tests.
-#[cfg(test)]
-pub(crate) mod test_support {
-    use parley_core::record::{self, Opcode};
-    use parley_core::telnet::Telnet;
-    use parley_core::{CodePage, Session, SessionConfig};
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    use parley_core::macros::{Macro, Step};
-
-    use crate::{MacroStore, Profile, StoredMacro};
-
-    /// A keychain in memory, for tests.
-    #[derive(Default)]
-    pub struct FakeKeys(
-        pub  std::sync::Mutex<
-            std::collections::HashMap<parley_core::sql::assistant::Provider, String>,
-        >,
-    );
-
-    impl std::fmt::Debug for FakeKeys {
-        /// Like a real keychain's: the keys are not shown.
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("FakeKeys")
-        }
-    }
-
-    impl crate::ApiKeys for FakeKeys {
-        fn get(
-            &self,
-            provider: parley_core::sql::assistant::Provider,
-        ) -> Result<Option<String>, String> {
-            Ok(self
-                .0
-                .lock()
-                .map_err(|e| e.to_string())?
-                .get(&provider)
-                .cloned())
-        }
-        fn set(
-            &self,
-            provider: parley_core::sql::assistant::Provider,
-            key: &str,
-        ) -> Result<(), String> {
-            self.0
-                .lock()
-                .map_err(|e| e.to_string())?
-                .insert(provider, key.to_owned());
-            Ok(())
-        }
-        fn delete(&self, provider: parley_core::sql::assistant::Provider) -> Result<(), String> {
-            self.0.lock().map_err(|e| e.to_string())?.remove(&provider);
-            Ok(())
-        }
-    }
-
-    /// Parley's fonts, once per context, for a widget tested on its own: the icons and
-    /// `theme::semibold` need them.
-    pub fn install_fonts(ui: &egui::Ui) {
-        let id = egui::Id::unique("test_support::install_fonts");
-        let done = ui
-            .ctx()
-            .data_mut(|d| std::mem::replace(d.get_temp_mut_or_default::<bool>(id), true));
-        if !done {
-            crate::theme::install(ui.ctx(), crate::fonts::DEFAULT_TERMINAL_FONT);
-        }
-    }
-
-    /// A session showing "Hello" and one input field at row 2, column 2, waiting for input.
-    pub fn waiting_session() -> Session {
-        let mut session = Session::new(SessionConfig::default());
-        session.receive(&waiting_screen());
-        session
-    }
-
-    /// The host's record behind [`waiting_session`]: the screen, then a read that unlocks the
-    /// keyboard.
-    pub fn waiting_screen() -> Vec<u8> {
-        let mut data = vec![0x04, 0x40, 0x04, 0x11, 0x00, 0x00, 0x11, 1, 1];
-        data.extend("Hello".chars().filter_map(|c| CodePage::Ccsid37.to_byte(c)));
-        data.extend([
-            0x11, 2, 1, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A, 0x04, 0x52, 0x00, 0x00,
-        ]);
-        Telnet::frame(&record::build(0, Opcode::PutGet, &data))
-    }
-
-    /// Macros in memory, shared with the test so it can look inside.
-    #[derive(Debug, Clone, Default)]
-    pub struct MemoryMacros(pub Rc<RefCell<std::collections::BTreeMap<String, Macro>>>);
-
-    impl MacroStore for MemoryMacros {
-        fn list(&self) -> Result<Vec<StoredMacro>, String> {
-            Ok(self
-                .0
-                .borrow()
-                .iter()
-                .map(|(name, m)| StoredMacro {
-                    name: name.clone(),
-                    contents: Ok(m.clone()),
-                })
-                .collect())
-        }
-
-        fn read_text(&self, name: &str) -> Result<String, String> {
-            let macros = self.0.borrow();
-            let m = macros.get(name).ok_or("no such macro")?;
-            Ok(m.to_text())
-        }
-
-        fn save_text(&self, name: &str, text: &str) -> Result<(), String> {
-            let m = Macro::parse(text).map_err(|e| e.to_string())?;
-            self.0.borrow_mut().insert(name.to_owned(), m);
-            Ok(())
-        }
-
-        fn delete(&self, name: &str) -> Result<(), String> {
-            self.0.borrow_mut().remove(name);
-            Ok(())
-        }
-
-        fn rename(&self, old: &str, new: &str) -> Result<(), String> {
-            let m = self.0.borrow_mut().remove(old).ok_or("no such macro")?;
-            self.0.borrow_mut().insert(new.to_owned(), m);
-            Ok(())
-        }
-
-        fn folder(&self) -> Option<String> {
-            Some("/memory".to_owned())
-        }
-
-        /// As if the file `Imported.macro` was chosen.
-        fn import(&self) -> Vec<Result<String, String>> {
-            self.0
-                .borrow_mut()
-                .insert("Imported".to_owned(), Macro::default());
-            vec![Ok("Imported".to_owned())]
-        }
-
-        /// As if the copy was saved in `/elsewhere`.
-        fn export(&self, name: &str) -> Result<Option<String>, String> {
-            Ok(Some(format!("/elsewhere/{name}.macro")))
-        }
-    }
-
-    /// A store holding one macro for every session, called `name`.
-    pub fn macros_with(name: &str) -> MemoryMacros {
-        let store = MemoryMacros::default();
-        store.0.borrow_mut().insert(
-            name.to_owned(),
-            Macro {
-                session: None,
-                steps: vec![Step::Text("wrkactjob".into()), Step::Wait],
-            },
-        );
-        store
-    }
-
-    pub fn profile(name: &str, host: &str) -> Profile {
-        Profile {
-            name: name.to_owned(),
-            config: SessionConfig {
-                host: host.to_owned(),
-                ..SessionConfig::default()
-            },
-            ..Profile::default()
-        }
-    }
-}
+#[cfg(any(test, feature = "testing"))]
+pub mod test_support;
 
 #[cfg(test)]
 mod tests {
@@ -1205,6 +1099,112 @@ mod tests {
             }
         });
         harness.run();
+    }
+
+    #[test]
+    fn the_terminal_font_has_a_glyph_for_every_character_of_every_code_page_r_ui_6() {
+        for font in fonts::BUNDLED {
+            let mut harness = Harness::new_ui(move |ui| {
+                theme::install(ui.ctx(), font);
+                let terminal = fonts::terminal_font(ui.ctx(), 14.0);
+                let mut missing = Vec::new();
+                for code_page in parley_core::CodePage::ALL {
+                    for byte in 0..=u8::MAX {
+                        let c = code_page.to_char(byte);
+                        let text = c.to_string();
+                        if !c.is_control()
+                            && !ui.ctx().fonts_mut(|f| f.has_glyphs(&terminal, &text))
+                        {
+                            missing.push(format!("U+{:04X} ({code_page:?})", u32::from(c)));
+                        }
+                    }
+                }
+                assert!(missing.is_empty(), "{font} lacks {missing:?}");
+            });
+            harness.run();
+        }
+    }
+
+    /// Closing the window while connected to the session "Local", which confirms exit.
+    fn ask_to_close(harness: &mut Harness<'static, ParleyUi>) {
+        harness
+            .input_mut()
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .events
+            .push(egui::ViewportEvent::Close);
+        harness.run();
+    }
+
+    #[test]
+    fn closing_while_connected_asks_first_and_cancel_keeps_the_window_r_ui_5() {
+        let (mut harness, _host) = connected_app();
+        assert!(
+            harness
+                .state()
+                .current
+                .as_ref()
+                .is_some_and(|p| p.confirm_exit)
+        );
+        ask_to_close(&mut harness);
+        assert!(harness.state().asking_to_exit);
+        assert!(!harness.state().exit_confirmed);
+        let before = harness.get_by_label("Exit").rect();
+        harness.run_steps(5);
+        assert_eq!(
+            harness.get_by_label("Exit").rect(),
+            before,
+            "the dialog keeps its place"
+        );
+        harness.get_by_label("Cancel").click();
+        harness.run();
+        assert!(!harness.state().asking_to_exit);
+        assert!(!harness.state().exit_confirmed, "the window stays");
+        assert!(harness.state().connection.is_some());
+    }
+
+    #[test]
+    fn exit_in_the_question_lets_the_window_close_r_ui_5() {
+        let (mut harness, _host) = connected_app();
+        ask_to_close(&mut harness);
+        harness.get_by_label("Exit").click();
+        harness.run();
+        assert!(!harness.state().asking_to_exit);
+        assert!(harness.state().exit_confirmed);
+    }
+
+    #[test]
+    fn closing_without_confirm_exit_does_not_ask_r_ui_5() {
+        let (mut harness, _host) = connected_app();
+        if let Some(current) = harness.state_mut().current.as_mut() {
+            current.confirm_exit = false;
+        }
+        ask_to_close(&mut harness);
+        assert!(!harness.state().asking_to_exit);
+    }
+
+    #[test]
+    fn a_second_session_with_a_name_in_use_is_refused_r_ui_5() {
+        let mut harness = app_with(vec![profile("Prod æøå", "prod")]);
+        harness.get_by_label("New session…").click();
+        harness.run();
+        type_into(&mut harness, "Name", "Prod æøå");
+        type_into(&mut harness, "Host", "other");
+        harness.get_by_label("Apply").click();
+        harness.run();
+        harness.get_by_label("There is already a session called \"Prod æøå\".");
+        assert_eq!(harness.state().profiles().len(), 1);
+    }
+
+    #[test]
+    fn connect_in_the_session_dialog_is_off_while_connected_r_ui_5() {
+        use egui_kittest::kittest::NodeT;
+        let (mut harness, _host) = connected_app();
+        harness.state_mut().open_editor(Some(1));
+        harness.run();
+        let connect = harness.get_by_label("Connect");
+        assert!(connect.accesskit_node().is_disabled());
     }
 
     #[test]
@@ -2236,6 +2236,82 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_slash_opens_the_shortcut_sheet_while_macros_are_off_r_ui_17() {
+        let (mut harness, _host) = connected_app();
+        harness.state_mut().set_settings(macros_off());
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::Slash);
+        harness.run();
+        assert!(harness.state().shortcut_sheet.is_some());
+    }
+
+    #[test]
+    fn the_sql_key_starts_parley_sql_while_macros_are_off_r_sql_70() {
+        let (mut harness, _host) = connected_app();
+        let started = with_sql_starter(&mut harness);
+        let mut settings = macros_off();
+        settings.addons.set_enabled(AddOn::Sql, true);
+        harness.state_mut().set_settings(settings);
+        harness.run();
+        let app = harness.state_mut();
+        let connection = app.connection.take().expect("connected");
+        app.carry_out_keys(vec![Function::Sql], &mut connection.session());
+        app.connection = Some(connection);
+        assert_eq!(started.lock().expect("not poisoned").len(), 1);
+    }
+
+    #[test]
+    fn applying_the_connected_session_updates_the_session_in_use_r_ui_5() {
+        let (mut harness, _host) = connected_app();
+        let port = harness
+            .state()
+            .current
+            .as_ref()
+            .expect("in use")
+            .config
+            .port;
+        harness.get(By::new().label_contains("127.0.0.1:")).click();
+        harness.run();
+        harness.get_by_label("Edit session…").click();
+        harness.run();
+        type_into(&mut harness, "Name", " æøå");
+        harness.get_by_label("Apply").click();
+        harness.run();
+        let app = harness.state();
+        let current = app.current.as_ref().expect("in use");
+        assert_eq!(current.name, "Local æøå");
+        assert_eq!(current.config.port, port, "the connection's settings stay");
+        assert_eq!(app.current_index(), Some(0), "Connect again finds it");
+        assert_eq!(app.title(), "Local æøå – Parley");
+    }
+
+    #[test]
+    fn renaming_a_macro_keeps_the_sessions_that_run_it_r_key_4() {
+        let prod = Profile {
+            run_macro: "Jobs".to_owned(),
+            ..profile("Prod", "prod")
+        };
+        let mut harness = app_with(vec![prod.clone()]);
+        harness
+            .state_mut()
+            .set_macro_store(Box::new(test_support::macros_with("Jobs")));
+        harness.state_mut().current = Some(prod);
+        harness.state_mut().macro_manager = Some(macros::Manager::default());
+        harness.run();
+        harness.get_by_label("Rename").click();
+        harness.run();
+        type_into(&mut harness, "New name", " 2");
+        harness.get_by_label("Save name").click();
+        harness.run();
+        let app = harness.state();
+        assert_eq!(app.profiles()[0].run_macro, "Jobs 2");
+        assert_eq!(
+            app.current.as_ref().map(|p| p.run_macro.as_str()),
+            Some("Jobs 2")
+        );
+    }
+
+    #[test]
     fn the_shortcut_sheet_keeps_its_place_from_frame_to_frame_r_ui_17() {
         let mut harness = app_with(Vec::new());
         harness.state_mut().shortcut_sheet = Some(shortcuts::Sheet::default());
@@ -2265,16 +2341,20 @@ mod tests {
     /// Settings with the SQL add-on on, and a starter that keeps what it was asked to open.
     fn with_sql_starter(
         harness: &mut Harness<'static, ParleyUi>,
-    ) -> std::sync::Arc<std::sync::Mutex<Vec<SqlConnection>>> {
+    ) -> std::sync::Arc<std::sync::Mutex<Vec<(String, parley_core::SessionConfig)>>> {
         let mut settings = Settings::default();
         settings.addons.set_enabled(AddOn::Sql, true);
         harness.state_mut().set_settings(settings);
         let started = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let kept = std::sync::Arc::clone(&started);
-        harness.state_mut().set_sql_starter(Box::new(move |c| {
-            kept.lock().expect("not poisoned").push(c.clone());
-            Ok(())
-        }));
+        harness
+            .state_mut()
+            .set_sql_starter(Box::new(move |name, config| {
+                kept.lock()
+                    .expect("not poisoned")
+                    .push((name.to_owned(), config.clone()));
+                Ok(())
+            }));
         started
     }
 
@@ -2292,17 +2372,15 @@ mod tests {
         let profile = harness.state().current.clone().expect("a session in use");
         let started = started.lock().expect("not poisoned").clone();
         assert_eq!(started.len(), 1, "one Parley SQL");
-        assert_eq!(started[0].name, profile.name);
-        assert_eq!(started[0].host, profile.config.host);
-        assert_eq!(started[0].tls, profile.config.tls);
-        assert!(started[0].user.is_empty(), "Parley knows no user (D16)");
+        assert_eq!(started[0].0, profile.name);
+        assert_eq!(started[0].1, profile.config);
     }
 
     #[test]
     fn when_parley_sql_cannot_start_parley_says_why_r_sql_70() {
         let (mut harness, _host) = connected_app();
         with_sql_starter(&mut harness);
-        harness.state_mut().set_sql_starter(Box::new(|_| {
+        harness.state_mut().set_sql_starter(Box::new(|_, _| {
             Err("Parley SQL is not installed beside Parley.".into())
         }));
         harness.state_mut().start_parley_sql(true);

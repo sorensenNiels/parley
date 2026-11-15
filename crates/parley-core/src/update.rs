@@ -15,6 +15,10 @@ use crate::{Error, Result};
 pub const LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/sorensenNiels/parley/releases/latest";
 
+/// The repository's list of releases: the page shown when GitHub's answer gives a release
+/// page that is not a plain `https` address.
+pub const RELEASES_PAGE_URL: &str = "https://github.com/sorensenNiels/parley/releases";
+
 /// How long a check may take; it runs in the background, but should not hang around.
 const TIMEOUT: Duration = Duration::from_secs(10);
 /// GitHub's answer is a few kilobytes; more is not a release.
@@ -86,15 +90,18 @@ impl GitHubAsset {
     /// As a download, when its URL is `https` and safe to put in single quotes in a shell
     /// command: the answer comes from the network.
     fn download(self) -> Option<Download> {
-        let safe = self.browser_download_url.starts_with("https://")
-            && !self
-                .browser_download_url
-                .contains(|c: char| c == '\'' || c.is_whitespace() || c.is_control());
-        safe.then_some(Download {
+        is_safe_https(&self.browser_download_url).then_some(Download {
             name: self.name,
             url: self.browser_download_url,
         })
     }
+}
+
+/// Whether `url` from GitHub's answer is `https` and safe to open or to put in single quotes
+/// in a shell command: the answer comes from the network.
+fn is_safe_https(url: &str) -> bool {
+    url.starts_with("https://")
+        && !url.contains(|c: char| c == '\'' || c.is_whitespace() || c.is_control())
 }
 
 /// Asks `url` (normally [`LATEST_RELEASE_URL`]) whether a release newer than `current`
@@ -148,7 +155,11 @@ pub fn found(status: u16, body: &[u8], current: &str) -> Result<Found> {
             Ok(if is_newer(&version, current) {
                 Found::Newer(Release {
                     version,
-                    page: release.html_url,
+                    page: if is_safe_https(&release.html_url) {
+                        release.html_url
+                    } else {
+                        RELEASES_PAGE_URL.to_owned()
+                    },
                     downloads: release
                         .assets
                         .into_iter()
@@ -240,6 +251,24 @@ mod tests {
             names,
             ["parley_0.3.0_amd64.deb", "parley_0.3.0_x64_en-US.msi"]
         );
+    }
+
+    /// R-UI-11: a release page that is not a plain `https` address is replaced by the
+    /// repository's list of releases.
+    #[test]
+    fn a_release_page_that_is_not_https_falls_back_to_the_releases_list_r_ui_11() {
+        for page in [
+            "javascript:alert(1)",
+            "http://github.com/x",
+            "https://x.test/a b",
+            "",
+        ] {
+            let answer = format!(r#"{{"tag_name": "v9.0.0", "html_url": {page:?}}}"#);
+            let Ok(Found::Newer(release)) = found(200, answer.as_bytes(), "0.2.0") else {
+                panic!("a newer release for {page:?}");
+            };
+            assert_eq!(release.page, RELEASES_PAGE_URL, "{page:?}");
+        }
     }
 
     /// R-UI-11: the same version, no release yet (404), an error and a garbled answer.

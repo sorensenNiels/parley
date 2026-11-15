@@ -33,6 +33,12 @@ allow = [
 multiple-versions = "allow"
 wildcards = "deny"
 allow-wildcard-paths = true
+# Parley and Parley SQL stay apart (D36): only Parley SQL's own crates and the launcher may use
+# Parley SQL's engine and UI. Parley's engine and UI (parley-core, parley-ui-egui) never do.
+deny = [
+  { crate = "parley-sql-core", wrappers = ["parley-sql-ui", "parley-app"] },
+  { crate = "parley-sql-ui", wrappers = ["parley-app"] },
+]
 
 [sources]
 unknown-registry = "deny"

@@ -6,6 +6,8 @@
 APP := parley-app
 CORE := parley-core
 UI := parley-ui-egui
+SQL_CORE := parley-sql-core
+SQL_UI := parley-sql-ui
 
 ifeq ($(OS),Windows_NT)
   PLATFORM := windows
@@ -23,7 +25,7 @@ endif
 RUN_ENV := $(if $(IS_WSL),GALLIUM_DRIVER=$${GALLIUM_DRIVER:-d3d12} ,)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup run run-sql probe probe-sql jt400 helper llama build release package icons test test-core test-ui lint \
+.PHONY: help setup run run-sql probe probe-sql jt400 helper llama build release package icons test test-core test-ui test-sql coverage lint \
         fmt fmt-check deny verify doc clean outdated update upgrade \
         release-patch release-minor release-major
 
@@ -44,8 +46,10 @@ help:
 	@echo "  Quality"
 	@echo "    verify        Everything CI checks: fmt-check, lint, test, deny"
 	@echo "    test          All tests (engine + UI)"
-	@echo "    test-core     Engine tests only"
+	@echo "    test-core     Engine tests only (Parley's and Parley SQL's)"
 	@echo "    test-ui       UI tests only (no window needed)"
+	@echo "    test-sql      Parley SQL's tests only (engine and UI)"
+	@echo "    coverage      Line coverage of all tests (cargo-llvm-cov) into target/coverage"
 	@echo "    lint          Clippy with warnings as errors"
 	@echo "    fmt           Format all code"
 	@echo "    deny          Check dependency licences and security advisories"
@@ -105,13 +109,12 @@ jt400:
 # it into target/helpers, runs its self-test, then the Rust tests that start it.
 helper:
 	bash scripts/build-helper.sh $(HELPERS)
-	cargo test -q -p $(CORE) sql:: -- --ignored
-	cargo test -q -p $(UI) sql -- --ignored
+	cargo test -q -p $(SQL_CORE) -- --ignored
 
 # make probe-sql HOST=myibmi.example.com: which SQL routes the host offers, without signing on (R-NET-8)
 # make probe-sql HOST=... ARGS="--sign-on USER [--tls] [--ccsid 277]": one recorded sign-on (R-NET-9)
 probe-sql:
-	cargo run -q -p $(CORE) --example sqlprobe -- $(HOST) $(ARGS)
+	cargo run -q -p $(SQL_CORE) --example sqlprobe -- $(HOST) $(ARGS)
 
 # A local model behind llama.cpp's OpenAI-compatible server, for trying models out. Needs llama-server
 # on PATH: sudo apt install llama.cpp (recent Ubuntu and Debian), brew install llama.cpp, winget install
@@ -182,10 +185,19 @@ test:
 	cargo test --workspace
 
 test-core:
-	cargo test -p $(CORE)
+	cargo test -p $(CORE) -p $(SQL_CORE)
 
 test-ui:
-	cargo test -p $(UI)
+	cargo test -p $(UI) -p $(SQL_UI)
+
+test-sql:
+	cargo test -p $(SQL_CORE) -p $(SQL_UI)
+
+# Line coverage of every test (needs: cargo install cargo-llvm-cov; rustup component add
+# llvm-tools-preview). A summary per file, and an HTML report in target/coverage/html.
+coverage:
+	cargo llvm-cov --workspace --html --output-dir target/coverage
+	cargo llvm-cov report --summary-only
 
 lint:
 	cargo clippy --workspace --all-targets -- -D warnings

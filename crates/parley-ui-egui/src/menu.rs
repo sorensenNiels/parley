@@ -186,7 +186,7 @@ fn file_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
 
 /// "Connect to ▸" with every saved session (or connection, R-SQL-46) named in `names` but
 /// `except`; the index of the one chosen.
-pub(crate) fn connect_menu<'a>(
+pub fn connect_menu<'a>(
     ui: &mut Ui,
     enabled: bool,
     names: impl Iterator<Item = &'a str>,
@@ -265,7 +265,7 @@ const GEAR_SCALE: f32 = 1.45;
 
 /// The gear at the right end of the header, for Settings (R-UI-18; Parley SQL's, R-SQL-45);
 /// true when clicked. Larger than the menus' text (R-UI-19), and growing with the text size.
-pub(crate) fn gear(ui: &mut Ui) -> bool {
+pub fn gear(ui: &mut Ui) -> bool {
     let muted = theme::palette(ui).muted;
     let size = egui::TextStyle::Button.resolve(ui.style()).size * GEAR_SCALE;
     let icon = icons::icon(icons::GEAR).size(size).color(muted);
@@ -402,7 +402,7 @@ impl Logo {
 }
 
 /// The app's icon and name, as Tortuga shows its own at the start of its top bar.
-pub(crate) fn brand(ui: &mut Ui, logo: Option<&egui::TextureHandle>, program: Program) {
+pub fn brand(ui: &mut Ui, logo: Option<&egui::TextureHandle>, program: Program) {
     if let Some(logo) = logo {
         ui.add(
             egui::Image::new(logo)

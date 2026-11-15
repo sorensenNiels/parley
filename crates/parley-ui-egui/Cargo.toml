@@ -11,13 +11,16 @@ publish = false
 [dependencies]
 parley-core.workspace = true
 egui.workspace = true
-egui_plot.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 fontique.workspace = true
 skrifa.workspace = true
 
+[features]
+# The UI tests' helpers (`test_support`), for Parley SQL's UI tests.
+testing = []
+
 [dev-dependencies]
+serde_json.workspace = true
 egui_kittest.workspace = true
 
 [lints]

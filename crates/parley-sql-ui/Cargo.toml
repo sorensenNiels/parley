@@ -1,0 +1,25 @@
+[package]
+name = "parley-sql-ui"
+description = "Parley SQL's user interface: the SQL window and the program around it, on Parley's shared egui look."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+parley-core.workspace = true
+parley-sql-core.workspace = true
+parley-ui-egui.workspace = true
+egui.workspace = true
+egui_plot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+parley-ui-egui = { workspace = true, features = ["testing"] }
+egui_kittest.workspace = true
+
+[lints]
+workspace = true

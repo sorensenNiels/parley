@@ -788,3 +788,400 @@ fn a_macro_at_connect_starts_on_the_sign_on_screen_r_key_4() {
     s.receive(&host(&menu_screen()));
     assert_eq!(s.macro_state(), MacroState::Off);
 }
+
+#[test]
+fn end_in_a_one_position_signed_numeric_field_keeps_the_cursor_r_key_1() {
+    // A signed numeric field of one position has only its sign position: End stays put.
+    let mut o = vec![SBA, 2, 10];
+    o.extend(field([0x47, 0x00], 0x24, 1));
+    let mut s = session();
+    s.receive(&host(&screen_with(&o)));
+    let start = address(&s, 2, 11);
+    assert_eq!(s.screen().cursor, start);
+    s.key(Key::End);
+    assert_eq!(s.screen().cursor, start);
+}
+
+// Keys on random screens: whatever fields the host defines, no key may panic.
+
+/// Every key, with characters of each kind a field may refuse.
+fn every_key(rows: usize, columns: usize) -> Vec<Key> {
+    vec![
+        Key::Char('1'),
+        Key::Char('a'),
+        Key::Char('-'),
+        Key::Char('+'),
+        Key::Char(' '),
+        Key::Char('æ'),
+        Key::Char('😀'),
+        Key::Aid(Aid::ENTER),
+        Key::Aid(Aid::function(24).expect("F24")),
+        Key::FieldExit,
+        Key::FieldPlus,
+        Key::FieldMinus,
+        Key::Tab,
+        Key::BackTab,
+        Key::Up,
+        Key::Down,
+        Key::Left,
+        Key::Right,
+        Key::Home,
+        Key::End,
+        Key::Backspace,
+        Key::Delete,
+        Key::ToggleInsert,
+        Key::EraseEof,
+        Key::Reset,
+        Key::Attention,
+        Key::SystemRequest,
+        Key::MoveTo { row: 0, column: 0 },
+        Key::MoveTo {
+            row: rows - 1,
+            column: columns - 1,
+        },
+        Key::MoveTo {
+            row: rows,
+            column: columns,
+        },
+        Key::MoveTo {
+            row: usize::MAX,
+            column: usize::MAX,
+        },
+    ]
+}
+
+#[test]
+fn every_key_on_random_fields_near_the_screens_end_never_panics_r_key_1() {
+    let mut seed: u32 = 0x1234_5678;
+    // Below `n`, which is at most 256: it fits a byte.
+    let mut random = move |n: u16| -> u8 {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        (seed % u32::from(n)).to_le_bytes()[0]
+    };
+    for size in [ScreenSize::Standard, ScreenSize::Wide] {
+        let mut s = Session::new(SessionConfig {
+            screen_size: size,
+            ..SessionConfig::default()
+        });
+        let rows = u8::try_from(size.rows()).expect("a screen has at most 27 rows");
+        let columns = u8::try_from(size.columns()).expect("a screen has at most 132 columns");
+        // Clear Unit Alternate picks the session's largest screen.
+        let clear = if size == ScreenSize::Wide {
+            vec![ESC, 0x20, 0x00]
+        } else {
+            vec![ESC, 0x40]
+        };
+        for _ in 0..300 {
+            let mut data = clear.clone();
+            data.extend([ESC, 0x11, 0x00, 0x00]);
+            for _ in 0..=random(4) {
+                // Most fields on the last row, near or at its end; some anywhere.
+                let (row, column) = if random(4) == 0 {
+                    (1 + random(rows.into()), 1 + random(columns.into()))
+                } else {
+                    (rows, columns - random(6))
+                };
+                let ffw0 = 0x40 | if random(5) == 0 { 0x20 } else { 0 } | random(8);
+                let ffw1 = random(256);
+                data.extend([SBA, row, column]);
+                data.extend([0x1D, ffw0, ffw1, 0x24, 0x00, random(4)]);
+            }
+            data.extend(READ_MDT);
+            s.receive(&host(&data));
+            let starts: Vec<usize> = s.screen().fields().iter().map(|f| f.start).collect();
+            let positions = s.screen().buffer().len();
+            for start in starts.iter().chain(&[0, positions - 1]) {
+                for insert in [false, true] {
+                    for key in every_key(usize::from(rows), usize::from(columns)) {
+                        let (row, column) = s.screen().row_column(*start + usize::from(random(3)));
+                        s.key(Key::MoveTo { row, column });
+                        if s.insert_mode() != insert {
+                            s.key(Key::ToggleInsert);
+                        }
+                        s.key(key);
+                        s.key(Key::Reset);
+                        if s.keyboard() == KeyboardState::Locked {
+                            s.receive(&host(&READ_MDT));
+                        }
+                        s.take_outbound();
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Commands and orders (R-DS-1) and what the host's data does to the keyboard and indicators.
+
+#[test]
+fn clear_format_table_removes_the_fields_and_locks_the_keyboard_r_ds_1() {
+    let mut s = signed_on();
+    s.receive(&host(&[ESC, 0x50]));
+    assert_eq!(s.screen().fields().len(), 0);
+    assert_eq!(s.keyboard(), KeyboardState::Locked);
+    assert_eq!(row_text(&s, 1).trim(), "Sign On", "the text stays");
+}
+
+#[test]
+fn write_error_code_to_window_shows_the_message_on_the_error_row_r_ds_1() {
+    let mut s = signed_on();
+    let mut data = vec![ESC, 0x22, 0x00, 0x00, 0x22];
+    data.extend(ebcdic("æøå not valid"));
+    s.receive(&host(&data));
+    assert_eq!(row_text(&s, 24), " æøå not valid");
+    assert_eq!(s.keyboard(), KeyboardState::Error(OperatorError::Host));
+}
+
+#[test]
+fn start_of_header_moves_the_error_row_r_ds_1() {
+    let mut s = session();
+    s.receive(&host(&screen_with(&[0x01, 0x04, 0, 0, 0, 5])));
+    let mut data = vec![ESC, 0x21, 0x22];
+    data.extend(ebcdic("Wrong"));
+    s.receive(&host(&data));
+    assert_eq!(row_text(&s, 5), " Wrong");
+    assert_eq!(row_text(&s, 24), "");
+}
+
+#[test]
+fn a_start_of_header_longer_than_7_is_reported_r_ds_1() {
+    let mut s = session();
+    s.receive(&host(&screen_with(&[0x01, 0x08, 0, 0, 0, 0, 0, 0, 0, 0])));
+    assert!(s.notice().is_some_and(|n| n.contains("Start of Header")));
+}
+
+/// Two alphanumeric fields, on rows 2 (5 positions) and 3 (3 positions), then `read`.
+fn two_fields_then(read: &[u8]) -> Session {
+    let mut data = vec![ESC, 0x40, ESC, 0x11, 0x00, 0x00, SBA, 2, 10];
+    data.extend(field([0x40, 0x00], 0x24, 5));
+    data.extend([SBA, 3, 10]);
+    data.extend(field([0x40, 0x00], 0x24, 3));
+    data.extend(read);
+    let mut s = session();
+    s.receive(&host(&data));
+    s
+}
+
+#[test]
+fn read_input_fields_sends_every_field_without_addresses_r_ds_3() {
+    let mut s = two_fields_then(&[ESC, 0x42, 0x00, 0x00]);
+    keys(&mut s, "ab");
+    s.key(Key::Aid(Aid::ENTER));
+    let (_, _, data) = sent_one(&mut s);
+    let mut expected = ebcdic("ab");
+    expected.extend([0x40; 6]);
+    assert_eq!(&data[3..], expected.as_slice());
+}
+
+#[test]
+fn read_input_fields_sends_no_fields_when_none_was_modified_r_ds_3() {
+    let mut s = two_fields_then(&[ESC, 0x42, 0x00, 0x00]);
+    s.key(Key::Aid(Aid::ENTER));
+    let (_, _, data) = sent_one(&mut s);
+    assert_eq!(data, [2, 11, Aid::ENTER.code()]);
+}
+
+#[test]
+fn read_screen_immediate_sends_the_whole_buffer_r_ds_1() {
+    let mut s = session();
+    s.receive(&host(&screen_with(&ebcdic("Hi"))));
+    s.take_outbound();
+    s.receive(&host(&[ESC, 0x62]));
+    let (opcode, _, data) = sent_one(&mut s);
+    assert_eq!(opcode, Opcode::NoOperation);
+    assert_eq!(data.len(), 24 * 80);
+    assert_eq!(&data[..2], ebcdic("Hi").as_slice());
+}
+
+#[test]
+fn transparent_data_is_written_as_it_is_even_when_it_looks_like_orders_r_ds_1() {
+    let mut s = session();
+    s.receive(&host(&screen_with(&[
+        SBA, 1, 1, 0x10, 0x00, 0x03, 0xC1, 0x1D, 0xC2,
+    ])));
+    assert_eq!(&s.screen().buffer()[..3], &[0xC1, 0x1D, 0xC2]);
+    assert_eq!(s.screen().fields().len(), 0);
+    assert_eq!(s.notice(), None);
+}
+
+#[test]
+fn a_start_of_field_without_a_format_word_writes_the_attribute_but_no_field_r_ds_1() {
+    let mut s = session();
+    s.receive(&host(&screen_with(&[SBA, 2, 10, 0x1D, 0x22, 0x00, 0x05])));
+    assert_eq!(s.screen().fields().len(), 0);
+    assert_eq!(s.screen().get(address(&s, 2, 10)), 0x22);
+    assert_eq!(s.notice(), None);
+}
+
+#[test]
+fn malformed_commands_and_orders_are_reported_not_applied_r_ds_1() {
+    const WTD: [u8; 4] = [ESC, 0x11, 0x00, 0x00];
+    let with_wtd = |orders: &[u8]| [&WTD[..], orders].concat();
+    for (data, says) in [
+        (vec![0x40], "expected a command"),
+        (vec![ESC], "ends inside a command"),
+        (vec![ESC, 0x99], "command X'99'"),
+        (vec![ESC, 0x20, 0x00], "27×132"),
+        (vec![ESC, 0x11, 0x00], "ends inside"),
+        (with_wtd(&[SBA, 25, 1]), "outside the screen"),
+        (with_wtd(&[SBA, 1, 0]), "outside the screen"),
+        (
+            with_wtd(&[SBA, 2, 1, 0x02, 1, 1, 0x40]),
+            "Repeat to Address goes backwards",
+        ),
+        (with_wtd(&[0x03, 1, 5, 1]), "Erase to Address with length 1"),
+        (with_wtd(&[0x03, 1, 5, 6]), "Erase to Address with length 6"),
+        (
+            with_wtd(&[SBA, 2, 1, 0x03, 1, 1, 2, 0xFF]),
+            "Erase to Address goes backwards",
+        ),
+        (
+            with_wtd(&[0x10, 0x00, 0x09, 0xC1]),
+            "ends inside Transparent Data",
+        ),
+        (
+            with_wtd(&[0x1D, 0x80, 0x00, 0x24, 0x00, 0x05]),
+            "field format word",
+        ),
+        (
+            with_wtd(&[0x1D, 0x40, 0x00, 0x24]),
+            "ends inside Start of Field",
+        ),
+        (
+            with_wtd(&[0x12, 0x00]),
+            "ends inside Write Extended Attribute",
+        ),
+        (
+            with_wtd(&[0x15, 0x00, 0x09, 0x00]),
+            "ends inside Write to Display Structured Field",
+        ),
+        (with_wtd(&[0x13, 30, 1]), "Insert Cursor"),
+        (with_wtd(&[0x14, 1, 81]), "Move Cursor"),
+        (vec![ESC, 0x23, 0x01, 3, 2], "Roll of rows 3 to 2"),
+        (vec![ESC, 0x23, 0x01, 0, 2], "Roll of rows 0 to 2"),
+        (vec![ESC, 0x23, 0x01, 1, 25], "Roll of rows 1 to 25"),
+        (vec![ESC, 0x23, 0x01], "ends inside Roll"),
+        (vec![ESC, 0x12, 0xD7], "ends inside Restore Screen"),
+        (
+            vec![ESC, 0xF3, 0x00, 0x09, 0xD9],
+            "ends inside Write Structured Field",
+        ),
+        (vec![ESC, 0x52, 0x00], "ends inside the read command"),
+    ] {
+        let mut s = signed_on();
+        s.receive(&host(&data));
+        let notice = s.notice().unwrap_or_default().to_owned();
+        assert!(notice.contains(says), "{data:02X?}: {notice:?}");
+    }
+}
+
+#[test]
+fn a_record_too_long_for_5250_is_dropped_with_a_notice_and_the_next_still_works_r_net_1() {
+    let mut s = session();
+    let mut bytes = vec![0x40; 70_000];
+    bytes.extend([IAC, 239]);
+    s.receive(&bytes);
+    assert!(s.notice().is_some_and(|n| n.contains("dropped")));
+    s.receive(&host(&sign_on()));
+    assert_eq!(row_text(&s, 1).trim(), "Sign On");
+}
+
+#[test]
+fn the_message_light_follows_its_opcodes_r_ds_2() {
+    let mut s = session();
+    s.receive(&host_record(Opcode::MessageLightOn, &[]));
+    assert!(s.message_waiting());
+    s.receive(&host_record(Opcode::MessageLightOff, &[]));
+    assert!(!s.message_waiting());
+}
+
+#[test]
+fn control_character_2_sets_the_message_light_sounds_the_alarm_and_unlocks_r_ds_2() {
+    let mut s = session();
+    assert_eq!(s.keyboard(), KeyboardState::Locked);
+    s.receive(&host(&[ESC, 0x11, 0x00, 0x01]));
+    assert!(s.message_waiting());
+    assert_eq!(s.keyboard(), KeyboardState::Locked, "CC2 without unlock");
+    s.receive(&host(&[ESC, 0x11, 0x00, 0x02]));
+    assert!(!s.message_waiting());
+    assert!(!s.take_alarm());
+    s.receive(&host(&[ESC, 0x11, 0x00, 0x04]));
+    assert!(s.take_alarm());
+    assert!(!s.take_alarm(), "the alarm sounds once");
+    s.receive(&host(&[ESC, 0x11, 0x00, 0x08]));
+    assert_eq!(s.keyboard(), KeyboardState::Unlocked);
+    s.receive(&host(&[ESC, 0x52, 0x00, 0x05]));
+    assert!(
+        s.message_waiting() && s.take_alarm(),
+        "a read command's CC2 too"
+    );
+}
+
+/// One field of the given field format word on row 2, column 10.
+fn one_field(ffw: [u8; 2], len: u8) -> Session {
+    let mut o = vec![SBA, 2, 9];
+    o.extend(field(ffw, 0x24, len));
+    let mut s = session();
+    s.receive(&host(&screen_with(&o)));
+    s
+}
+
+#[test]
+fn each_kind_of_field_refuses_what_it_does_not_take_r_ds_2() {
+    for (ffw, c, error) in [
+        ([0x41, 0x00], '1', OperatorError::AlphaOnly),
+        ([0x43, 0x00], 'a', OperatorError::NumericOnly),
+        ([0x46, 0x00], 'a', OperatorError::NotKeyboardInput),
+        ([0x40, 0x00], '😀', OperatorError::NotInCodePage),
+    ] {
+        let mut s = one_field(ffw, 5);
+        s.key(Key::Char(c));
+        assert_eq!(s.keyboard(), KeyboardState::Error(error), "{ffw:02X?} {c}");
+        s.key(Key::Reset);
+        assert_eq!(s.keyboard(), KeyboardState::Unlocked);
+        assert_eq!(s.screen().get(address(&s, 2, 10)), 0, "nothing typed");
+    }
+}
+
+#[test]
+fn letters_comma_period_minus_and_space_go_into_an_alpha_only_field_r_ds_2() {
+    let mut s = one_field([0x41, 0x00], 6);
+    keys(&mut s, "æ,.- ");
+    assert_eq!(s.keyboard(), KeyboardState::Unlocked);
+    assert_eq!(row_text(&s, 2), "         æ,.-");
+}
+
+#[test]
+fn typing_or_deleting_on_the_sign_position_is_an_operator_error_r_ds_2() {
+    for key in [Key::Char('1'), Key::Delete] {
+        let mut s = one_field([0x47, 0x00], 3);
+        s.key(Key::MoveTo { row: 1, column: 11 });
+        s.key(key);
+        assert_eq!(
+            s.keyboard(),
+            KeyboardState::Error(OperatorError::SignPosition),
+            "{key:?}"
+        );
+    }
+}
+
+#[test]
+fn cancelling_the_password_stops_the_macro_and_sends_nothing_r_key_4() {
+    let mut s = signed_on();
+    s.play(
+        "start",
+        vec![Step::Password, enter(), Step::Text("x".into())],
+    );
+    assert_eq!(s.macro_state(), MacroState::NeedsPassword);
+    s.give_macro_password(None);
+    assert_eq!(s.macro_state(), MacroState::Off);
+    assert!(s.notice().is_some_and(|n| n.contains("no password")));
+    assert_eq!(sent(&mut s), Vec::<Vec<u8>>::new());
+    assert_eq!(
+        row_text(&s, 6).trim_end(),
+        "                User . . .",
+        "nothing typed"
+    );
+}

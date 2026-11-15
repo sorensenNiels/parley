@@ -23,6 +23,8 @@ path = "src/sql_main.rs"
 parley-ui-egui.workspace = true
 eframe.workspace = true
 parley-core.workspace = true
+parley-sql-core.workspace = true
+parley-sql-ui.workspace = true
 keyring = "4.2"
 
 # File windows for importing and exporting macros (R-KEY-7). GTK on Linux, as Tortuga: the
@@ -32,6 +34,11 @@ rfd = { version = "0.17", default-features = false, features = ["gtk3"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 rfd = { version = "0.17", default-features = false }
+
+[dev-dependencies]
+# The format eframe stores settings in (its own dependency, the same version), for the test that
+# settings saved by an earlier version still load.
+ron = "0.12"
 
 [build-dependencies]
 winresource.workspace = true

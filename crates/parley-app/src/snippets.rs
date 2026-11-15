@@ -5,7 +5,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use parley_ui_egui::SnippetStore;
+use parley_sql_ui::SnippetStore;
 
 const EXTENSION: &str = "sql";
 

@@ -4,10 +4,7 @@ use super::datastream::SBA;
 use super::input::Aid;
 use super::{ReadKind, Session};
 use crate::record::Opcode;
-use crate::screen::{Field, ScreenSize, Shift};
-
-const BLANK: u8 = 0x40;
-const MINUS: u8 = 0x60;
+use crate::screen::{BLANK, Field, MINUS, ScreenSize, negative_zone};
 
 // Device capability byte 1 of the query reply (table 12-39; bit 0 is the high-order bit).
 const SIZE_27X132: u8 = 0x20;
@@ -55,10 +52,8 @@ impl Session {
     /// is not a digit (an empty field with a minus); Parley leaves it as it is.
     fn field_data(&self, field: &Field, nulls_to_blanks: bool) -> Vec<u8> {
         let bytes = self.screen.field_bytes(field);
-        let (digits, sign) = match field.format.shift() {
-            Shift::SignedNumeric => bytes.split_at(bytes.len().saturating_sub(1)),
-            _ => (bytes, &[][..]),
-        };
+        // A signed numeric field's sign position is the one past its data end.
+        let (digits, sign) = bytes.split_at((field.data_end() - field.start).min(bytes.len()));
         let mut out: Vec<u8> = digits
             .iter()
             .map(|&b| if b == 0 && nulls_to_blanks { BLANK } else { b })
@@ -68,9 +63,10 @@ impl Session {
             out.truncate(kept);
         }
         if sign == [MINUS]
-            && let Some(last) = out.last_mut().filter(|b| (0xF0..=0xF9).contains(*b))
+            && let Some(last) = out.last_mut()
+            && let Some(negative) = negative_zone(*last)
         {
-            *last = 0xD0 | (*last & 0x0F);
+            *last = negative;
         }
         out
     }

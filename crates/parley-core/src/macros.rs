@@ -122,15 +122,41 @@ impl Macro {
     }
 }
 
-/// The macro-file name of a key; typed characters are `text` steps, not keys.
+/// The macro-file line of a key; typed characters are `text` steps, not keys. An AID key
+/// without a name is written `aid-XX` (its code in hex), which [`key_named`] reads back.
 fn key_name(key: Key) -> String {
     match key {
         Key::MoveTo { row, column } => format!("move {} {}", row + 1, column + 1),
         Key::Char(c) => format!("text {}", quote(&c.to_string())),
-        Key::Aid(aid) => key_name_of(key).unwrap_or_else(|| format!("aid-{:02x}", aid.code())),
-        _ => key_name_of(key).unwrap_or_default(),
+        Key::Aid(aid) => {
+            key_name_of(key).unwrap_or_else(|| format!("{AID_PREFIX}{:02x}", aid.code()))
+        }
+        Key::FieldExit
+        | Key::FieldPlus
+        | Key::FieldMinus
+        | Key::Tab
+        | Key::BackTab
+        | Key::Up
+        | Key::Down
+        | Key::Left
+        | Key::Right
+        | Key::Home
+        | Key::End
+        | Key::Backspace
+        | Key::Delete
+        | Key::ToggleInsert
+        | Key::EraseEof
+        | Key::Reset
+        | Key::Attention
+        | Key::SystemRequest => key_name_of(key)
+            // Every one of these is in KEY_NAMES (tested); a comment line reads back as nothing
+            // rather than as a broken line.
+            .unwrap_or_else(|| format!("# a key without a name: {key:?}")),
     }
 }
+
+/// How a macro file names an AID key that has no name of its own: `aid-` and its code in hex.
+const AID_PREFIX: &str = "aid-";
 
 /// The name of a key in a macro file and in a keyboard map (R-KEY-2): `f1` to `f24` or one
 /// of [`KEY_NAMES`]; `None` for typed characters, cursor moves and other AIDs.
@@ -151,6 +177,13 @@ pub fn key_named(word: &str) -> Option<Key> {
     let lower = word.to_ascii_lowercase();
     if let Some(n) = lower.strip_prefix('f').and_then(|n| n.parse().ok()) {
         return Aid::function(n).map(Key::Aid);
+    }
+    if let Some(code) = lower.strip_prefix(AID_PREFIX) {
+        let hex = code.len() == 2 && code.bytes().all(|b| b.is_ascii_hexdigit());
+        return u8::from_str_radix(code, 16)
+            .ok()
+            .filter(|_| hex)
+            .map(|code| Key::Aid(Aid::from_code(code)));
     }
     KEY_NAMES
         .iter()
@@ -222,6 +255,43 @@ mod tests {
             assert_eq!(key_named(name), Some(*key), "{name}");
             assert_eq!(key_name(*key), *name);
         }
+    }
+
+    #[test]
+    fn every_key_but_text_and_moves_has_a_name_r_key_3() {
+        for key in [
+            Key::FieldExit,
+            Key::FieldPlus,
+            Key::FieldMinus,
+            Key::Tab,
+            Key::BackTab,
+            Key::Up,
+            Key::Down,
+            Key::Left,
+            Key::Right,
+            Key::Home,
+            Key::End,
+            Key::Backspace,
+            Key::Delete,
+            Key::ToggleInsert,
+            Key::EraseEof,
+            Key::Reset,
+            Key::Attention,
+            Key::SystemRequest,
+        ] {
+            assert!(key_name_of(key).is_some(), "{key:?}");
+        }
+    }
+
+    #[test]
+    fn an_aid_key_without_a_name_reads_back_as_aid_and_its_code_r_key_3() {
+        let key = Key::Aid(Aid::from_code(0x70));
+        assert_eq!(key_name(key), "aid-70");
+        assert_eq!(key_named("AID-70"), Some(key));
+        assert_eq!(key_named("aid-7"), None);
+        assert_eq!(key_named("aid-zz"), None);
+        assert_eq!(key_named("aid-+7"), None);
+        assert_eq!(key_named("aid-æø"), None);
     }
 
     #[test]

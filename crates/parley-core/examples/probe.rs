@@ -33,7 +33,7 @@ fn main() {
             "--tls" => {
                 config.tls = true;
                 if config.port == 23 {
-                    config.port = 992;
+                    config.port = parley_core::session::TLS_PORT;
                 }
             }
             "--wide" => config.screen_size = ScreenSize::Wide,

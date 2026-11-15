@@ -2,7 +2,7 @@
 //! D29): the same program as `make run-sql`, told which host to open.
 
 use parley_core::CodePage;
-use parley_ui_egui::SqlConnection;
+use parley_sql_ui::SqlConnection;
 
 /// The usage text of `parley-sql`.
 pub const USAGE: &str = "\
@@ -104,14 +104,16 @@ pub fn args_for(connection: &SqlConnection) -> Vec<String> {
     args
 }
 
-/// Starts Parley SQL, installed beside this program, on `connection`'s host (R-SQL-70).
+/// Starts Parley SQL, installed beside this program, on Parley's session `name` on `config`'s
+/// host (R-SQL-70).
 ///
 /// # Errors
 /// When Parley SQL is not beside Parley or cannot be started, said for the operator.
-pub fn start(connection: &SqlConnection) -> Result<(), String> {
+pub fn start(name: &str, config: &parley_core::SessionConfig) -> Result<(), String> {
+    let connection = SqlConnection::for_session(name, config);
     let program = beside()?;
     let mut child = std::process::Command::new(&program)
-        .args(args_for(connection))
+        .args(args_for(&connection))
         .spawn()
         .map_err(|e| format!("Parley SQL could not be started: {e}"))?;
     // Parley SQL runs on its own; waiting on a thread only collects its exit status, so it

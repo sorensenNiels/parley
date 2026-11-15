@@ -60,7 +60,24 @@ impl Session {
         let accepted = match key {
             Key::Reset => !had_error,
             Key::Attention | Key::SystemRequest => true,
-            _ => !had_error && !locked && !refused,
+            Key::Char(_)
+            | Key::Aid(_)
+            | Key::FieldExit
+            | Key::FieldPlus
+            | Key::FieldMinus
+            | Key::Tab
+            | Key::BackTab
+            | Key::Up
+            | Key::Down
+            | Key::Left
+            | Key::Right
+            | Key::Home
+            | Key::End
+            | Key::Backspace
+            | Key::Delete
+            | Key::ToggleInsert
+            | Key::EraseEof
+            | Key::MoveTo { .. } => !had_error && !locked && !refused,
         };
         if accepted {
             record(steps, key, hidden);

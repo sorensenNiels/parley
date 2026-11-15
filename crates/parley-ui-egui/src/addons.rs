@@ -11,36 +11,28 @@ use serde::{Deserialize, Serialize};
 pub enum AddOn {
     /// Recording and playing keyboard macros (R-KEY-3, R-KEY-4, R-ADD-2). On by default.
     Macros,
-    /// The SQL window over a Java helper with `JTOpen` (R-SQL-10, D20). Off by default.
+    /// Tools ▸ SQL… starts Parley SQL on the session's host (R-SQL-10, R-SQL-70). Off by default.
     Sql,
-    /// The SQL assistant in the SQL window (R-SQL-44, R-SQL-48, R-ADD-3, D25, D27). Off by
-    /// default; turned on in its own settings page.
-    Assistant,
+}
+
+/// Something turned on or off and kept in [`AddOnSettings`] by its id: Parley's add-ons, and
+/// Parley SQL's assistant (R-ADD-3), which it turns on in its own settings page.
+pub trait Toggle: Copy {
+    /// The name the settings keep it under.
+    fn id(self) -> &'static str;
+    /// Whether it is on until turned off.
+    fn on_by_default(self) -> bool;
 }
 
 impl AddOn {
     /// Every add-on.
-    pub const ALL: [Self; 3] = [Self::Macros, Self::Sql, Self::Assistant];
-
-    /// The add-ons Settings ▸ Add-ons lists, in its order; the assistant is turned on in
-    /// Settings ▸ SQL assistant (R-SQL-48).
-    pub const ON_ADDONS_PAGE: [Self; 2] = [Self::Macros, Self::Sql];
-
-    /// The name the settings keep it under.
-    pub const fn id(self) -> &'static str {
-        match self {
-            Self::Macros => "macros",
-            Self::Sql => "sql",
-            Self::Assistant => "sql-assistant",
-        }
-    }
+    pub const ALL: [Self; 2] = [Self::Macros, Self::Sql];
 
     /// The name Settings shows.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Macros => "Macros",
             Self::Sql => "SQL",
-            Self::Assistant => "SQL assistant",
         }
     }
 
@@ -49,15 +41,22 @@ impl AddOn {
         match self {
             Self::Macros => "Record keystrokes and play them back, also when a session connects.",
             Self::Sql => "SQL… in the Tools menu opens Parley SQL on the session's host.",
-            Self::Assistant => "Off: nothing of it shows in the SQL window and nothing is sent.",
+        }
+    }
+}
+
+impl Toggle for AddOn {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Macros => "macros",
+            Self::Sql => "sql",
         }
     }
 
-    /// Whether it is on until turned off.
-    pub const fn on_by_default(self) -> bool {
+    fn on_by_default(self) -> bool {
         match self {
             Self::Macros => true,
-            Self::Sql | Self::Assistant => false,
+            Self::Sql => false,
         }
     }
 }
@@ -75,7 +74,7 @@ pub struct AddOnSettings {
 }
 
 impl AddOnSettings {
-    pub fn enabled(&self, addon: AddOn) -> bool {
+    pub fn enabled(&self, addon: impl Toggle) -> bool {
         if addon.on_by_default() {
             !self.disabled.contains(addon.id())
         } else {
@@ -83,7 +82,7 @@ impl AddOnSettings {
         }
     }
 
-    pub fn set_enabled(&mut self, addon: AddOn, enabled: bool) {
+    pub fn set_enabled(&mut self, addon: impl Toggle, enabled: bool) {
         let (differs, other) = if addon.on_by_default() {
             (&mut self.disabled, &mut self.enabled)
         } else {
@@ -113,10 +112,6 @@ mod tests {
         assert!(
             !settings.enabled(AddOn::Sql),
             "SQL is off until turned on (R-SQL-10)"
-        );
-        assert!(
-            !settings.enabled(AddOn::Assistant),
-            "nothing is sent until turned on (R-ADD-3)"
         );
     }
 

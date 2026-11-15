@@ -48,7 +48,9 @@ GNU make, rustup). Under WSL2 the app needs WSLg; `make run` selects the GPU dri
 | Crate | Purpose |
 |---|---|
 | `crates/parley-core` | The TN5250 engine: telnet negotiation, the 5250 data stream, EBCDIC, the screen model, and the TCP/TLS connection. No UI code. |
-| `crates/parley-ui-egui` | The user interface, built with [egui](https://github.com/emilk/egui). |
+| `crates/parley-sql-core` | Parley SQL's engine: the IBM i host servers, the SQL helper's protocol, SQL text, transfers and the assistant. No UI code. |
+| `crates/parley-ui-egui` | Parley's user interface, built with [egui](https://github.com/emilk/egui), and the look Parley SQL shares. |
+| `crates/parley-sql-ui` | Parley SQL's user interface: the SQL window. |
 | `crates/parley-app` | The `parley` and `parley-sql` binaries: open the window and run the UI. |
 
 ## Releases

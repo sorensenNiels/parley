@@ -39,6 +39,22 @@ const MC: u8 = 0x14;
 const WDSF: u8 = 0x15;
 const SF: u8 = 0x1D;
 
+// Control character 2 of Write To Display and the read commands (5494 Functions Reference
+// SC30-3533-02, "Write to Display Command", CC2 bits 4-7; bit 0 is the high-order bit).
+const CC2_UNLOCK: u8 = 0x08;
+const CC2_ALARM: u8 = 0x04;
+const CC2_MESSAGE_LIGHT_OFF: u8 = 0x02;
+const CC2_MESSAGE_LIGHT_ON: u8 = 0x01;
+
+// The Roll command's control byte ("Roll Command"): bit 0 rolls down, bits 3-7 count lines.
+const ROLL_DOWN: u8 = 0x80;
+const ROLL_LINES: u8 = 0x1F;
+
+// The first byte of a field format word has bits 0-1 = B'01' ("Start of Field Order"); a
+// field control word does not.
+const FFW_ID_MASK: u8 = 0xC0;
+const FFW_ID: u8 = 0x40;
+
 /// Marks restore data Parley made in reply to Save Screen ("PY" in EBCDIC).
 pub(super) const RESTORE_MAGIC: [u8; 2] = [0xD7, 0xE8];
 
@@ -253,7 +269,7 @@ impl Session {
         let (format, attribute) = if is_attribute(first) {
             (None, first)
         } else {
-            if first & 0xC0 != 0x40 {
+            if first & FFW_ID_MASK != FFW_ID {
                 return Err(Error::data(format!(
                     "a field format word starting X'{first:02X}'"
                 )));
@@ -319,16 +335,16 @@ impl Session {
 
     /// Control character 2: message light, alarm, unlock.
     fn apply_cc2(&mut self, cc2: u8) {
-        if cc2 & 0x02 != 0 {
+        if cc2 & CC2_MESSAGE_LIGHT_OFF != 0 {
             self.message_waiting = false;
         }
-        if cc2 & 0x01 != 0 {
+        if cc2 & CC2_MESSAGE_LIGHT_ON != 0 {
             self.message_waiting = true;
         }
-        if cc2 & 0x04 != 0 {
+        if cc2 & CC2_ALARM != 0 {
             self.alarm = true;
         }
-        if cc2 & 0x08 != 0 {
+        if cc2 & CC2_UNLOCK != 0 {
             self.unlock();
         }
     }
@@ -376,11 +392,11 @@ impl Session {
         }
         let (top, bottom) = (usize::from(top - 1), usize::from(bottom - 1));
         let height = bottom - top + 1;
-        let count = usize::from(control & 0x1F).min(height);
+        let count = usize::from(control & ROLL_LINES).min(height);
         let mut rows: Vec<Vec<u8>> = (top..=bottom)
             .map(|row| self.screen.row_bytes(row).to_vec())
             .collect();
-        if control & 0x80 != 0 {
+        if control & ROLL_DOWN != 0 {
             rows.rotate_right(count);
             rows[..count].iter_mut().for_each(|row| row.fill(0));
         } else {
