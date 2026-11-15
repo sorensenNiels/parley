@@ -12,10 +12,20 @@
 
 ## In progress
 
-None.
+- **R-SQL-87, R-SQL-88** (2026-11-15): Explorer and Current library; Snippets as a tree. Built; **automated**
+  (`make test`): the side panel's tests fold and open "Explorer", the top bar's test clicks "Current library MSGSUDTA",
+  a snippet's Run shows only while the pointer is on its line, and a starter's right-click menu inserts it and has no
+  Edit or Delete. Not yet checked in the running app.
 
 ## Implemented
 
+- **R-SQL-89..91** (2026-11-15): a fuller History (Phase 19). **Automated** (`make test`): every run kept with
+  its time, how long and how it ended, also a statement run again, the last 500, an error's first line only, the
+  history kept before read as entries without a time (core); runs listed newest first under Today and Earlier, the
+  search and Failed narrowing the list and "Nothing found.", a click selecting and Enter adding to the script, the
+  arrows moving the selection, Insert at the cursor, Clear history asking first, Remove and Clear for one connection
+  only (UI). **Checked in the running app** by the owner, Linux under WSL
+  (2026-11-15).
 - **R-SQL-78..81** (2026-11-15): IBM i Services (Phase 17). **Automated** (`make test`): each view's SQL reads
   the signed-on user's own within 1000 entries with a heading per column, names from the host quoted and a spooled file
   number that is not one refused, rows becoming a viewer's text, new messages counted after the newest seen (core);

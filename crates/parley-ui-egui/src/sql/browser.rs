@@ -573,7 +573,7 @@ impl Browser {
 
 /// A group's header row, open as `open` says; its caret may change that, which
 /// [`open_now`] reads after the body.
-fn group_header<R>(
+pub(super) fn group_header<R>(
     ui: &mut Ui,
     id: impl std::hash::Hash + std::fmt::Debug,
     open: bool,
@@ -586,7 +586,7 @@ fn group_header<R>(
 }
 
 /// Whether the group `id` is open after this frame's clicks on its caret.
-fn open_now(ui: &Ui, id: impl std::hash::Hash + std::fmt::Debug, was: bool) -> bool {
+pub(super) fn open_now(ui: &Ui, id: impl std::hash::Hash + std::fmt::Debug, was: bool) -> bool {
     CollapsingState::load(ui.ctx(), ui.make_persistent_id(id)).map_or(was, |s| s.is_open())
 }
 
@@ -1066,7 +1066,7 @@ fn reading(ui: &mut Ui) {
 fn unusable(state: &State) -> Option<String> {
     match state {
         State::Off => Some("Sign on to browse the database.".to_owned()),
-        State::Failed(why) => Some(format!("No catalog job, so no schema browser: {why}")),
+        State::Failed(why) => Some(format!("No catalog job, so no Explorer: {why}")),
         State::Started | State::Connecting | State::Ready { .. } => None,
     }
 }

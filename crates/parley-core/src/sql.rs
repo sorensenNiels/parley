@@ -9,6 +9,7 @@ pub mod complete;
 pub mod edit;
 pub mod export;
 pub mod helper;
+pub mod history;
 pub mod java;
 pub mod message;
 pub mod params;

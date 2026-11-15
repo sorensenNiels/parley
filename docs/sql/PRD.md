@@ -65,6 +65,7 @@ library list, `LABEL ON` headings) in a fast desktop window.
 | IBM i Services | Under System in the tree: the user's spooled files, message queue and jobs, listed under the editor; a spooled file or job log in a viewer window; more starters | R-SQL-78..81 | Verified |
 | Layout | Results below or beside the editor, the editor's height, the side panel folded | R-SQL-49..51 | Verified |
 | Work area | A side panel on the left with the IBM i as the tree's root, library groups per connection (Development, Testing, …) and Snippets below; History as a tab beside Results and Messages (D33) | R-SQL-82..85 | Verified |
+| History | Every run with when, how long and how it ended, by day, with search and a filter; insert, run again, copy, remove (D35) | R-SQL-89..91 | Verified |
 | Editing | Comment, indent, move and duplicate lines, pairs, matching bracket, go to line, keyword case, zoom | R-SQL-52..59 | Verified |
 | Editor, deeper | Gutter with line numbers, ▶ and outcomes; completion on Ctrl+Space and with snippets; a routine's parameters; the word under the cursor, Ctrl+D; trailing blanks trimmed (D28) | R-SQL-61..68 | Verified |
 | Shortcuts and settings | Parley SQL's Shortcuts page; Parley SQL's settings kept in Parley SQL only | R-SQL-60, R-SQL-69 | Verified |

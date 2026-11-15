@@ -135,4 +135,4 @@ Decisions D19–D27 are about SQL and are in [sql/ROADMAP.md](sql/ROADMAP.md) §
   (`D`), phases and ideas (`IDEA`, in [IDEAS.md](IDEAS.md)) take their next number here, whichever roadmap uses it,
   so a number never means two things.
 
-Next free IDs (removed rows keep their numbers): `R-P-5` · `R-NET-10` · `R-DS-6` · `R-EBC-2` · `R-KEY-9` · `R-UI-20` · `R-ADD-4` · `R-NF-2` · `D34` · `Phase 19` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); ideas: last line of IDEAS.md).
+Next free IDs (removed rows keep their numbers): `R-P-5` · `R-NET-10` · `R-DS-6` · `R-EBC-2` · `R-KEY-9` · `R-UI-20` · `R-ADD-4` · `R-NF-2` · `D36` · `Phase 20` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); ideas: last line of IDEAS.md).

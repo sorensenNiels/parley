@@ -211,13 +211,14 @@ impl SqlWindow {
     pub(super) fn schema_menu(&mut self, ui: &mut Ui) {
         let idle = self.waiting.is_none() && self.queue.is_empty();
         let schema = self.job.as_ref().map_or("…", |j| j.schema.as_str());
-        let label = format!("Schema {schema}");
+        // R-SQL-87, D34: IBM i's word; it is still the SQL current schema underneath.
+        let label = format!("Current library {schema}");
         let mut run = None;
         ui.add_enabled_ui(idle, |ui| {
             ui.menu_button(label, |ui| run = self.library_list(ui))
                 .response
                 .on_hover_text(
-                    "The SQL job's current schema: where unqualified tables are looked for",
+                    "Where unqualified tables are looked for: the SQL job's current schema (SET SCHEMA)",
                 );
         });
         if let Some(sql) = run {
@@ -240,7 +241,7 @@ impl SqlWindow {
                         .selected(current);
                     let response = ui
                         .add_sized([ui.available_width(), 22.0], item)
-                        .on_hover_text("Make it the current schema");
+                        .on_hover_text("Make it the current library");
                     // A name from the host goes into SQL only when it is a system name.
                     if response.clicked()
                         && !current
@@ -338,7 +339,7 @@ mod tests {
             Some("SQL0204 is not in the job log or its message file.")
         );
         assert_eq!(
-            w.take_ran(),
+            super::super::tests::statements(w.take_ran()),
             ["SELECT * FROM T"],
             "the window's own queries are not in the history"
         );
@@ -408,7 +409,7 @@ mod tests {
         );
         let mut harness = drawn(w, Vec::new());
         harness.run();
-        harness.get_by_label("Schema MSGSUDTA").click();
+        harness.get_by_label("Current library MSGSUDTA").click();
         harness.run();
         harness.get_by_label_contains("QSYS");
         harness.get_by_label("Add to library list");

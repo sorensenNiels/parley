@@ -240,9 +240,7 @@ impl Database {
             State::Off | State::Started => None,
             State::Connecting => Some(("catalog job: signing on…".to_owned(), false)),
             State::Ready { job } => Some((format!("catalog job {job}"), false)),
-            State::Failed(why) => {
-                Some((format!("No catalog job, so no schema browser: {why}"), true))
-            }
+            State::Failed(why) => Some((format!("No catalog job, so no Explorer: {why}"), true)),
         }
     }
 }

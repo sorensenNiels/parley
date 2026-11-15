@@ -7,12 +7,12 @@ use std::path::{Path, PathBuf};
 use parley_core::SessionConfig;
 use parley_core::sql::helper::HelperFiles;
 
+use parley_core::sql::history;
+
+use super::history::HistoryAction;
 use super::{SqlWindow, browser};
 use crate::settings::Settings;
 use crate::{dialog, theme};
-
-/// How many statements the history keeps per session (R-SQL-7).
-const HISTORY: usize = 100;
 
 /// Said when this installation has no SQL helper (R-SQL-13).
 const NO_HELPER: &str =
@@ -72,10 +72,29 @@ pub fn keep(window: &mut SqlWindow, name: &str, settings: &mut Settings, scripts
     }
     let ran = window.take_ran();
     if !ran.is_empty() {
-        add_to_history(
+        history::add(
             settings.sql_history.entry(name.to_owned()).or_default(),
             ran,
         );
+    }
+    // R-SQL-90, R-SQL-91: Remove from history and Clear history.
+    for edit in window.take_history_edits() {
+        let Some(runs) = settings.sql_history.get_mut(name) else {
+            continue;
+        };
+        match edit {
+            HistoryAction::Remove(entry) => {
+                if let Some(at) = runs.iter().position(|e| *e == entry) {
+                    runs.remove(at);
+                }
+            }
+            HistoryAction::Clear => runs.clear(),
+            HistoryAction::Append(_)
+            | HistoryAction::Insert(_)
+            | HistoryAction::NewTab(_)
+            | HistoryAction::Run(_)
+            | HistoryAction::SaveSnippet(_) => {}
+        }
     }
 }
 
@@ -94,17 +113,6 @@ pub fn rename(settings: &mut Settings, old: &str, new: &str) {
     if let Some(groups) = settings.sql_groups.remove(old) {
         settings.sql_groups.insert(new.to_owned(), groups);
     }
-}
-
-/// Adds `ran` to `history`: a statement run again moves to the end, and only the last
-/// [`HISTORY`] are kept.
-fn add_to_history(history: &mut Vec<String>, ran: Vec<String>) {
-    for statement in ran {
-        history.retain(|s| *s != statement);
-        history.push(statement);
-    }
-    let excess = history.len().saturating_sub(HISTORY);
-    history.drain(..excess);
 }
 
 /// Says why the SQL window could not open, with where to get Java, while `notice` is set;
@@ -139,14 +147,34 @@ pub fn notice_dialog(ctx: &egui::Context, notice: &mut Option<String>) {
 mod tests {
     use super::*;
 
+    fn run(statement: &str) -> history::Entry {
+        history::Entry::now(statement, std::time::Duration::ZERO, history::Outcome::Done)
+    }
+
+    /// R-SQL-89..91: runs go into the connection's history; Remove takes one run out and Clear
+    /// empties it, for this connection only.
     #[test]
-    fn the_history_keeps_a_statement_once_and_only_the_last_hundred_r_sql_7() {
-        let mut history = vec!["A".to_owned(), "B".to_owned()];
-        add_to_history(&mut history, vec!["A".to_owned(), "C".to_owned()]);
-        assert_eq!(history, ["B", "A", "C"], "run again: moved to the end");
-        add_to_history(&mut history, (0..150).map(|n| format!("S{n}")).collect());
-        assert_eq!(history.len(), 100);
-        assert_eq!(history.last().map(String::as_str), Some("S149"));
+    fn runs_are_kept_and_removed_or_cleared_per_connection_r_sql_89() {
+        let mut settings = Settings::default();
+        settings
+            .sql_history
+            .insert("Other".to_owned(), vec![run("VALUES 'æøå'")]);
+        let mut window = crate::sql::tests::window();
+        window.ran = vec![run("SELECT 1"), run("SELECT 1"), run("SELECT 2")];
+        keep(&mut window, "Prod", &mut settings, &mut 0);
+        assert_eq!(settings.sql_history["Prod"].len(), 3, "every run");
+        let second = settings.sql_history["Prod"][1].clone();
+        window.history_edits = vec![HistoryAction::Remove(second)];
+        keep(&mut window, "Prod", &mut settings, &mut 0);
+        assert_eq!(settings.sql_history["Prod"].len(), 2);
+        window.history_edits = vec![HistoryAction::Clear];
+        keep(&mut window, "Prod", &mut settings, &mut 0);
+        assert_eq!(settings.sql_history["Prod"], []);
+        assert_eq!(
+            settings.sql_history["Other"].len(),
+            1,
+            "another connection's stays"
+        );
     }
 
     #[test]
@@ -154,13 +182,13 @@ mod tests {
         let mut settings = Settings::default();
         settings
             .sql_history
-            .insert("Prod".to_owned(), vec!["VALUES 1".to_owned()]);
+            .insert("Prod".to_owned(), vec![run("VALUES 1")]);
         settings
             .sql_pinned
             .insert("Prod".to_owned(), vec!["QSYS2".to_owned()]);
         rename(&mut settings, "Prod", "Production");
         assert!(!settings.sql_history.contains_key("Prod"));
-        assert_eq!(settings.sql_history["Production"], ["VALUES 1"]);
+        assert_eq!(settings.sql_history["Production"][0].statement, "VALUES 1");
         assert_eq!(settings.sql_pinned["Production"], ["QSYS2"]);
     }
 

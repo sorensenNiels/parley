@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use egui::{RichText, ScrollArea, TextEdit, Ui};
 use parley_core::sql::snippet::{self, STARTERS, Snippet};
 
+use super::browser;
 use crate::{dialog, icons, theme};
 
 /// The snippet folders, in the app (R-SQL-24). Folders are given as text.
@@ -175,6 +176,7 @@ impl SnippetPanel {
             theme::error(ui, error);
         }
         let mut chosen = None;
+        let searching = !self.query.trim().is_empty();
         ScrollArea::vertical()
             .id_salt("sql-snippets")
             .auto_shrink([false, false])
@@ -190,12 +192,8 @@ impl SnippetPanel {
                     if shown.is_empty() {
                         continue;
                     }
-                    ui.add_space(6.0);
-                    theme::section_label(ui, source.heading());
-                    for i in shown {
-                        if let Some(act) = self.item(ui, i) {
-                            chosen = Some(act);
-                        }
+                    if let Some(act) = self.group(ui, source, &shown, searching) {
+                        chosen = Some(act);
                     }
                 }
             });
@@ -212,53 +210,114 @@ impl SnippetPanel {
         }
     }
 
-    /// One snippet: its title (double-click inserts it), its tags, and Run, Edit and Delete.
+    /// The snippets of `source` in `shown`, as a group that folds like a library group
+    /// (R-SQL-88); open while searching, so that every match shows.
+    fn group(&self, ui: &mut Ui, source: Source, shown: &[usize], searching: bool) -> Option<Item> {
+        let id = ("sql-snippet-group", source.heading());
+        let open = searching || browser::open_now(ui, id, true);
+        let mut act = None;
+        let (_, header, _) = browser::group_header(ui, id, open, |ui| {
+            let label = ui.add(
+                egui::Label::new(theme::semibold(source.heading()))
+                    .truncate()
+                    .sense(egui::Sense::click()),
+            );
+            ui.label(RichText::new(shown.len().to_string()).color(theme::palette(ui).muted));
+            label
+        })
+        .body(|ui| {
+            for &i in shown {
+                if let Some(item) = self.item(ui, i) {
+                    act = Some(item);
+                }
+            }
+        });
+        if header.inner.clicked() {
+            let id = ui.make_persistent_id(id);
+            let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+                ui.ctx(),
+                id,
+                open,
+            );
+            state.set_open(!open);
+            state.store(ui.ctx());
+        }
+        act
+    }
+
+    /// One snippet on one line (R-SQL-88): its title, its tags on the right, and while the
+    /// pointer is on it a Run button in their place. Double-click inserts it; the hover shows
+    /// its about and SQL; the right-click menu has Insert, Run, Edit and Delete.
     fn item(&self, ui: &mut Ui, i: usize) -> Option<Item> {
         let entry = self.entries.get(i)?;
+        let title = &entry.snippet.title;
         let p = theme::palette(ui);
+        let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+        let (rect, row) = ui.allocate_exact_size(size, egui::Sense::click());
+        row.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::accesskit::Role::Button, true, title.as_str())
+        });
+        let pointed = ui.rect_contains_pointer(rect);
+        if pointed {
+            let fill = ui.visuals().widgets.hovered.weak_bg_fill;
+            ui.painter()
+                .rect_filled(rect, ui.visuals().widgets.hovered.corner_radius, fill);
+        }
         let mut act = None;
-        ui.horizontal(|ui| {
-            let title = egui::Button::new(RichText::new(&entry.snippet.title))
-                .frame_when_inactive(false)
-                .truncate();
-            let width = (ui.available_width() - 70.0).max(60.0);
-            let response = ui
-                .add_sized([width, 20.0], title)
-                .on_hover_ui(|ui| about(ui, &entry.snippet));
-            if response.double_clicked() {
-                act = Some(Item::Use(i, false));
-            }
+        let inner = rect.shrink2(egui::vec2(4.0, 0.0));
+        let mut line = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(inner)
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        );
+        if pointed {
             let run = icons::button(icons::PLAY, "").small();
-            if icons::add_named(ui, true, run, &format!("Run {}", entry.snippet.title))
+            if icons::add_named(&mut line, true, run, &format!("Run {title}"))
                 .on_hover_text("Run")
                 .clicked()
             {
                 act = Some(Item::Use(i, true));
             }
+        } else if !entry.snippet.tags.is_empty() {
+            line.scope(|ui| {
+                ui.set_max_width(inner.width() * 0.4);
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(entry.snippet.tags.join(" · "))
+                            .small()
+                            .color(p.muted),
+                    )
+                    .truncate()
+                    .selectable(false),
+                );
+            });
+        }
+        line.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.add(
+                egui::Label::new(title.as_str())
+                    .truncate()
+                    .selectable(false),
+            );
+        });
+        let row = row.on_hover_ui(|ui| about(ui, &entry.snippet));
+        if row.double_clicked() {
+            act = Some(Item::Use(i, false));
+        }
+        row.context_menu(|ui| {
+            let mut pick = |ui: &mut Ui, name: &str, item: Item| {
+                if ui.button(name).clicked() {
+                    act = Some(item);
+                    ui.close();
+                }
+            };
+            pick(ui, "Insert", Item::Use(i, false));
+            pick(ui, "Run", Item::Use(i, true));
             if entry.source != Source::Starter {
-                let edit = icons::button(icons::PENCIL, "").small();
-                if icons::add_named(ui, true, edit, &format!("Edit {}", entry.snippet.title))
-                    .on_hover_text("Edit")
-                    .clicked()
-                {
-                    act = Some(Item::Edit(i));
-                }
-                if ui
-                    .add(theme::icon_button(ui, "🗙"))
-                    .on_hover_text("Delete")
-                    .clicked()
-                {
-                    act = Some(Item::Delete(i));
-                }
+                ui.separator();
+                pick(ui, "Edit…", Item::Edit(i));
+                pick(ui, "Delete…", Item::Delete(i));
             }
         });
-        if !entry.snippet.tags.is_empty() {
-            ui.label(
-                RichText::new(entry.snippet.tags.join(" · "))
-                    .small()
-                    .color(p.muted),
-            );
-        }
         act
     }
 
@@ -602,7 +661,10 @@ fn about(ui: &mut Ui, snippet: &Snippet) {
     }
     ui.add_space(4.0);
     ui.label(RichText::new(&snippet.sql).monospace().small());
-    theme::hint(ui, "Double-click to put it in the editor.");
+    theme::hint(
+        ui,
+        "Double-click to put it in the editor; right-click for more.",
+    );
 }
 
 /// A file name from a title: letters, digits, `-` and `_`; blanks become `-`.

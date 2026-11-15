@@ -20,6 +20,8 @@ sha1.workspace = true
 getrandom.workspace = true
 # Excel files for Download (R-SQL-72, D31); constant memory keeps large downloads small.
 rust_xlsxwriter = { version = "0.102", default-features = false, features = ["constant_memory"] }
+# Local dates for the SQL history's day headings and times (R-SQL-90, D35): the clock only.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [dev-dependencies]
 # Reads the password without showing it in examples/sqlprobe.rs (R-NET-9).

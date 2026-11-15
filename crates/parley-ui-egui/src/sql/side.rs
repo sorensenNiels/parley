@@ -1,4 +1,4 @@
-//! The side panel on the left (R-SQL-82, D33): Libraries (R-SQL-83) above Snippets (R-SQL-84),
+//! The side panel on the left (R-SQL-82, D33, D34): Explorer (R-SQL-83) above Snippets (R-SQL-84),
 //! each section folding on its own, a divider between them while both are open. The panel's
 //! edge can be dragged to change its width, and the panel folds to a narrow strip.
 
@@ -65,14 +65,16 @@ impl Default for SideLayout {
 /// A section of the side panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Section {
-    Libraries,
+    Explorer,
     Snippets,
 }
 
 impl Section {
+    /// The header's name: "Explorer" holds the IBM i, its System node and the libraries
+    /// (R-SQL-87, D34).
     const fn name(self) -> &'static str {
         match self {
-            Self::Libraries => "Libraries",
+            Self::Explorer => "Explorer",
             Self::Snippets => "Snippets",
         }
     }
@@ -177,7 +179,7 @@ impl SqlWindow {
     /// The folded panel: a button that opens it again.
     fn folded_side(&mut self, ui: &mut Ui) {
         ui.vertical_centered(|ui| {
-            if panel_button(ui, icons::CARET_RIGHT, "Show Libraries and Snippets") {
+            if panel_button(ui, icons::CARET_RIGHT, "Show Explorer and Snippets") {
                 self.toggle_side_panel();
             }
         });
@@ -211,7 +213,7 @@ impl SqlWindow {
             libraries_header,
             "sql-side-libraries-header",
             |w, ui| {
-                w.section_header(ui, Section::Libraries);
+                w.section_header(ui, Section::Explorer);
             },
         );
         if self.side.libraries_open {
@@ -258,7 +260,7 @@ impl SqlWindow {
     /// button that folds the panel.
     fn section_header(&mut self, ui: &mut Ui, section: Section) {
         let open = match section {
-            Section::Libraries => self.side.libraries_open,
+            Section::Explorer => self.side.libraries_open,
             Section::Snippets => self.side.snippets_open,
         };
         let mut toggle = false;
@@ -274,7 +276,7 @@ impl SqlWindow {
                 .response
                 .interact(egui::Sense::click());
             toggle |= label.clicked();
-            if section == Section::Libraries {
+            if section == Section::Explorer {
                 theme::button_row(ui, |ui| {
                     if panel_button(ui, icons::CARET_LEFT, "Hide the side panel") {
                         self.toggle_side_panel();
@@ -288,7 +290,7 @@ impl SqlWindow {
         });
         if toggle {
             match section {
-                Section::Libraries => self.side.libraries_open = !open,
+                Section::Explorer => self.side.libraries_open = !open,
                 Section::Snippets => self.side.snippets_open = !open,
             }
         }

@@ -17,28 +17,16 @@ const MARK: f32 = 14.0;
 /// Room for the ▶, right of the numbers.
 const PLAY: f32 = 18.0;
 
-/// How a statement's last run ended (R-SQL-62).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Outcome {
-    Rows { count: usize, more: bool },
-    Changed(i64),
-    Done,
-    Failed(String),
-}
+/// How a statement's last run ended (R-SQL-62), as the history keeps it too (R-SQL-89).
+pub use parley_core::sql::history::Outcome;
 
-impl Outcome {
-    /// What hovering the mark says.
-    fn said(&self, took: Duration) -> String {
-        let time = format!("{:.2} s", took.as_secs_f64());
-        match self {
-            Self::Rows { count, more } => {
-                let more = if *more { ", more to fetch" } else { "" };
-                format!("{count} rows{more} in {time}")
-            }
-            Self::Changed(count) => format!("{count} rows changed in {time}"),
-            Self::Done => format!("Done in {time}"),
-            Self::Failed(message) => message.clone(),
-        }
+/// What hovering the mark says.
+fn said(outcome: &Outcome, took: Duration) -> String {
+    let time = format!("{:.2} s", took.as_secs_f64());
+    match outcome {
+        Outcome::Failed(message) => message.clone(),
+        Outcome::Done => format!("Done in {time}"),
+        Outcome::Rows { .. } | Outcome::Changed(_) => format!("{} in {time}", outcome.text()),
     }
 }
 
@@ -208,28 +196,31 @@ fn play(ui: &Ui, row: Rect, line: usize, current: bool) -> bool {
 /// The outcome mark at the left of the gutter's row, which says the outcome on hover.
 fn mark(ui: &Ui, row: Rect, line: usize, outcome: &Outcome, took: Duration) {
     let rect = Rect::from_min_size(row.min, vec2(MARK, row.height()));
-    let p = theme::palette(ui);
-    match outcome {
-        Outcome::Failed(_) => {
-            ui.painter().circle_filled(rect.center(), 3.5, p.fail);
-        }
-        Outcome::Rows { .. } | Outcome::Changed(_) | Outcome::Done => {
-            let size = (row.height().min(14.0) * 0.8).max(6.0);
-            ui.painter().text(
-                rect.center(),
-                Align2::CENTER_CENTER,
-                icons::CHECK_CIRCLE,
-                FontId::new(size, egui::FontFamily::Name(icons::FAMILY.into())),
-                p.ok,
-            );
-        }
-    }
+    paint_mark(ui, rect, outcome);
     ui.interact(
         rect,
         ui.scope_id().with(("gutter-outcome", line)),
         Sense::hover(),
     )
-    .on_hover_text(outcome.said(took));
+    .on_hover_text(said(outcome, took));
+}
+
+/// The mark of an outcome in `rect`: a check when it succeeded, a dot when it failed; the
+/// gutter's and the history's (R-SQL-62, R-SQL-90).
+pub(in crate::sql) fn paint_mark(ui: &Ui, rect: Rect, outcome: &Outcome) {
+    let p = theme::palette(ui);
+    if outcome.failed() {
+        ui.painter().circle_filled(rect.center(), 3.5, p.fail);
+    } else {
+        let size = (rect.height().min(14.0) * 0.8).max(6.0);
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            icons::CHECK_CIRCLE,
+            FontId::new(size, egui::FontFamily::Name(icons::FAMILY.into())),
+            p.ok,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -251,10 +242,13 @@ mod tests {
         let (outcome, _) = outcomes
             .get("SELECT * FROM kunder")
             .expect("the same statement");
-        assert_eq!(outcome.said(took), "3 rows, more to fetch in 1.50 s");
+        assert_eq!(said(outcome, took), "3 rows, more to fetch in 1.50 s");
         assert!(outcomes.get("SELECT * FROM ordrer").is_none());
         assert_eq!(
-            Outcome::Failed("SQL0204: KUNDER i *LIBL findes ikke.".to_owned()).said(took),
+            said(
+                &Outcome::Failed("SQL0204: KUNDER i *LIBL findes ikke.".to_owned()),
+                took
+            ),
             "SQL0204: KUNDER i *LIBL findes ikke."
         );
     }

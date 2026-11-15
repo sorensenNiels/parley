@@ -10,6 +10,7 @@ mod database;
 mod download;
 pub mod editor;
 pub mod grid;
+mod history;
 pub mod hosting;
 pub mod keys;
 pub mod layout;
@@ -24,7 +25,7 @@ mod upload;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
-use egui::{CentralPanel, Key, Panel, RichText, ScrollArea, TextEdit, Ui};
+use egui::{CentralPanel, Key, Panel, RichText, TextEdit, Ui};
 use parley_core::SessionConfig;
 use parley_core::password::Password;
 use parley_core::sql::helper::HelperFiles;
@@ -71,8 +72,8 @@ pub trait SqlFiles: std::fmt::Debug {
 /// What the SQL window is given by Parley each frame.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Around<'a> {
-    /// The statements run for this session, oldest first (R-SQL-7).
-    pub history: &'a [String],
+    /// The runs of this connection, oldest first (R-SQL-89).
+    pub history: &'a [parley_core::sql::history::Entry],
     /// The file window (R-SQL-8, R-SQL-21); without it, no Export or Open….
     pub files: Option<&'a dyn SqlFiles>,
     /// The snippet folders (R-SQL-24); without them, only the starters.
@@ -226,8 +227,12 @@ pub struct SqlWindow {
     uncommitted: bool,
     confirm: Option<(String, Risk)>,
     closing: Closing,
-    /// Statements run since the last [`SqlWindow::take_ran`], for the history.
-    ran: Vec<String>,
+    /// Runs since the last [`SqlWindow::take_ran`], for the history (R-SQL-89).
+    ran: Vec<parley_core::sql::history::Entry>,
+    /// The History tab's search, filter and selection (R-SQL-90).
+    history_list: history::HistoryList,
+    /// Removals from the history asked since the last [`SqlWindow::take_history_edits`].
+    history_edits: Vec<history::HistoryAction>,
     /// The sign-on, sent once the helper's hello is read; it holds the password until then.
     pending_connect: Option<Request>,
     /// The form for a statement's parameter markers while it is open (R-SQL-40).
@@ -303,6 +308,8 @@ impl SqlWindow {
             confirm: None,
             closing: Closing::Open,
             ran: Vec::new(),
+            history_list: history::HistoryList::default(),
+            history_edits: Vec::new(),
             pending_connect: None,
             database: database::Database::default(),
             system: system::System::default(),
@@ -408,9 +415,14 @@ impl SqlWindow {
         self.scripts.generation()
     }
 
-    /// The statements run since last asked, for the history (R-SQL-7).
-    pub fn take_ran(&mut self) -> Vec<String> {
+    /// The runs since last asked, for the history (R-SQL-89).
+    pub fn take_ran(&mut self) -> Vec<parley_core::sql::history::Entry> {
         std::mem::take(&mut self.ran)
+    }
+
+    /// Remove from history and Clear history, asked since last taken (R-SQL-90, R-SQL-91).
+    pub fn take_history_edits(&mut self) -> Vec<history::HistoryAction> {
+        std::mem::take(&mut self.history_edits)
     }
 
     /// Closes the window, asking first if changes are not committed (R-SQL-5); the session
@@ -797,30 +809,23 @@ impl SqlWindow {
         self.next_statement();
     }
 
-    /// The statements run, newest first; a click puts one back in the editor (R-SQL-85).
-    fn history(&mut self, ui: &mut Ui, history: &[String]) {
-        if history.is_empty() {
-            theme::hint(ui, "Statements you run are listed here.");
-            return;
-        }
-        ScrollArea::vertical()
-            .id_salt("sql-history")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for statement in history.iter().rev() {
-                    let line = statement.split_whitespace().collect::<Vec<_>>().join(" ");
-                    let item = egui::Button::new(RichText::new(line).monospace().small())
-                        .truncate()
-                        .frame_when_inactive(false);
-                    if ui
-                        .add_sized([ui.available_width(), 20.0], item)
-                        .on_hover_text(statement)
-                        .clicked()
-                    {
-                        self.scripts.append(statement);
-                    }
+    /// The History tab (R-SQL-89..91).
+    fn history(&mut self, ui: &mut Ui, entries: &[parley_core::sql::history::Entry]) {
+        for action in self.history_list.show(ui, entries) {
+            match action {
+                history::HistoryAction::Append(sql) => self.scripts.append(&sql),
+                history::HistoryAction::Insert(sql) => self.scripts.insert(&sql),
+                history::HistoryAction::NewTab(sql) => self.scripts.open_new("History", &sql),
+                history::HistoryAction::Run(sql) => self.run_now(&sql),
+                history::HistoryAction::SaveSnippet(sql) => {
+                    self.snippets.save_as(&sql);
+                    self.show_snippets();
                 }
-            });
+                history::HistoryAction::Remove(_) | history::HistoryAction::Clear => {
+                    self.history_edits.push(action);
+                }
+            }
+        }
     }
 
     // ---------------------------------------------------------------- writing and running
@@ -1277,7 +1282,6 @@ impl SqlWindow {
     }
 
     fn on_run(&mut self, statement: &str, event: Event) {
-        self.ran.push(statement.to_owned());
         if text::may_change_job(statement) {
             self.job_stale = true;
         }
@@ -1348,6 +1352,12 @@ impl SqlWindow {
             .take()
             .map(|t| t.elapsed())
             .unwrap_or_default();
+        // R-SQL-89: every run, with how it ended.
+        self.ran.push(parley_core::sql::history::Entry::now(
+            statement,
+            took,
+            outcome.clone(),
+        ));
         self.scripts.outcomes.note(statement, outcome, took);
     }
 
@@ -1507,7 +1517,7 @@ mod tests {
         assert_eq!(view.rows.len(), 2);
         assert_eq!(view.cursor, Some(3), "more to fetch");
         assert_eq!(w.tab, Tab::Results);
-        assert_eq!(w.take_ran(), ["SELECT NAME FROM T"]);
+        assert_eq!(statements(w.take_ran()), ["SELECT NAME FROM T"]);
         assert!(w.waiting.is_none());
     }
 
@@ -1586,7 +1596,7 @@ mod tests {
         let line = w.error_line.as_deref().expect("an error line");
         assert!(line.contains("SQLSTATE 42704"), "{line}");
         assert_eq!(
-            w.take_ran(),
+            statements(w.take_ran()),
             ["SELECT * FROM NOPE"],
             "failed statements are in the history too"
         );
@@ -1686,10 +1696,33 @@ mod tests {
         assert_eq!(editor::byte_at("abc", 9), 3);
     }
 
-    /// The window drawn alone, as in a test of the main window (embedded: kittest has one).
+    /// The statements of `ran`, for tests of what goes into the history.
+    pub(super) fn statements(ran: Vec<parley_core::sql::history::Entry>) -> Vec<String> {
+        ran.into_iter().map(|e| e.statement).collect()
+    }
+
+    /// The window drawn alone, as in a test of the main window (embedded: kittest has one),
+    /// with `history` as statements kept before Phase 19, without time or outcome.
     pub(super) fn drawn(
         w: SqlWindow,
         history: Vec<String>,
+    ) -> egui_kittest::Harness<'static, SqlWindow> {
+        let history = history
+            .into_iter()
+            .map(|statement| parley_core::sql::history::Entry {
+                statement,
+                at: None,
+                took_ms: None,
+                outcome: None,
+            })
+            .collect();
+        drawn_with_history(w, history)
+    }
+
+    /// The window drawn alone with the runs `history` (R-SQL-89).
+    pub(super) fn drawn_with_history(
+        w: SqlWindow,
+        history: Vec<parley_core::sql::history::Entry>,
     ) -> egui_kittest::Harness<'static, SqlWindow> {
         egui_kittest::Harness::builder()
             .with_size(egui::vec2(1100.0, 760.0))
@@ -1742,7 +1775,7 @@ mod tests {
             "Fetch more",
             "Copy all",
             "History",
-            "Fold Libraries",
+            "Fold Explorer",
             "Fold Snippets",
             "Save as snippet…",
         ] {
@@ -1894,19 +1927,19 @@ mod tests {
             .width();
         harness.get_by_label("Hide the side panel").click();
         harness.run();
-        assert!(harness.query_by_label("Fold Libraries").is_none());
+        assert!(harness.query_by_label("Fold Explorer").is_none());
         assert!(harness.state().side_layout().folded, "kept in the settings");
         let wider = harness
             .get_by_label("Editor and results divider")
             .rect()
             .width();
         assert!(wider > wide + 150.0, "{wide} then {wider}");
-        harness.get_by_label("Show Libraries and Snippets").click();
+        harness.get_by_label("Show Explorer and Snippets").click();
         harness.run();
-        harness.get_by_label("Fold Libraries");
+        harness.get_by_label("Fold Explorer");
         harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::B);
         harness.run();
-        assert!(harness.query_by_label("Fold Libraries").is_none(), "Ctrl+B");
+        assert!(harness.query_by_label("Fold Explorer").is_none(), "Ctrl+B");
         harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::B);
         harness.run();
         harness.get_by_label("Hide the side panel");
@@ -1919,38 +1952,39 @@ mod tests {
 
         let mut harness = drawn_with_results(1100.0, layout::ResultsPlace::Below);
         let snippets = harness.get_by_label("Fold Snippets").rect().top();
-        harness.get_by_label("Fold Libraries").click();
+        harness.get_by_label("Fold Explorer").click();
         harness.run();
         let higher = harness.get_by_label("Fold Snippets").rect().top();
         assert!(higher < snippets - 100.0, "{snippets} then {higher}");
         assert!(!harness.state().side_layout().libraries_open);
-        harness.get_by_label("Open Libraries").click();
+        harness.get_by_label("Open Explorer").click();
         harness.run();
         harness.get_by_label("Fold Snippets").click();
         harness.run();
         harness.get_by_label("Open Snippets");
-        harness.get_by_label("Fold Libraries");
+        harness.get_by_label("Fold Explorer");
     }
 
-    /// R-SQL-85: History is a tab beside Results and Messages; a click puts a statement back
-    /// in the editor.
+    /// R-SQL-85: History is a tab beside Results and Messages; R-SQL-91: a click selects a
+    /// statement, Enter adds it to the script.
     #[test]
-    fn the_history_is_a_tab_under_the_editor_r_sql_85() {
+    fn the_history_is_a_tab_under_the_editor_r_sql_85_r_sql_91() {
         use egui_kittest::kittest::Queryable;
 
-        let mut harness = drawn(window(), vec!["SELECT 'æøå' FROM T".to_owned()]);
-        assert!(harness.query_by_label("SELECT 'æøå' FROM T").is_none());
+        let statement = "SELECT 'æøå' FROM T";
+        let mut harness = drawn(window(), vec![statement.to_owned()]);
+        assert!(harness.query_by_label(statement).is_none());
         harness.get_by_label("History").click();
         harness.run();
-        harness.get_by_label("SELECT 'æøå' FROM T").click();
+        harness.get_by_label(statement).click();
         harness.run();
         assert!(
-            harness
-                .state()
-                .scripts
-                .text()
-                .contains("SELECT 'æøå' FROM T")
+            !harness.state().scripts.text().contains(statement),
+            "selected only"
         );
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        assert!(harness.state().scripts.text().contains(statement));
     }
 
     /// R-SQL-49: beside, the editor fills the column: the Run buttons are at its foot, and they
@@ -1996,6 +2030,12 @@ mod tests {
         let mut harness = drawn(w, Vec::new());
         // The spinner keeps repainting while a statement runs.
         harness.run_steps(3);
+        // R-SQL-88: Run shows only while the pointer is on the snippet's line.
+        assert!(harness.query_by_label("Run System status").is_none());
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::Button, "System status")
+            .hover();
+        harness.run_steps(3);
         harness.get_by_label("Run System status").click();
         // The spinner keeps repainting while a statement runs.
         harness.run_steps(3);
@@ -2003,6 +2043,33 @@ mod tests {
             harness.state().error_line.as_deref(),
             Some("Wait for the statement running to end."),
             "the click reached the window, which runs one statement at a time"
+        );
+    }
+
+    /// R-SQL-88: the snippets are groups that fold; a snippet's right-click menu inserts or
+    /// runs it, and a starter, which cannot be changed, has no Edit or Delete.
+    #[test]
+    fn a_snippet_s_menu_inserts_it_and_a_starter_cannot_be_edited_r_sql_88() {
+        use egui_kittest::kittest::Queryable;
+        let mut w = window();
+        w.snippets.query = "system status".to_owned();
+        let mut harness = drawn(w, Vec::new());
+        harness.run_steps(3);
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::Button, "System status")
+            .click_secondary();
+        harness.run_steps(3);
+        assert!(harness.query_by_label("Edit…").is_none(), "a starter");
+        assert!(harness.query_by_label("Delete…").is_none(), "a starter");
+        harness.get_by_label("Insert").click();
+        harness.run_steps(3);
+        assert!(
+            harness
+                .state()
+                .scripts
+                .text()
+                .contains("SYSTEM_STATUS_INFO"),
+            "inserted at the cursor"
         );
     }
 
@@ -2046,7 +2113,7 @@ mod tests {
         w.autocommit = false;
         running(&mut w, "CL: ADDLIBLE MYLIB");
         answer(&mut w, r#"{"id":1,"ok":{"kind":"count","count":0}}"#);
-        assert_eq!(w.take_ran(), ["CL: ADDLIBLE MYLIB"]);
+        assert_eq!(statements(w.take_ran()), ["CL: ADDLIBLE MYLIB"]);
         assert_eq!(
             w.messages.last().map(|(_, m)| m.as_str()),
             Some("CL: ADDLIBLE MYLIB: done")

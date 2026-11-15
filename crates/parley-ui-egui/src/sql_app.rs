@@ -278,11 +278,10 @@ impl ParleySqlUi {
             .settings
             .sql_history
             .get(&name)
-            .cloned()
-            .unwrap_or_default();
+            .map_or(&[][..], Vec::as_slice);
         let keys = sql::keys::SqlKeys::new(&self.settings.sql_keys);
         let around = sql::Around {
-            history: &history,
+            history,
             files: self.files.as_deref(),
             snippets: self.snippets.as_deref(),
             shared: &self.settings.sql_snippets_shared,

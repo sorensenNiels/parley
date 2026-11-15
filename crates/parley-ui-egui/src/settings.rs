@@ -68,7 +68,7 @@ pub struct Settings {
     /// A folder of snippets shared with others, besides the operator's own; empty for none (R-SQL-24).
     pub sql_snippets_shared: String,
     /// The statements run in the SQL window, by saved session, oldest first (R-SQL-7).
-    pub sql_history: std::collections::BTreeMap<String, Vec<String>>,
+    pub sql_history: std::collections::BTreeMap<String, Vec<parley_core::sql::history::Entry>>,
     /// The SQL window's scripts, by saved session (R-SQL-20).
     pub sql_scripts: std::collections::BTreeMap<String, Vec<crate::sql::editor::SavedScript>>,
     /// The libraries pinned in the SQL window's schema browser, by saved session (R-SQL-34):

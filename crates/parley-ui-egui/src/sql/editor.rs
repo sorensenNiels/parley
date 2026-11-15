@@ -14,6 +14,7 @@ use super::layout::TextHeight;
 use crate::{dialog, icons, theme};
 
 mod colour;
+pub(super) use colour::{Marks, coloured};
 mod complete;
 mod editing;
 mod error_mark;
@@ -1349,10 +1350,11 @@ mod tests {
         let tab = harness.get_by_role(egui::accesskit::Role::Tab).rect();
         let format = harness.get_by_label("Format").rect();
         let new = harness.get_by_label("New script").rect();
+        let case = harness.get_by_label("Case").rect();
         let text = harness
             .get_by_role(egui::accesskit::Role::MultilineTextInput)
             .rect();
-        for (name, rect) in [("Format", format), ("New script", new)] {
+        for (name, rect) in [("Format", format), ("Case", case), ("New script", new)] {
             assert!(
                 (rect.center().y - tab.center().y).abs() < 1.0,
                 "{name} {rect:?} on the tab's line {tab:?}"
