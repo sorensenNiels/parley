@@ -93,6 +93,52 @@ fn a_session_negotiates_shows_the_host_screen_and_sends_enter() {
 }
 
 #[test]
+fn a_connection_the_network_breaks_after_it_got_through_is_dropped_r_net_10() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a free local port");
+    let port = listener.local_addr().expect("a local address").port();
+    let host = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().expect("the client connects");
+        // DO TERMINAL-TYPE: the client answers, and the answer is left unread, so closing
+        // the socket resets the connection instead of ending it in order.
+        socket.write_all(&[IAC, 253, 24]).expect("send");
+        thread::sleep(Duration::from_millis(300));
+    });
+    let connection = Connection::open(config(port), || {});
+    host.join().expect("the fake host finishes");
+    wait_for("the reset", || {
+        !matches!(
+            connection.state(),
+            LinkState::Connecting | LinkState::Connected
+        )
+    });
+    assert!(
+        matches!(connection.state(), LinkState::Dropped(_)),
+        "{:?}",
+        connection.state()
+    );
+}
+
+#[test]
+fn a_host_that_ends_the_session_closes_it_in_order_r_net_10() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a free local port");
+    let port = listener.local_addr().expect("a local address").port();
+    let host = thread::spawn(move || {
+        let (socket, _) = listener.accept().expect("the client connects");
+        thread::sleep(Duration::from_millis(100));
+        drop(socket);
+    });
+    let connection = Connection::open(config(port), || {});
+    host.join().expect("the fake host finishes");
+    wait_for("the end", || {
+        matches!(connection.state(), LinkState::Closed(_))
+    });
+    assert_eq!(
+        connection.state(),
+        LinkState::Closed("The host closed the connection.".into())
+    );
+}
+
+#[test]
 fn a_refused_connection_says_where_it_tried() {
     // Bind and drop a listener, so the port is very likely closed.
     let port = TcpListener::bind("127.0.0.1:0")

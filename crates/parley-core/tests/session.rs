@@ -430,6 +430,91 @@ fn restore_data_from_elsewhere_is_reported_not_applied() {
     assert_eq!(row_text(&s, 1).trim(), "Sign On");
 }
 
+/// Save Partial Screen of rows 5-10, columns 10-49, then a pop-up written over the screen.
+fn save_partial_then_popup() -> Vec<u8> {
+    let mut data = vec![ESC, 0x03, 0x00, 5, 10, 6, 40];
+    data.extend([ESC, 0x11, 0x00, 0x00, SBA, 1, 2]);
+    data.extend(ebcdic("Popup"));
+    data
+}
+
+#[test]
+fn save_partial_screen_replies_after_the_rest_of_the_record_with_restore_partial_data_r_ds_6() {
+    let mut s = signed_on();
+    s.receive(&host(&save_partial_then_popup()));
+    assert_eq!(s.notice(), None);
+    assert!(row_text(&s, 1).starts_with(" Popup"), "the record went on");
+    let (opcode, _, data) = sent_one(&mut s);
+    assert_eq!(opcode, Opcode::SaveScreen);
+    // ESC, Restore Partial Screen, a length counting itself, then Parley's id (D7).
+    assert_eq!(&data[..6], &[ESC, 0x13, 0x00, 0x06, 0xD7, 0xE8]);
+    assert_eq!(data.len(), 8);
+}
+
+#[test]
+fn restore_partial_screen_puts_the_screen_back_and_goes_on_with_the_record_r_ds_6() {
+    let mut s = signed_on();
+    s.receive(&host(&save_partial_then_popup()));
+    let (_, _, saved) = sent_one(&mut s);
+    // The host echoes the data, then reads at once in the same record.
+    let mut restore = saved.clone();
+    restore.extend([ESC, 0x72]);
+    s.receive(&host(&restore));
+    assert_eq!(s.notice(), None);
+    assert_eq!(row_text(&s, 1).trim(), "Sign On");
+    assert_eq!(s.screen().fields().len(), 2);
+    assert_eq!(s.keyboard(), KeyboardState::Unlocked);
+    assert_eq!(
+        sent(&mut s).len(),
+        1,
+        "the Read Immediate after it was answered"
+    );
+}
+
+#[test]
+fn restore_partial_data_parley_did_not_make_or_cut_short_is_reported_r_ds_6() {
+    let mut s = signed_on();
+    s.receive(&host(&[ESC, 0x13, 0x00, 0x06, 1, 2, 3, 4]));
+    assert!(
+        s.notice().is_some_and(|n| n.contains("did not save")),
+        "{:?}",
+        s.notice()
+    );
+    let mut s = signed_on();
+    s.receive(&host(&[ESC, 0x13, 0x00, 0x20, 0xD7, 0xE8]));
+    assert!(s.notice().is_some(), "a length past the record");
+    let mut s = signed_on();
+    s.receive(&host(&[ESC, 0x13, 0x00]));
+    assert!(s.notice().is_some(), "a truncated length");
+    assert_eq!(row_text(&s, 1).trim(), "Sign On");
+}
+
+#[test]
+fn the_query_reply_claims_read_mdt_immediate_alternate_r_ds_7() {
+    let mut s = session();
+    s.receive(&host(&[ESC, 0xF3, 0x00, 0x05, 0xD9, 0x70, 0x00]));
+    assert_eq!(
+        sent_one(&mut s).2[49],
+        0x01,
+        "device capability byte 0, bit 7"
+    );
+}
+
+#[test]
+fn read_mdt_immediate_alternate_answers_at_once_with_cursor_aid_00_and_modified_fields_r_ds_7() {
+    let mut s = signed_on();
+    assert_eq!(s.screen().row_column(s.screen().cursor), (5, 52));
+    s.receive(&host(&[ESC, 0x83]));
+    assert_eq!(sent_one(&mut s).2, [6, 53, 0x00], "nothing modified");
+
+    keys(&mut s, "ab");
+    s.receive(&host(&[ESC, 0x83]));
+    let mut expected = vec![6, 55, 0x00, SBA, 6, 53];
+    expected.extend(ebcdic("AB")); // trailing nulls left out
+    assert_eq!(sent_one(&mut s).2, expected);
+    assert_eq!(s.keyboard(), KeyboardState::Unlocked);
+}
+
 #[test]
 fn roll_up_moves_rows_and_blanks_the_bottom() {
     let mut s = session();
@@ -472,7 +557,8 @@ fn the_query_reply_puts_the_screen_sizes_in_device_capability_byte_1_r_ds_5() {
     standard.receive(&query);
     let (_, _, data) = sent_one(&mut standard);
     assert_eq!(&data[44..46], &[0x01, 0x00], "256 input fields");
-    assert_eq!(&data[49..51], &[0x00, 0x11], "24×80 and colour");
+    // Byte 0 bit 7: Read MDT Immediate Alternate (R-DS-7).
+    assert_eq!(&data[49..51], &[0x01, 0x11], "24×80 and colour");
 
     let mut wide = Session::new(SessionConfig {
         screen_size: ScreenSize::Wide,
@@ -482,7 +568,7 @@ fn the_query_reply_puts_the_screen_sizes_in_device_capability_byte_1_r_ds_5() {
     let (_, _, data) = sent_one(&mut wide);
     assert_eq!(data.len(), 61);
     assert_eq!(&data[30..37], ebcdic("3477FC ").as_slice());
-    assert_eq!(&data[49..51], &[0x00, 0x31], "27×132, 24×80 and colour");
+    assert_eq!(&data[49..51], &[0x01, 0x31], "27×132, 24×80 and colour");
 }
 
 /// R-DS-5: SC30-3533-02, "Start of Header Order": a length of 0 is a parameter error.
@@ -686,6 +772,25 @@ fn recording_keeps_text_keys_and_a_wait_after_enter_but_not_the_password_r_key_3
     );
     assert!(!recorded.to_text().contains("secret"));
     assert_eq!(s.macro_state(), MacroState::Off);
+}
+
+#[test]
+fn a_hotspot_s_move_to_its_option_field_is_recorded_r_ui_20() {
+    let mut s = signed_on();
+    s.start_recording();
+    s.hotspot_keys(&[
+        Key::MoveTo { row: 4, column: 9 },
+        Key::EraseEof,
+        Key::Char('2'),
+    ]);
+    assert_eq!(
+        s.stop_recording().expect("was recording").steps,
+        [
+            Step::Key(Key::MoveTo { row: 4, column: 9 }),
+            Step::Key(Key::EraseEof),
+            Step::Text("2".into())
+        ]
+    );
 }
 
 #[test]

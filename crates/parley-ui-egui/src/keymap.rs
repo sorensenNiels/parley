@@ -185,8 +185,13 @@ fn key_label(key: PcKey) -> &'static str {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Function {
     Key(Key),
+    /// Copy the selection, or the whole screen (R-UI-1, R-UI-22).
     CopyScreen,
+    /// Copy the selection, or the whole screen, as a table (R-UI-22).
+    CopyTable,
     Paste,
+    /// Open the find bar (R-UI-21).
+    Find,
     /// Start recording a macro, or stop the recording (R-KEY-3).
     RecordMacro,
     /// Run the macro of this name (R-KEY-4).
@@ -239,7 +244,9 @@ impl Function {
         match self {
             Self::Key(key) => key_name_of(*key).unwrap_or_default(),
             Self::CopyScreen => "copy".to_owned(),
+            Self::CopyTable => "copy-table".to_owned(),
             Self::Paste => "paste".to_owned(),
+            Self::Find => "find".to_owned(),
             Self::RecordMacro => "record-macro".to_owned(),
             Self::RunMacro(name) => format!("{RUN_MACRO}{name}"),
             Self::Shortcuts => "shortcuts".to_owned(),
@@ -250,7 +257,9 @@ impl Function {
     pub fn from_id(id: &str) -> Option<Self> {
         Some(match id {
             "copy" => Self::CopyScreen,
+            "copy-table" => Self::CopyTable,
             "paste" => Self::Paste,
+            "find" => Self::Find,
             "record-macro" => Self::RecordMacro,
             "shortcuts" => Self::Shortcuts,
             "sql" => Self::Sql,
@@ -274,8 +283,10 @@ impl Function {
                     .find(|(k, _)| k == key)
                     .map_or_else(String::new, |(_, name)| (*name).to_owned())
             }
-            Self::CopyScreen => "Copy the screen".to_owned(),
+            Self::CopyScreen => "Copy the selection or the screen".to_owned(),
+            Self::CopyTable => "Copy as a table".to_owned(),
             Self::Paste => "Paste into fields".to_owned(),
+            Self::Find => "Find on the screen".to_owned(),
             Self::RecordMacro => "Record macro, stop recording".to_owned(),
             Self::RunMacro(name) => format!("Run macro {name}"),
             Self::Shortcuts => "Keyboard shortcuts".to_owned(),
@@ -292,7 +303,13 @@ impl Function {
             (Self::Paste, false) => Some("Ctrl+V"),
             (Self::Paste, true) => Some("Cmd+V"),
             (
-                Self::Key(_) | Self::RecordMacro | Self::RunMacro(_) | Self::Shortcuts | Self::Sql,
+                Self::Key(_)
+                | Self::CopyTable
+                | Self::Find
+                | Self::RecordMacro
+                | Self::RunMacro(_)
+                | Self::Shortcuts
+                | Self::Sql,
                 _,
             ) => None,
         }
@@ -316,7 +333,13 @@ pub fn groups(macros: Option<&[String]>, sql: bool) -> Vec<(&'static str, Vec<Fu
         ("Fields and cursor", keys(&FIELD_KEYS)),
         (
             "Parley",
-            vec![Function::CopyScreen, Function::Paste, Function::Shortcuts],
+            vec![
+                Function::CopyScreen,
+                Function::CopyTable,
+                Function::Paste,
+                Function::Find,
+                Function::Shortcuts,
+            ],
         ),
     ];
     if sql && let Some((_, parley)) = groups.last_mut() {
@@ -370,6 +393,8 @@ static BUILT_IN: LazyLock<KeyMap> = LazyLock::new(|| {
         ("End", "end"),
         ("Ctrl+End", "erase-eof"),
         ("Ctrl+Slash", "shortcuts"),
+        ("Ctrl+F", "find"),
+        ("Ctrl+T", "copy-table"),
         ("ArrowUp", "up"),
         ("ArrowDown", "down"),
         ("ArrowLeft", "left"),

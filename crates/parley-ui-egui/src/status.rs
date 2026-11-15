@@ -26,6 +26,8 @@ pub struct Status<'a> {
     pub macros: bool,
     /// The last session is a saved one, so it can be connected to again.
     pub can_connect_again: bool,
+    /// How long until Parley connects again by itself, while it waits to (R-NET-10).
+    pub reconnect_in: Option<std::time::Duration>,
     /// The keyboard map in use and every map there is, Default first (R-KEY-2).
     pub map: &'a str,
     /// The keyboard map in use itself, for the keys the Keys menu shows.
@@ -43,6 +45,8 @@ pub enum StatusAction {
     StopRecording,
     /// Connect again to the last session.
     ConnectAgain,
+    /// Stop waiting to connect again by itself (R-NET-10).
+    CancelReconnect,
     /// Use this keyboard map for the session.
     UseMap(String),
     /// A 5250 key from the Keys menu (R-UI-16).
@@ -166,6 +170,12 @@ fn left(ui: &mut Ui, status: &Status<'_>) -> Option<StatusAction> {
     let mut action = None;
     let Some(session) = status.session else {
         theme::badge(ui, "Offline", p.muted);
+        if let Some(left) = status.reconnect_in {
+            ui.label(RichText::new(crate::reconnect::countdown(left)).color(p.muted));
+            if ui.small_button("Cancel").clicked() {
+                action = Some(StatusAction::CancelReconnect);
+            }
+        }
         if let Some(note) = status.note {
             ui.add(egui::Label::new(RichText::new(note).color(p.muted)).truncate());
         }

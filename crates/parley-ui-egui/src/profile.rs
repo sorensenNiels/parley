@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 /// One saved session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent options of a saved session, each a switch in the session dialog"
+)]
 pub struct Profile {
     pub name: String,
     pub config: SessionConfig,
@@ -21,6 +25,10 @@ pub struct Profile {
     pub run_macro: String,
     /// The keyboard map's name (R-KEY-2); empty, or a map since deleted, for Default.
     pub keyboard_map: String,
+    /// Connect again by itself when the network drops the connection (R-NET-10).
+    pub reconnect: bool,
+    /// The 5250 screen's colours; `None` for the settings' (R-UI-23).
+    pub screen_colors: Option<crate::terminal::Scheme>,
 }
 
 impl Default for Profile {
@@ -38,6 +46,8 @@ impl Default for Profile {
             connect_on_start: false,
             run_macro: String::new(),
             keyboard_map: String::new(),
+            reconnect: false,
+            screen_colors: None,
         }
     }
 }

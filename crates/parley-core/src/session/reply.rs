@@ -22,7 +22,14 @@ impl Session {
             data.extend([one_based(row), one_based(column), aid.code()]);
         }
         let any_modified = self.screen.fields().iter().any(|f| f.modified);
-        let with_address = matches!(kind, ReadKind::MdtFields | ReadKind::MdtFieldsAlternate);
+        let with_address = matches!(
+            kind,
+            ReadKind::MdtFields | ReadKind::MdtFieldsAlternate | ReadKind::ImmediateAlternate
+        );
+        let keep_nulls = matches!(
+            kind,
+            ReadKind::MdtFieldsAlternate | ReadKind::ImmediateAlternate
+        );
         for field in self.screen.fields() {
             let include = if with_address {
                 field.modified
@@ -36,7 +43,7 @@ impl Session {
                 let (row, column) = self.screen.row_column(field.start);
                 data.extend([SBA, one_based(row), one_based(column)]);
             }
-            data.extend(self.field_data(field, kind != ReadKind::MdtFieldsAlternate));
+            data.extend(self.field_data(field, !keep_nulls));
         }
         self.send_record(0, Opcode::PutGet, &data);
     }
@@ -73,8 +80,8 @@ impl Session {
 
     /// The reply to a 5250 Query (5494 Functions Reference SC30-3533-02, "5250 QUERY Command",
     /// tables 12-38 and 12-39): what kind of display this is. Parley reports a plain colour 5250
-    /// emulator without GUI support (IDEA-5) and claims none of the optional commands in
-    /// device capability byte 0.
+    /// emulator without GUI support (IDEA-5) that claims only Read MDT Immediate Alternate
+    /// (R-DS-7) in device capability byte 0.
     pub(super) fn send_query_reply(&mut self) {
         // The model is 3 bytes (table 12-39). "FC " for the 3477 is left-aligned and blank-padded
         // as tn5250 sends it; the manual gives no example of a model with letters.
@@ -113,9 +120,11 @@ impl Session {
             0x01,
             0x00, // maximum number of input fields: 256
             0x00,
-            0x00,           // control unit customisation
-            0x00,           // reserved
-            0x00,           // device capabilities byte 0: none of the optional commands
+            0x00, // control unit customisation
+            0x00, // reserved
+            // Device capabilities byte 0 (SC30-3533-04 §15.27.2): only bit 7, Read MDT
+            // Immediate Alternate (R-DS-7); Parley claims none of the other optional commands.
+            0x01,
             sizes | COLOUR, // byte 1: screen sizes and colour
         ]);
         data.resize(61, 0x00); // device capability bytes 2-11

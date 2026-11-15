@@ -1,7 +1,7 @@
 //! Parley's look, shared with Tortuga (D12): fonts, colours, the global egui style, and small
 //! building blocks (section labels, hints, cards, filled buttons, switches, segmented choices).
 //! Every colour has a light and a dark variant; egui follows the system theme unless the
-//! settings say otherwise. The 5250 screen keeps its own colours (`terminal::color`).
+//! settings say otherwise. The 5250 screen keeps its own colours (`terminal::Palette`).
 //!
 //! [`install`] runs once per `egui::Context` before drawing (the first frame of
 //! [`crate::ParleyUi::ui`]).

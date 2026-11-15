@@ -14,64 +14,7 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
-- **R-NF-2** (2026-11-15): both commands after installing. Built; **automated** (`make test`): `--sql` first and a
-  start by the name `parley-sql` hand over to Parley SQL, anything else is Parley. **Checked on Linux under WSL:**
-  the `.deb` holds `/usr/bin/parley`, `/usr/bin/parley-sql` and both menu entries; the AppImage answers
-  `--version`, `--sql --version` and, through a link named `parley-sql`, `--version` as Parley SQL. **Still to
-  check:** the `.msi` (PATH after installing and its removal on uninstall, the Start menu shortcut; the WiX fragment
-  has not been built yet) and the macOS links, from a release build (Actions → Release → Run workflow).
-- **R-KEY-5** (2026-11-12): editing a macro in Parley, built. **Automated** (`make test`): in kittest, Edit opens the
-  file's text, a change is saved, text that does not read names its line and cannot be saved, Cancel leaves the file,
-  New macro… saves a macro written by hand, the editor keeps its place; in parley-app the text is written and read
-  back with its comments. **Seen** in a `--screenshot` of the editor (WSL2, dark). **Left:** the owner edits and adds
-  a macro on Windows, macOS and Linux, then move R-KEY-5 to REQUIREMENTS.md.
-
-- **R-KEY-6** (2026-11-12): Stop beside REC in the status bar, built. **Automated** (`make test`): in kittest, with a
-  session connected to a local port, Stop is there only while recording, clicking it ends the recording and asks for
-  the name, and the boxes beside it keep their place. **Left:** the owner records a macro and stops it from the
-  status bar, in light and dark, then move R-KEY-6 to REQUIREMENTS.md.
-
-- **R-KEY-7** (2026-11-12): importing and exporting macro files through the system's file window (rfd, GTK 3 on
-  Linux as Tortuga), built. **Automated** (`make test`): in parley-app, files are copied in as they are (comments,
-  `æøå` in the name), a file that does not read is refused with its line, a name already taken is refused, export
-  copies the file and a missing macro is an error; in kittest, Import… and Export… report what happened and the list
-  shows an imported macro at once; Open folder is gone. `cargo deny` passes with the GTK crates. **Not seen:** the file window itself (it
-  needs a click in the running app). **Left:** the owner imports and exports macros on Windows, macOS, Linux and
-  WSL, then move R-KEY-7 to REQUIREMENTS.md.
-
-- **R-KEY-8** (2026-11-13): a key typed in a protected area is ignored, with no error to Reset (D18), built.
-  **Automated** (`make test`): in parley-core, a character (also `æ`), Delete, Backspace, Erase EOF and Field Exit at a
-  protected position leave the keyboard unlocked and the screen unchanged, and Tab then goes to the next input field.
-  **Left:** the owner types outside a field on a real screen on each OS.
-
-- **R-UI-13** (2026-11-12): icons from the bundled Phosphor font (D17), built. **Automated** (`make test`): every
-  icon in `icons::ALL` is in the icon font, which is the only font in its family and stays out of the text families
-  (Inter has glyphs of its own at some of the same codepoints). **Seen** in `--screenshot`s on PUB400's sign-on screen
-  (WSL2, light and dark). **Left:** the owner checks the menus, the Keys menu and the status bar on Windows, macOS and Linux.
-
-- **R-UI-14** (2026-11-12): the interactive status bar, built. **Automated** (`make test`): the state, TLS, keyboard
-  map, code page, size and cursor show, INS only in insert mode; a narrow bar drops size and code page but keeps TLS
-  and the cursor; the clock times the host from an AID key to the unlocked keyboard; the lock is noticed in the frame Enter
-  goes down, the hourglass has its own slot beside the check, which stays, and Keys does not move; the REC pill and Stop keep the
-  state pill in place (R-KEY-6); choosing a map in the chip saves it to the session. **Seen** in `--screenshot`s (WSL2,
-  light and dark: Ready, 125 ms, 24×80, CCSID 37, Default, 5, 25). **Left:** Connect again after a disconnect, the map
-  menu and the hovers, checked by the owner in the running app on each OS.
-
-- **R-UI-15** (2026-11-12): one header with the session pill, built. **Automated** (`make test`): menus and Help are
-  there before connecting; the pill shows host:port and its menu disconnects; Connect to another session while
-  connected closes the open one first. **Seen** in `--screenshot`s (WSL2, light and dark). **Left:** the owner opens
-  the menus (icons, keys) and switches sessions from the pill on each OS.
-
-- **R-UI-16** (2026-11-12, changed 2026-11-13): the 5250 keys in a Keys menu in the status bar, built. **Automated**
-  (`make test`): Attention and F15 are sent from the menu, the menu lists System Request and F24 while connected, and
-  there is no Keys button before connecting. **Seen** in a `--screenshot` (WSL2, light): Ready, Keys, then the chips.
-  **Not seen:** the open menu. **Left:** the owner uses the menu on each OS.
-
-- **R-UI-17** (2026-11-12): the keyboard shortcut sheet, built. **Automated** (`make test`): the Default map's keys
-  under Settings' headings, Ctrl+/ opens it from the screen and it stays open the next frame, Esc closes it (not on
-  the frame it opens), both close buttons, Change keys… opens Settings ▸ Keyboard, the filter, and the dialog keeps
-  its place. **Not seen:** the sheet itself in a screenshot. **Left:** the owner opens it with Ctrl+/ (also on a
-  Danish keyboard, where / is Shift+7) on each OS.
+Nothing at the moment.
 
 ## Implemented
 
@@ -179,3 +122,95 @@ gives them Default; the session dialog chooses the map; the Keyboard page keeps 
 session on a sign-on screen sends nothing until a key; a macro's `password` step always asks; the session dialog
 asks for no user or password; `Password`'s `Debug` hides it. The RFC 4777 code and the `des`, `sha1` and
 `getrandom` dependencies are gone. **Verified** by the owner in the running app on Windows, macOS and Linux (2026-11-12).
+
+### Phase 3 (the rest) and Phase 4: a modern look (2026-11-15) — R-KEY-5..8, R-UI-13..17, R-NF-2
+
+Verified by the owner in the running app on Windows, macOS, Linux and Linux under WSL (2026-11-15), including
+R-NF-2's `.msi` (PATH and Start menu) and the macOS links.
+
+- **R-NF-2** (2026-11-15): both commands after installing. Built; **automated** (`make test`): `--sql` first and a
+  start by the name `parley-sql` hand over to Parley SQL, anything else is Parley. **Checked on Linux under WSL:**
+  the `.deb` holds `/usr/bin/parley`, `/usr/bin/parley-sql` and both menu entries; the AppImage answers
+  `--version`, `--sql --version` and, through a link named `parley-sql`, `--version` as Parley SQL.
+- **R-KEY-5** (2026-11-12): editing a macro in Parley. **Automated** (`make test`): in kittest, Edit opens the
+  file's text, a change is saved, text that does not read names its line and cannot be saved, Cancel leaves the file,
+  New macro… saves a macro written by hand, the editor keeps its place; in parley-app the text is written and read
+  back with its comments. **Seen** in a `--screenshot` of the editor (WSL2, dark).
+
+- **R-KEY-6** (2026-11-12): Stop beside REC in the status bar. **Automated** (`make test`): in kittest, with a
+  session connected to a local port, Stop is there only while recording, clicking it ends the recording and asks for
+  the name, and the boxes beside it keep their place.
+
+- **R-KEY-7** (2026-11-12): importing and exporting macro files through the system's file window (rfd, GTK 3 on
+  Linux as Tortuga). **Automated** (`make test`): in parley-app, files are copied in as they are (comments,
+  `æøå` in the name), a file that does not read is refused with its line, a name already taken is refused, export
+  copies the file and a missing macro is an error; in kittest, Import… and Export… report what happened and the list
+  shows an imported macro at once; Open folder is gone. `cargo deny` passes with the GTK crates. 
+
+- **R-KEY-8** (2026-11-13): a key typed in a protected area is ignored, with no error to Reset (D18).
+  **Automated** (`make test`): in parley-core, a character (also `æ`), Delete, Backspace, Erase EOF and Field Exit at a
+  protected position leave the keyboard unlocked and the screen unchanged, and Tab then goes to the next input field.
+
+- **R-UI-13** (2026-11-12): icons from the bundled Phosphor font (D17). **Automated** (`make test`): every
+  icon in `icons::ALL` is in the icon font, which is the only font in its family and stays out of the text families
+  (Inter has glyphs of its own at some of the same codepoints). **Seen** in `--screenshot`s on PUB400's sign-on screen
+  (WSL2, light and dark).
+
+- **R-UI-14** (2026-11-12): the interactive status bar. **Automated** (`make test`): the state, TLS, keyboard
+  map, code page, size and cursor show, INS only in insert mode; a narrow bar drops size and code page but keeps TLS
+  and the cursor; the clock times the host from an AID key to the unlocked keyboard; the lock is noticed in the frame Enter
+  goes down, the hourglass has its own slot beside the check, which stays, and Keys does not move; the REC pill and Stop keep the
+  state pill in place (R-KEY-6); choosing a map in the chip saves it to the session. **Seen** in `--screenshot`s (WSL2,
+  light and dark: Ready, 125 ms, 24×80, CCSID 37, Default, 5, 25).
+
+- **R-UI-15** (2026-11-12): one header with the session pill. **Automated** (`make test`): menus and Help are
+  there before connecting; the pill shows host:port and its menu disconnects; Connect to another session while
+  connected closes the open one first. **Seen** in `--screenshot`s (WSL2, light and dark).
+
+- **R-UI-16** (2026-11-12, changed 2026-11-13): the 5250 keys in a Keys menu in the status bar. **Automated**
+  (`make test`): Attention and F15 are sent from the menu, the menu lists System Request and F24 while connected, and
+  there is no Keys button before connecting. **Seen** in a `--screenshot` (WSL2, light): Ready, Keys, then the chips.
+
+
+- **R-UI-17** (2026-11-12): the keyboard shortcut sheet. **Automated** (`make test`): the Default map's keys
+  under Settings' headings, Ctrl+/ opens it from the screen and it stays open the next frame, Esc closes it (not on
+  the frame it opens), both close buttons, Change keys… opens Settings ▸ Keyboard, the filter, and the dialog keeps
+  its place.
+
+### Phase 20: everyday screen work (2026-11-15) — R-UI-20..23, R-NET-10
+
+Checked by the owner in the running app (2026-11-15); `make verify` on Linux under WSL.
+
+- **R-UI-20** hotspots. **Automated**: in parley-core, `F3=Exit`-style legends (labels of several words, blanks
+  around `=`, F25 and text inside words refused), options (`2=Change`), `More...`/`More…`/`Bottom`/a lone `+` at the
+  end of a row, URLs (`æøå` in them), input fields never hotspots; an option goes into the field on the cursor's
+  row, else the first after the legend, else nowhere; a recorded option keeps its `move`. In kittest: a click on
+  F3=Exit sends F3, on an option types it without Enter, on a URL opens it, a hand under the pointer, a click beside
+  still moves the cursor. **Against PUB400.COM** (probe): the sign-on screen's two URLs are its only hotspots.
+- **R-UI-21** find on the screen. **Automated**: case ignored, accents not, no overlaps, nothing across rows; in
+  kittest Ctrl+F opens the bar, Enter and Shift+Enter step with the keyboard kept, "No matches", Esc and 🗙 close,
+  Edit ▸ Find… opens it focused.
+- **R-UI-22** select and copy, also as a table. **Automated**: a rectangle as lines (trimmed, cut at the screen edge),
+  as a table split at blank columns (one blank column only at a field attribute), blank rows left out; in kittest a
+  drag selects without moving the cursor and Copy copies it, the whole screen without one, a key, a click or a new
+  screen drops it, Ctrl+T copies a table. Copy as table is Ctrl+T, not Ctrl+Shift+C (a map cannot tell that from
+  Ctrl+C, R-KEY-2); keyboard maps copied before this version do not have Find and Copy as table until bound.
+- **R-UI-23** colour schemes. **Automated**: every Light colour reads on its background (WCAG 4.5:1), Custom starts
+  as Classic; in kittest Settings ▸ Terminal changes the screen at once and Cancel puts it back, Custom's colour
+  buttons keep the dialog in place, a session's scheme wins over the settings', the session dialog saves one.
+- **R-NET-10** reconnect when the connection drops. **Automated**: in parley-core a reset after connecting is
+  `Dropped`, a host closing in order is `Closed`; the waits 2, 4 … 60 s; in kittest (local sockets) a dropped
+  connection counts down and connects again, a failed try waits longer, Cancel stops it, without the setting it
+  stays offline, the session dialog turns it on.
+
+### Phase 21: protocol gaps (2026-11-15) — R-DS-6, R-DS-7
+
+- **R-DS-6, R-DS-7** (2026-11-15): Save/Restore Partial Screen and Read MDT Immediate Alternate, built against
+  SC30-3533-04 §15.20, §15.22, §15.24 and RFC 1205 §5.3. **Automated** (`make test`, `tests/session.rs`): the save
+  reply (opcode Save Screen, ESC X'13', a length of 6, Parley's id) comes after the rest of the record; Restore
+  Partial puts back the screen, its fields and unlocked keyboard and the record goes on (a Read Immediate after it is
+  answered); foreign data, a length past the record and a truncated length are reported; X'83' answers at once with
+  cursor, AID X'00' and only modified fields after SBA, trailing nulls left out; the query reply sets byte 0 bit 7.
+  **Where the sources differ:** the manual says X'83' is "the same as READ IMMEDIATE" (no cursor or AID); RFC 1205
+  says AID X'00' after the cursor, which Parley follows. **Not checked against a real IBM i** (the test profile could
+  not sign on); marked done by the owner (2026-11-15).

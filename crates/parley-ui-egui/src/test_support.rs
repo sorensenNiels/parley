@@ -29,11 +29,27 @@ pub fn waiting_session() -> Session {
     session
 }
 
+/// Like [`waiting_session`], with `text` at row 1, column 1 instead of "Hello".
+pub fn session_showing(text: &str) -> Session {
+    let mut session = Session::new(SessionConfig::default());
+    session.receive(&screen_record(text));
+    session
+}
+
 /// The host's record behind [`waiting_session`]: the screen, then a read that unlocks the
 /// keyboard.
 pub fn waiting_screen() -> Vec<u8> {
+    screen_record("Hello")
+}
+
+/// The host's record behind [`session_showing`].
+pub fn screen_record_showing(text: &str) -> Vec<u8> {
+    screen_record(text)
+}
+
+fn screen_record(text: &str) -> Vec<u8> {
     let mut data = vec![0x04, 0x40, 0x04, 0x11, 0x00, 0x00, 0x11, 1, 1];
-    data.extend("Hello".chars().filter_map(|c| CodePage::Ccsid37.to_byte(c)));
+    data.extend(text.chars().filter_map(|c| CodePage::Ccsid37.to_byte(c)));
     data.extend([
         0x11, 2, 1, 0x1D, 0x40, 0x00, 0x24, 0x00, 0x0A, 0x04, 0x52, 0x00, 0x00,
     ]);

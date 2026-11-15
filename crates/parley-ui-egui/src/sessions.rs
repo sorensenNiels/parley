@@ -8,6 +8,7 @@ use parley_core::{CodePage, ScreenSize, SessionConfig};
 use crate::keymap::{DEFAULT_MAP, KeyMap};
 use crate::macros::Macros;
 use crate::profile::Profile;
+use crate::terminal::Scheme;
 use crate::{dialog, theme};
 
 const HELP: &str = "\
@@ -16,9 +17,13 @@ Host: the IBM i's name or IP address. TLS encrypts the connection (port 992).
 Device name: the display device to use; empty lets the IBM i make one up (QPADEVxxxx).
 
 Keyboard map: which PC keys do what; make your own in Settings, Keyboard.
+5250 colours: the screen's colours for this session, so production can look different from \
+test; As in settings uses the colours chosen in Settings, Terminal.
 
 Exit when the session ends: close Parley when the IBM i ends the session (sign-off).
 Confirm exit: ask before closing Parley while connected.
+Reconnect when the connection drops: when the network fails (not when the IBM i ends the \
+session), connect again after 2, 4, 8 … up to 60 seconds; the session's macro runs again.
 Send keep-alive: send a telnet no-operation after a minute without traffic, so firewalls \
 keep an idle connection open.
 Connect on program start: connect to this session when Parley starts.
@@ -156,12 +161,18 @@ impl Editor {
     /// `macros` is `None` while the Macros add-on is off: no Run macro then (R-ADD-2).
     fn options(&mut self, ui: &mut Ui, macros: Option<&Macros>, maps: &[KeyMap]) {
         keyboard_map(ui, &mut self.draft.keyboard_map, maps);
+        screen_colors(ui, &mut self.draft.screen_colors);
         if let Some(macros) = macros {
             self.run_macro(ui, macros);
         }
         let profile = &mut self.draft;
         theme::switch_row(ui, "Exit when the session ends", &mut profile.exit_on_close);
         theme::switch_row(ui, "Confirm exit", &mut profile.confirm_exit);
+        theme::switch_row(
+            ui,
+            "Reconnect when the connection drops",
+            &mut profile.reconnect,
+        );
         theme::switch_row(ui, "Send keep-alive", &mut profile.config.keep_alive);
         theme::switch_row(
             ui,
@@ -385,6 +396,25 @@ fn connection_fields(ui: &mut Ui, config: &mut SessionConfig) {
             .labelled_by(label.id);
             ui.end_row();
         });
+}
+
+/// The 5250 screen's colours for the session (R-UI-23); `None` uses the settings'.
+fn screen_colors(ui: &mut Ui, chosen: &mut Option<Scheme>) {
+    const AS_IN_SETTINGS: &str = "As in settings";
+    ui.horizontal(|ui| {
+        let label = ui.label("5250 colours");
+        ComboBox::from_id_salt("screen_colors")
+            .selected_text(chosen.map_or(AS_IN_SETTINGS, Scheme::name))
+            .width(180.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(chosen, None, AS_IN_SETTINGS);
+                for (scheme, name) in Scheme::ALL {
+                    ui.selectable_value(chosen, Some(scheme), name);
+                }
+            })
+            .response
+            .labelled_by(label.id);
+    });
 }
 
 /// The keyboard map the session uses (R-KEY-2): Default or one of the operator's. A map

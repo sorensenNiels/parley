@@ -8,7 +8,9 @@
 //! ```
 //!
 //! `--macro FILE` plays a macro file (R-KEY-4) on the first screen and prints the screen it
-//! ends on.
+//! ends on. A `password` step gets the password from the file `PARLEY_PASSWORD_FILE` names: the
+//! owner's test profile for Claude's checks (D22); the file is never printed. Without it the
+//! step gives up.
 
 #![expect(
     clippy::print_stdout,
@@ -21,6 +23,7 @@ use std::time::{Duration, Instant};
 
 use parley_core::macros::Macro;
 use parley_core::net::{Connection, LinkState};
+use parley_core::password::Password;
 use parley_core::{Aid, CodePage, Key, KeyboardState, MacroState, ScreenSize, SessionConfig};
 
 fn main() {
@@ -89,12 +92,33 @@ fn play(connection: &Connection, file: &str) {
     };
     connection.session().play(file, steps);
     let start = Instant::now();
-    while connection.session().macro_state() != MacroState::Off
-        && start.elapsed() < Duration::from_secs(60)
-    {
+    loop {
+        let state = connection.session().macro_state();
+        if state == MacroState::Off || start.elapsed() > Duration::from_secs(60) {
+            break;
+        }
+        if state == MacroState::NeedsPassword {
+            let password = password_from_file();
+            connection.session().give_macro_password(password.as_ref());
+        }
         thread::sleep(Duration::from_millis(50));
     }
     print_when_ready(connection, &format!("after macro {file}"));
+}
+
+/// The test profile's password from the file `PARLEY_PASSWORD_FILE` names (D22); `None` stops
+/// the macro.
+fn password_from_file() -> Option<Password> {
+    let file = std::env::var_os("PARLEY_PASSWORD_FILE")?;
+    match std::fs::read_to_string(&file) {
+        Ok(text) => Some(Password::new(
+            text.trim_end_matches(['\r', '\n']).to_owned(),
+        )),
+        Err(e) => {
+            eprintln!("probe: cannot read PARLEY_PASSWORD_FILE: {e}");
+            None
+        }
+    }
 }
 
 fn key(name: &str) -> Option<Key> {
@@ -118,7 +142,7 @@ fn print_when_ready(connection: &Connection, title: &str) {
     // Give the host a moment to lock the keyboard after a key.
     thread::sleep(Duration::from_millis(300));
     loop {
-        if let LinkState::Closed(reason) = connection.state() {
+        if let LinkState::Closed(reason) | LinkState::Dropped(reason) = connection.state() {
             eprintln!("probe: {reason}");
             std::process::exit(1);
         }

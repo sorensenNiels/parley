@@ -32,8 +32,20 @@ const TRACE_VARIABLE: &str = "PARLEY_TRACE";
 pub enum LinkState {
     Connecting,
     Connected,
-    /// The connection ended; the text says why.
+    /// The connection ended, or never got through; the text says why.
     Closed(String),
+    /// The connection got through, then the network failed: a read, write or TLS error, not
+    /// the host ending the session (R-NET-10). The text says why.
+    Dropped(String),
+}
+
+/// How the link ended: `run`'s result, and whether it had got through first.
+fn ending(result: Result<String>, got_through: bool) -> LinkState {
+    match result {
+        Ok(reason) => LinkState::Closed(reason),
+        Err(e) if got_through => LinkState::Dropped(e.to_string()),
+        Err(e) => LinkState::Closed(e.to_string()),
+    }
 }
 
 #[derive(Debug)]
@@ -57,11 +69,10 @@ impl Connection {
         };
         let thread_state = Arc::clone(&state);
         thread::spawn(move || {
-            let reason = match link.run(&config, &thread_state) {
-                Ok(reason) => reason,
-                Err(e) => e.to_string(),
-            };
-            *lock(&thread_state) = LinkState::Closed(reason);
+            let result = link.run(&config, &thread_state);
+            let mut state = lock(&thread_state);
+            *state = ending(result, *state == LinkState::Connected);
+            drop(state);
             (link.wake)();
         });
         Self {

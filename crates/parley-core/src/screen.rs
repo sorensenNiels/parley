@@ -7,6 +7,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::CodePage;
 
+mod hotspots;
+mod region;
+pub use hotspots::{Hotspot, Target, hotspots};
+pub use region::{Rectangle, Span, find, rectangle_text, table_text};
+
 /// The display sizes a 5250 session can use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ScreenSize {

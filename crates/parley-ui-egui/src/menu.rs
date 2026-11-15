@@ -38,8 +38,13 @@ pub enum Action {
     Connect(usize),
     Disconnect,
     Exit,
+    /// Copy the selection, or the screen (R-UI-22).
     CopyScreen,
+    /// Copy the selection, or the screen, as a table (R-UI-22).
+    CopyTable,
     Paste,
+    /// Edit ▸ Find… (R-UI-21).
+    Find,
     /// The keyboard shortcut sheet (R-UI-17).
     Shortcuts,
     /// Tools ▸ SQL… (R-SQL-6).
@@ -212,9 +217,13 @@ fn edit_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     let mut action = None;
     ui.menu_button("Edit", |ui| {
         let on = header.connected();
-        let copy = (icons::COPY, "Copy screen");
+        let copy = (icons::COPY, "Copy");
         if item(ui, header, on, copy, Some(&Function::CopyScreen)) {
             action = Some(Action::CopyScreen);
+        }
+        let table = (icons::LIST, "Copy as table");
+        if item(ui, header, on, table, Some(&Function::CopyTable)) {
+            action = Some(Action::CopyTable);
         }
         if item(
             ui,
@@ -224,6 +233,11 @@ fn edit_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
             Some(&Function::Paste),
         ) {
             action = Some(Action::Paste);
+        }
+        ui.separator();
+        let find = (icons::MAGNIFYING_GLASS, "Find…");
+        if item(ui, header, on, find, Some(&Function::Find)) {
+            action = Some(Action::Find);
         }
     });
     action
@@ -351,7 +365,7 @@ fn session_pill(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     let state = match link {
         LinkState::Connected => "online",
         LinkState::Connecting => "connecting",
-        LinkState::Closed(_) => "offline",
+        LinkState::Closed(_) | LinkState::Dropped(_) => "offline",
     };
     response
         .response
@@ -359,7 +373,7 @@ fn session_pill(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     let color = match link {
         LinkState::Connected => p.ok,
         LinkState::Connecting => p.warning_text,
-        LinkState::Closed(_) => p.muted,
+        LinkState::Closed(_) | LinkState::Dropped(_) => p.muted,
     };
     let (rect, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), Sense::hover());
     ui.painter().circle_filled(rect.center(), 4.0, color);

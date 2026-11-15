@@ -139,6 +139,8 @@ enum ReadKind {
     MdtFieldsAlternate,
     /// Read Immediate: never pending, answered at once.
     Immediate,
+    /// Read MDT Immediate Alternate (R-DS-7): never pending, answered at once.
+    ImmediateAlternate,
 }
 
 /// A screen kept by Save Screen until the host restores it.

@@ -1,7 +1,8 @@
 //! The 5250 data stream from the host (R-DS-1): commands, each after an ESC byte, and the
 //! orders inside Write To Display. References are to IBM's "5250 Functions Reference"
 //! (SA21-9247), chapter 15 "5494 data stream", IBM's "5494 Remote Control Unit Functions
-//! Reference" (SC30-3533-02), chapter 12 "Display Data Streams", and RFC 1205.
+//! Reference" (SC30-3533-02), chapter 12 "Display Data Streams", its release 3.0 (SC30-3533-04,
+//! chapter 15) for the partial screen commands and Read MDT Immediate Alternate, and RFC 1205.
 
 use super::{MAX_SAVED_SCREENS, ReadKind, SavedScreen, Session};
 use crate::error::{Error, Result};
@@ -22,8 +23,11 @@ const READ_MDT_FIELDS: u8 = 0x52;
 const READ_MDT_FIELDS_ALTERNATE: u8 = 0x82;
 const READ_SCREEN_IMMEDIATE: u8 = 0x62;
 const READ_IMMEDIATE: u8 = 0x72;
+const READ_MDT_IMMEDIATE_ALTERNATE: u8 = 0x83;
 const SAVE_SCREEN: u8 = 0x02;
+const SAVE_PARTIAL_SCREEN: u8 = 0x03;
 pub(super) const RESTORE_SCREEN: u8 = 0x12;
+const RESTORE_PARTIAL_SCREEN: u8 = 0x13;
 const ROLL: u8 = 0x23;
 const WRITE_STRUCTURED_FIELD: u8 = 0xF3;
 
@@ -111,6 +115,8 @@ enum Fields {
 impl Session {
     pub(super) fn process_stream(&mut self, data: &[u8]) -> Result<()> {
         let mut r = Reader::new(data);
+        // Save Partial Screen's reply goes after the rest of the record (SC30-3533-04 §15.22).
+        let mut partial_save = None;
         while let Some(b) = r.peek() {
             r.pos += 1;
             if b != ESC {
@@ -146,16 +152,34 @@ impl Session {
                     self.read_command(&mut r, ReadKind::MdtFieldsAlternate)?;
                 }
                 READ_IMMEDIATE => self.send_fields(ReadKind::Immediate, None),
+                // R-DS-7: SC30-3533-04 §15.20 says "the same as READ IMMEDIATE", which sends
+                // no cursor or AID; RFC 1205 §5.3 says the same as Read MDT Fields Alternate
+                // with AID X'00', as IBM's QsnReadMDTImmAlt API describes it. Parley follows
+                // the RFC.
+                READ_MDT_IMMEDIATE_ALTERNATE => self.send_fields(
+                    ReadKind::ImmediateAlternate,
+                    Some(super::Aid::from_code(0x00)),
+                ),
                 READ_SCREEN_IMMEDIATE => {
                     let buffer = self.screen.buffer().to_vec();
                     self.send_record(0, Opcode::NoOperation, &buffer);
                 }
                 SAVE_SCREEN => self.save_screen(),
+                SAVE_PARTIAL_SCREEN => {
+                    // Flag, top row, left column, depth, width: the 5494 ignores them and
+                    // saves the whole screen, and so does Parley.
+                    r.take(5, "Save Partial Screen")?;
+                    partial_save = Some(self.keep_screen());
+                }
                 RESTORE_SCREEN => self.restore_screen(&mut r)?,
+                RESTORE_PARTIAL_SCREEN => self.restore_partial_screen(&mut r)?,
                 ROLL => self.roll(&mut r)?,
                 WRITE_STRUCTURED_FIELD => self.write_structured_field(&mut r)?,
                 other => return Err(Error::unsupported(format!("command X'{other:02X}'"))),
             }
+        }
+        if let Some(id) = partial_save {
+            self.send_partial_save(id);
         }
         Ok(())
     }
@@ -412,8 +436,27 @@ impl Session {
     }
 
     /// Save Screen: the reply is restore data, which the host sends back later after a Restore
-    /// Screen command. Parley keeps the screen itself and sends an id for it.
+    /// Screen command. Parley keeps the screen itself and sends an id for it (D7).
     pub(super) fn save_screen(&mut self) {
+        let id = self.keep_screen();
+        let mut data = vec![ESC, RESTORE_SCREEN];
+        data.extend(RESTORE_MAGIC);
+        data.extend(id.to_be_bytes());
+        self.send_record(0, Opcode::SaveScreen, &data);
+    }
+
+    /// Save Partial Screen's reply (R-DS-6, SC30-3533-04 §15.22, §15.24): ESC, Restore Partial
+    /// Screen and a length counting itself, as the host sends it back. The manual names no
+    /// opcode; RFC 1205's Save Screen opcode is used, as tn5250 does.
+    fn send_partial_save(&mut self, id: u16) {
+        let mut data = vec![ESC, RESTORE_PARTIAL_SCREEN, 0x00, 0x06];
+        data.extend(RESTORE_MAGIC);
+        data.extend(id.to_be_bytes());
+        self.send_record(0, Opcode::SaveScreen, &data);
+    }
+
+    /// Keeps a copy of the screen and its state; returns its id.
+    fn keep_screen(&mut self) -> u16 {
         let id = self.next_save_id;
         self.next_save_id = self.next_save_id.wrapping_add(1);
         self.saved_screens.push(SavedScreen {
@@ -426,15 +469,26 @@ impl Session {
         if self.saved_screens.len() > MAX_SAVED_SCREENS {
             self.saved_screens.remove(0);
         }
-        let mut data = vec![ESC, RESTORE_SCREEN];
-        data.extend(RESTORE_MAGIC);
-        data.extend(id.to_be_bytes());
-        self.send_record(0, Opcode::SaveScreen, &data);
+        id
     }
 
     fn restore_screen(&mut self, r: &mut Reader<'_>) -> Result<()> {
         let data = r.take(4, "Restore Screen")?;
-        if data[..2] != RESTORE_MAGIC {
+        self.restore(data)
+    }
+
+    /// Restore Partial Screen (R-DS-6, SC30-3533-04 §15.24): a length counting itself, then
+    /// the data Save Partial Screen sent. Commands may follow it.
+    fn restore_partial_screen(&mut self, r: &mut Reader<'_>) -> Result<()> {
+        let len = usize::from(r.u16("Restore Partial Screen")?);
+        let data = r.take(len.saturating_sub(2), "Restore Partial Screen")?;
+        self.restore(data)
+    }
+
+    /// Puts back the screen saved under the id in `data` (D7): everything but the message
+    /// waiting light, which the manual says is lost.
+    fn restore(&mut self, data: &[u8]) -> Result<()> {
+        if data.len() != 4 || data[..2] != RESTORE_MAGIC {
             return Err(Error::data("restore data that this session did not save"));
         }
         let id = u16::from_be_bytes([data[2], data[3]]);

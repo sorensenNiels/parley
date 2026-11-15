@@ -84,6 +84,19 @@ impl Session {
         }
     }
 
+    /// The keys of a clicked hotspot (R-UI-20), each as [`Session::key`] takes it, except that
+    /// while recording the move to an option field is kept too (a click elsewhere is not): the
+    /// macro then types the option where the click did.
+    pub fn hotspot_keys(&mut self, keys: &[Key]) {
+        for &key in keys {
+            let ready = self.player.is_none() && !self.locked && self.error.is_none();
+            self.key(key);
+            if let (Key::MoveTo { .. }, true, Some(steps)) = (key, ready, self.recording.as_mut()) {
+                steps.push(Step::Key(key));
+            }
+        }
+    }
+
     pub const fn macro_state(&self) -> MacroState {
         match (&self.player, &self.recording) {
             (Some(p), _) if p.needs_password => MacroState::NeedsPassword,

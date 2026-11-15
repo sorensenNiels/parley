@@ -13,6 +13,7 @@ mod keys;
 mod macros;
 pub mod menu;
 mod profile;
+mod reconnect;
 mod sessions;
 pub mod settings;
 mod shortcuts;
@@ -62,6 +63,8 @@ pub struct ParleyUi {
     connection: Option<Connection>,
     /// The connection got through: when it ends, the host ended it.
     online: bool,
+    /// Connecting again by itself after the network dropped the connection (R-NET-10).
+    reconnect: Option<reconnect::Reconnect>,
     /// Why the last connection ended, shown on the start screen and in the status bar.
     closed: Option<String>,
     /// A problem to show next to the keyboard state, such as a macro that cannot be run.
@@ -78,6 +81,8 @@ pub struct ParleyUi {
     updates: updates::Updates,
     /// Give the terminal the keyboard focus on the next frame.
     focus_terminal: bool,
+    /// The find bar and the selection on the screen (R-UI-21, R-UI-22).
+    view: terminal::View,
     /// The keyboard shortcut sheet, while it is open (R-UI-17).
     shortcut_sheet: Option<shortcuts::Sheet>,
     /// The response time and the recording's length in the status bar (R-UI-14).
@@ -112,6 +117,7 @@ impl ParleyUi {
             current: None,
             connection: None,
             online: false,
+            reconnect: None,
             closed: None,
             warning: None,
             editor: None,
@@ -123,6 +129,7 @@ impl ParleyUi {
             logo: menu::Logo::default(),
             updates: updates::Updates::default(),
             focus_terminal: false,
+            view: terminal::View::default(),
             shortcut_sheet: None,
             clock: status::Clock::default(),
             asking_to_exit: false,
@@ -218,6 +225,7 @@ impl ParleyUi {
     /// Connects to `profile`. The operator signs on: Parley never does (R-NET-7).
     pub fn connect(&mut self, ctx: &egui::Context, profile: Profile) {
         self.warning = None;
+        self.reconnect = None;
         let ctx = ctx.clone();
         let connection = Connection::open(profile.config.clone(), move || ctx.request_repaint());
         if self.addon_on(AddOn::Macros) && !profile.run_macro.is_empty() {
@@ -255,6 +263,9 @@ impl ParleyUi {
             note: self.closed.as_deref().or(self.warning.as_deref()),
             macros: self.addon_on(AddOn::Macros),
             can_connect_again: self.current_index().is_some(),
+            reconnect_in: self
+                .reconnect
+                .and_then(|r| r.left(std::time::Instant::now())),
             map: &self.keyboard_map().name,
             keymap: self.keyboard_map(),
             mac: is_mac(ui.ctx()),
@@ -287,6 +298,7 @@ impl ParleyUi {
                     actions.push(Action::Connect(index));
                 }
             }
+            status::StatusAction::CancelReconnect => self.reconnect = None,
             status::StatusAction::UseMap(name) => self.use_keyboard_map(&name),
             status::StatusAction::Key(key) => actions.push(Action::Key(key)),
         }
@@ -361,6 +373,10 @@ impl ParleyUi {
         {
             self.status_action(chosen, &mut actions);
         }
+        if let Some(session) = session.as_deref() {
+            self.find_panel(ui, session);
+        }
+        self.view.palette = self.palette();
         let asked = self.central_panel(ui, session.as_deref_mut(), &mut actions);
 
         let next = self.carry_out(ui.ctx(), actions, session.as_deref_mut());
@@ -397,6 +413,34 @@ impl ParleyUi {
         }
     }
 
+    /// The 5250 screen's colours: the session's scheme, or the settings' (R-UI-23).
+    fn palette(&self) -> terminal::Palette {
+        let scheme = self
+            .current
+            .as_ref()
+            .and_then(|p| p.screen_colors)
+            .unwrap_or(self.settings.screen_colors);
+        terminal::Palette::of(scheme, &self.settings.custom_colors)
+    }
+
+    /// The find bar above the screen while it is open (R-UI-21); closing it gives the screen
+    /// the keyboard back.
+    fn find_panel(&mut self, ui: &mut Ui, session: &parley_core::Session) {
+        let Some(bar) = &mut self.view.find else {
+            return;
+        };
+        let count = bar.matches(session).len();
+        let frame = theme::bar(ui, Margin::symmetric(8, 3));
+        let closed = Panel::top("find-bar")
+            .frame(frame)
+            .show(ui, |ui| terminal::find_bar(ui, bar, count))
+            .inner;
+        if closed == Some(terminal::FindAction::Close) {
+            self.view.find = None;
+            self.focus_terminal = true;
+        }
+    }
+
     /// The session's screen, or the start screen without one; returns the functions the
     /// keys typed on the screen asked for. What the start screen asks goes to `actions`.
     fn central_panel(
@@ -410,7 +454,7 @@ impl ParleyUi {
             CentralPanel::default()
                 .frame(
                     Frame::new()
-                        .fill(terminal::BACKGROUND)
+                        .fill(self.view.palette.background)
                         .inner_margin(Margin::same(14)),
                 )
                 .show(ui, |ui| {
@@ -422,7 +466,8 @@ impl ParleyUi {
                             .as_ref()
                             .map_or("", |p| p.keyboard_map.as_str()),
                     );
-                    asked = terminal::show(ui, session, &mut self.key_input, map, grab);
+                    asked =
+                        terminal::show(ui, session, &mut self.key_input, map, grab, &mut self.view);
                 });
         } else {
             CentralPanel::default().show(ui, |ui| {
@@ -452,6 +497,7 @@ impl ParleyUi {
                 self.end_recording(&mut connection.session());
                 connection.close();
                 self.closed = Some("Disconnected.".to_owned());
+                self.reconnect = None;
             }
             other => self.connection = other,
         }
@@ -535,9 +581,15 @@ impl ParleyUi {
                 Action::Exit => ctx.send_viewport_cmd(ViewportCommand::Close),
                 Action::CopyScreen => {
                     if let Some(s) = session.as_deref() {
-                        ctx.copy_text(s.screen().text(s.code_page()));
+                        ctx.copy_text(self.view.copy_text(s));
                     }
                 }
+                Action::CopyTable => {
+                    if let Some(s) = session.as_deref() {
+                        ctx.copy_text(self.view.table_text(s));
+                    }
+                }
+                Action::Find => self.view.open_find(),
                 Action::Paste => {
                     // The pasted text arrives as an input event, which the terminal takes.
                     ctx.send_viewport_cmd(ViewportCommand::RequestPaste);
@@ -587,22 +639,64 @@ impl ParleyUi {
     }
 
     /// Notices the connection coming up or ending; a host that ends the session closes the
-    /// window if the session says so.
+    /// window if the session says so. A connection the network dropped is connected again
+    /// when the session says so (R-NET-10), and so is a try at it that failed.
     fn follow_link(&mut self, ctx: &egui::Context) {
+        let now = std::time::Instant::now();
         match self.connection.as_ref().map(Connection::state) {
-            Some(LinkState::Connected) => self.online = true,
+            Some(LinkState::Connected) => {
+                self.online = true;
+                self.reconnect = None;
+            }
             Some(LinkState::Closed(reason)) => {
-                if let Some(connection) = self.connection.take() {
-                    self.end_recording(&mut connection.session());
-                }
-                self.closed = Some(reason);
-                let exit = self.current.as_ref().is_some_and(|p| p.exit_on_close);
-                if std::mem::take(&mut self.online) && exit {
-                    self.exit_confirmed = true;
-                    ctx.send_viewport_cmd(ViewportCommand::Close);
+                self.connection_ended(reason);
+                if let Some(trying) = self.reconnect {
+                    self.reconnect = Some(trying.after_failure(now));
+                } else {
+                    self.exit_when_host_ends(ctx);
                 }
             }
-            Some(LinkState::Connecting) | None => {}
+            Some(LinkState::Dropped(reason)) => {
+                self.connection_ended(format!("The connection dropped: {reason}"));
+                if self.current.as_ref().is_some_and(|p| p.reconnect) {
+                    self.online = false;
+                    self.reconnect = Some(reconnect::Reconnect::after_drop(now));
+                } else {
+                    self.exit_when_host_ends(ctx);
+                }
+            }
+            Some(LinkState::Connecting) => {}
+            None => self.reconnect_when_due(ctx, now),
+        }
+    }
+
+    fn connection_ended(&mut self, reason: String) {
+        if let Some(connection) = self.connection.take() {
+            self.end_recording(&mut connection.session());
+        }
+        self.closed = Some(reason);
+    }
+
+    fn exit_when_host_ends(&mut self, ctx: &egui::Context) {
+        let exit = self.current.as_ref().is_some_and(|p| p.exit_on_close);
+        if std::mem::take(&mut self.online) && exit {
+            self.exit_confirmed = true;
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+        }
+    }
+
+    /// Connects again once the wait is over, and draws the countdown each second until then.
+    fn reconnect_when_due(&mut self, ctx: &egui::Context, now: std::time::Instant) {
+        let Some(reconnect) = self.reconnect else {
+            return;
+        };
+        match (reconnect.due(now), self.current.clone()) {
+            (Some(trying), Some(profile)) => {
+                self.connect(ctx, profile);
+                self.reconnect = Some(trying);
+            }
+            (None, Some(_)) => ctx.request_repaint_after(std::time::Duration::from_secs(1)),
+            (_, None) => self.reconnect = None,
         }
     }
 
@@ -777,7 +871,12 @@ impl ParleyUi {
                 Function::Shortcuts => self.shortcut_sheet = Some(shortcuts::Sheet::default()),
                 // The terminal took the key, so a session is connected.
                 Function::Sql => self.start_parley_sql(true),
-                Function::Key(_) | Function::CopyScreen | Function::Paste => {}
+                // The terminal does these itself.
+                Function::Key(_)
+                | Function::CopyScreen
+                | Function::CopyTable
+                | Function::Find
+                | Function::Paste => {}
             }
         }
     }
@@ -1617,6 +1716,7 @@ mod tests {
                         note: None,
                         macros: true,
                         can_connect_again: false,
+                        reconnect_in: None,
                         map: "Default",
                         keymap: KeyMap::built_in(),
                         mac: false,
@@ -1758,6 +1858,21 @@ mod tests {
         harness.state_mut().connect(&ctx, local);
         harness.run();
         listener
+    }
+
+    #[test]
+    fn edit_find_opens_the_bar_and_esc_closes_it_r_ui_21() {
+        let mut harness = app_with(Vec::new());
+        let _host = connect_locally(&mut harness, "");
+        harness.get_by_label("Edit").click();
+        harness.run();
+        harness.get_by_label("Find…").click();
+        harness.run();
+        assert!(harness.state().view.find.is_some());
+        assert!(harness.get_by_label("Find on screen").is_focused());
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        assert!(harness.state().view.find.is_none());
     }
 
     fn macros_off() -> Settings {
@@ -2087,6 +2202,83 @@ mod tests {
         assert_eq!(harness.state().profiles()[0].keyboard_map, "Mine");
     }
 
+    fn choose_screen_colors(harness: &mut Harness<'static, ParleyUi>, scheme: &str) {
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("Terminal").click();
+        harness.run();
+        harness.get_by_label(scheme).click();
+        harness.run();
+    }
+
+    #[test]
+    fn the_screen_colours_change_at_once_and_cancel_puts_them_back_r_ui_23() {
+        let mut harness = app_with(Vec::new());
+        choose_screen_colors(&mut harness, "Light");
+        assert_eq!(harness.state().view.palette, terminal::Palette::light());
+        harness.get_by_label("Cancel").click();
+        harness.run();
+        assert_eq!(
+            harness.state().settings().screen_colors,
+            terminal::Scheme::Classic
+        );
+        assert_eq!(harness.state().view.palette, terminal::Palette::classic());
+    }
+
+    #[test]
+    fn custom_colours_offer_a_button_per_colour_and_keep_the_dialog_in_place_r_ui_23() {
+        let mut harness = app_with(Vec::new());
+        choose_screen_colors(&mut harness, "Custom");
+        harness.get_by_label("Background");
+        harness.get_by_role_and_label(egui::accesskit::Role::Button, "Turquoise");
+        let before = harness.get_by_label("Save").rect();
+        harness.run_steps(5);
+        assert_eq!(harness.get_by_label("Save").rect(), before);
+        harness.get_by_label("Save").click();
+        harness.run();
+        assert_eq!(
+            harness.state().settings().screen_colors,
+            terminal::Scheme::Custom
+        );
+    }
+
+    #[test]
+    fn a_session_s_own_colours_win_over_the_settings_r_ui_23() {
+        let mut harness = app_with(Vec::new());
+        let mut prod = profile("Prod", "127.0.0.1");
+        prod.screen_colors = Some(terminal::Scheme::Light);
+        harness.state_mut().current = Some(prod);
+        harness.run();
+        assert_eq!(harness.state().view.palette, terminal::Palette::light());
+        harness
+            .state_mut()
+            .current
+            .as_mut()
+            .expect("set")
+            .screen_colors = None;
+        harness.run();
+        assert_eq!(harness.state().view.palette, terminal::Palette::classic());
+    }
+
+    #[test]
+    fn the_session_dialog_chooses_the_screen_colours_r_ui_23() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("New session…").click();
+        harness.run();
+        type_into(&mut harness, "Name", "Prod");
+        type_into(&mut harness, "Host", "prod");
+        harness.get_by_label("5250 colours").click();
+        harness.run();
+        harness.get_by_label("Light").click();
+        harness.run();
+        harness.get_by_label("Apply").click();
+        harness.run();
+        assert_eq!(
+            harness.state().profiles()[0].screen_colors,
+            Some(terminal::Scheme::Light)
+        );
+    }
+
     #[test]
     fn stop_beside_rec_in_the_status_bar_ends_the_recording_r_key_6() {
         let mut harness = app_with(Vec::new());
@@ -2123,6 +2315,112 @@ mod tests {
         let session = app.connection.as_ref().expect("connected").session();
         assert_eq!(session.macro_state(), parley_core::MacroState::Off);
         assert!(app.save_macro.is_some(), "it asks for the macro's name");
+    }
+
+    /// Frames until `done` says the app is where the test wants it (the network has its own
+    /// thread), at most two seconds.
+    fn run_until(harness: &mut Harness<'static, ParleyUi>, done: impl Fn(&ParleyUi) -> bool) {
+        for _ in 0..200 {
+            if done(harness.state()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            harness.run();
+        }
+        panic!("the app did not get there");
+    }
+
+    /// Connects "Local" to a host on a local port that accepts once and then resets the
+    /// connection (DO TERMINAL-TYPE, the answer left unread), as a network failure does.
+    fn drop_locally(
+        harness: &mut Harness<'static, ParleyUi>,
+        reconnect: bool,
+    ) -> std::net::TcpListener {
+        use std::io::Write as _;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a local port");
+        let mut local = profile("Local", "127.0.0.1");
+        local.config.port = listener.local_addr().expect("its address").port();
+        local.config.tls = false;
+        local.reconnect = reconnect;
+        let ctx = harness.ctx.clone();
+        harness.state_mut().connect(&ctx, local);
+        let (mut socket, _) = listener.accept().expect("Parley connects");
+        socket.write_all(&[255, 253, 24]).expect("send");
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        drop(socket);
+        run_until(harness, |app| app.connection.is_none());
+        listener
+    }
+
+    #[test]
+    fn a_dropped_connection_counts_down_to_connecting_again_r_net_10() {
+        let mut harness = app_with(Vec::new());
+        let host = drop_locally(&mut harness, true);
+        harness.run();
+        harness.get_by_label_contains("Reconnecting in 2 s");
+        let note = harness.state().closed.clone().unwrap_or_default();
+        assert!(note.starts_with("The connection dropped"), "{note}");
+
+        // The wait is over: Parley connects again, and the countdown goes.
+        let soon = std::time::Instant::now();
+        harness.state_mut().reconnect = Some(reconnect::Reconnect::Waiting {
+            attempt: 0,
+            at: soon,
+        });
+        harness.run();
+        let (_again, _) = host.accept().expect("Parley connects again");
+        run_until(&mut harness, |app| app.reconnect.is_none() && app.online);
+        assert!(harness.query_by_label_contains("Reconnecting").is_none());
+    }
+
+    #[test]
+    fn a_failed_try_waits_longer_and_cancel_stops_reconnecting_r_net_10() {
+        let mut harness = app_with(Vec::new());
+        let host = drop_locally(&mut harness, true);
+        drop(host); // nothing listens any more: the next try fails
+        let soon = std::time::Instant::now();
+        harness.state_mut().reconnect = Some(reconnect::Reconnect::Waiting {
+            attempt: 0,
+            at: soon,
+        });
+        run_until(&mut harness, |app| {
+            matches!(
+                app.reconnect,
+                Some(reconnect::Reconnect::Waiting { attempt: 1, .. })
+            )
+        });
+        harness.run();
+        harness.get_by_label_contains("Reconnecting in 4 s");
+        harness.get_by_label("Cancel").click();
+        harness.run();
+        assert_eq!(harness.state().reconnect, None);
+        assert!(harness.query_by_label_contains("Reconnecting").is_none());
+    }
+
+    #[test]
+    fn without_the_setting_a_dropped_connection_stays_offline_r_net_10() {
+        let mut harness = app_with(Vec::new());
+        let _host = drop_locally(&mut harness, false);
+        harness.run();
+        assert_eq!(harness.state().reconnect, None);
+        let note = harness.state().closed.clone().unwrap_or_default();
+        assert!(note.starts_with("The connection dropped"), "{note}");
+    }
+
+    #[test]
+    fn the_session_dialog_turns_reconnecting_on_r_net_10() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("New session…").click();
+        harness.run();
+        type_into(&mut harness, "Name", "Prod");
+        type_into(&mut harness, "Host", "prod");
+        harness
+            .get_by_label("Reconnect when the connection drops")
+            .click();
+        harness.run();
+        harness.get_by_label("Apply").click();
+        harness.run();
+        assert!(harness.state().profiles()[0].reconnect);
     }
 
     /// Connected to a local listener as "Local", with "Other" saved too; waits for the link.

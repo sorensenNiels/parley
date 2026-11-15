@@ -4,8 +4,8 @@
 > [REQUIREMENTS.md](REQUIREMENTS.md), and how each was verified is in [FEATURES.md](FEATURES.md).
 > Look things up with `grep -n` (an ID such as `"R-NET-1 "`, `"| D3 "` or a heading) rather than reading the whole file.
 
-**Status of this document:** first written while setting up the development environment (2026-11-12); Phases 1 and 2
-were built and verified the same day. The vision, principles and requirements are proposals to review.
+**Status of this document:** first written while setting up the development environment (2026-11-12). Phases 1–4
+are built and verified (the last on 2026-11-15); Phase 20, everyday screen work, is done too.
 
 ## 1. Vision
 
@@ -34,9 +34,11 @@ modern take on what surrounds the screen: sessions, keyboard mapping, copy and p
 | Phase 0: development environment | Done (2026-11-12): workspace, Makefile, setup scripts, CI, lints, Claude Code setup. |
 | Phase 1: connect and show a screen | Done (2026-11-12): verified on Windows, macOS, Linux and WSL2 (FEATURES.md). |
 | Phase 2: saved sessions and auto sign-on | Done (2026-11-12): verified on Windows, macOS, Linux and WSL2 (FEATURES.md). Auto sign-on and saved passwords were removed again in Phase 3 (R-NET-7, D16). |
-| Phase 3: keyboard maps and macros | Done (2026-11-12): verified on Windows, macOS and Linux (FEATURES.md): R-DS-5, keyboard maps (R-KEY-2), macros (R-KEY-3, R-KEY-4), add-ons (R-ADD-1, R-ADD-2), auto sign-on removed (R-NET-7, D16). Then the macro editor (R-KEY-5) Stop in the status bar (R-KEY-6) and import and export of macros (R-KEY-7), built, waiting for a check in the running app. |
-| Phase 4: a modern look | Built (2026-11-12), waiting for a check in the running app on each OS (FEATURES.md, In progress): icons (R-UI-13, D17), an interactive status bar (R-UI-14), one header with the session (R-UI-15), the 5250 keys in a Keys menu in the status bar (R-UI-16), a shortcut sheet (R-UI-17). |
-| Phases 5–12: SQL | Parley SQL's phases: [sql/ROADMAP.md](sql/ROADMAP.md). |
+| Phase 3: keyboard maps and macros | Done (2026-11-12): verified on Windows, macOS and Linux (FEATURES.md): R-DS-5, keyboard maps (R-KEY-2), macros (R-KEY-3, R-KEY-4), add-ons (R-ADD-1, R-ADD-2), auto sign-on removed (R-NET-7, D16). The macro editor (R-KEY-5), Stop in the status bar (R-KEY-6) and import and export of macros (R-KEY-7) verified 2026-11-15. |
+| Phase 4: a modern look | Done (2026-11-15): verified on Windows, macOS, Linux and WSL (FEATURES.md): icons (R-UI-13, D17), an interactive status bar (R-UI-14), one header with the session (R-UI-15), the 5250 keys in a Keys menu in the status bar (R-UI-16), a shortcut sheet (R-UI-17), no error for a key in a protected area (R-KEY-8); both commands after installing (R-NF-2). |
+| Phases 5–19: SQL | Parley SQL's phases: [sql/ROADMAP.md](sql/ROADMAP.md). |
+| Phase 20: everyday screen work | Done (2026-11-15): checked by the owner in the running app (FEATURES.md): R-UI-20..23, R-NET-10. |
+| Phase 21: protocol gaps | Started (2026-11-15): R-DS-6, R-DS-7 (IDEA-7) done; IDEA-4, 6, 2, 3, 5, 14 to come. |
 
 ## 4. Phases
 
@@ -65,13 +67,29 @@ First a correctness step (R-P-2): the points of the data stream built from memor
 (R-ADD-1, D15), with macros as the first add-on (R-ADD-2). Auto sign-on and saved passwords removed (R-NET-7, D16);
 R-NET-6 (why a bypass sign-on failed) is dropped with it.
 
-### Phase 4 — A modern look (built)
+### Phase 4 — A modern look (done)
 
 The owner chose these from mockups of three options per area (2026-11-12): an icon font (R-UI-13, D17); a status
 bar of pills that shows only what is true and can be clicked (R-UI-14, option S3); one header row with the session
 instead of the menu bar plus toolbar (R-UI-15, option T2); the seldom-used 5250 keys in a Keys menu in the status bar (R-UI-16; first a key strip under the screen, changed 2026-11-13); and
 a keyboard shortcut sheet over the screen instead of the side panel (R-UI-17, option K1). Built in that order.
-Labels from the screen ("F3=Exit") on the function keys stay IDEA-19.
+Labels from the screen ("F3=Exit") on the function keys stayed IDEA-19, now R-UI-20 in Phase 20.
+
+### Phase 20 — Everyday screen work (done)
+
+Chosen by the owner (2026-11-15) as the first terminal phase after Phase 4: what makes a day at the green screen
+easier, all in the UI, without new protocol. In this order: hotspots (R-UI-20, from IDEA-19), find on the screen
+(R-UI-21, IDEA-22), selecting and copying part of the screen, also as a table (R-UI-22, IDEA-20), 5250 colour schemes
+(R-UI-23, IDEA-23) and reconnecting by itself when the network drops (R-NET-10, IDEA-16). Then, as candidates for
+later phases: the protocol gaps (IDEA-7 first, then IDEA-4, 6, 2, 3, 5, 14), several sessions as tabs (IDEA-15),
+importing sessions from ACS and PCOMM (IDEA-17).
+
+### Phase 21 — Protocol gaps (started)
+
+The commands and fields Parley still turns away (R-P-2), from IDEA-7, then IDEA-4, 6, 2, 3, 5 and 14 in that order,
+each checked against IBM's 5494 Remote Control Unit Functions Reference (SC30-3533-04, chapter 15) and RFC 1205.
+First Save/Restore Partial Screen (R-DS-6) and Read MDT Immediate Alternate (R-DS-7), which a host now gets an
+error for.
 
 ### Later (unordered, to be planned)
 
@@ -86,16 +104,6 @@ the SQL window's add-on switches, probes and assistant, are in [sql/ROADMAP.md](
 
 | ID | Requirement | Phase |
 |---|---|---|
-| R-NF-2 | **Both commands after installing** (2026-11-15, asked by the owner; D26, adds to R-NF-1). One release, whose installers hold both programs; after installing, `parley` and `parley-sql` work in a terminal and both are in the menu where the OS allows it. Windows `.msi`: the install folder on the system PATH (removed on uninstall), Parley SQL in the Start menu. `.deb`: both in `/usr/bin`, Parley SQL in the application menu. AppImage: `parley --sql [ARGS]`, and the AppImage started through a link named `parley-sql`, start Parley SQL; the release notes say how to make the links. macOS: the release notes give the two links into `/usr/local/bin`. `parley --sql` works on every OS. The release notes start with these install steps. | Release |
-| R-KEY-5 | **Edit a macro in Parley** (2026-11-12, asked by the owner). Tools ▸ Macros… has "Edit" on each macro and "New macro…": a dialog with the macro's file as text (monospace, comments and blank lines kept as typed) and, for a new one, its name. The text is checked as it is typed with the reader that runs macros (R-KEY-4); a line that does not read is named ("line 7: unknown key teleport") and Save stays off until it reads; a short line under it gives the syntax. Save writes the file and the list reads it again; Cancel and 🗙 leave the file as it was. A new macro needs a name no macro has. | 3 |
-| R-KEY-6 | **Stop recording from the status bar** (2026-11-12, asked by the owner). While a macro is being recorded, the status bar's macro box shows "REC" and a small Stop button beside it; Stop does what Tools ▸ Stop recording does (asks for the name). The macro box keeps one width, so the boxes beside it don't move when a recording starts or stops, and the bar keeps its height. *(Changes R-KEY-3: Stop recording was only in the Tools menu.)* | 3 |
-| R-KEY-7 | **Import and export macros** (2026-11-12, asked by the owner). Tools ▸ Macros… has "Import…" beside Copy path and "Export…" on each macro, both opening the system's file window (GTK 3 on Linux, also under WSL, as Tortuga's file windows; the xdg portal fails silently where none runs). Import takes one or more `.macro` files and copies each in as it is, named after the file; a file that does not read as a macro (its line named), whose name is not a valid macro name, or whose name a macro already has is not taken, and the dialog says which were imported and why the others were not. Export saves a copy of the file where the operator chooses (`NAME.macro` offered) and says where. Cancelling either changes nothing. GTK 3 is a new build and run dependency on Linux (CI, release, the .deb, `scripts/setup-linux.sh`). *R-KEY-4's "Open folder" is removed (the owner, 2026-11-12): Edit, New macro…, Import… and Export… do what it was for; the dialog still shows the folder with Copy path, and Read again.* | 3 |
-| R-KEY-8 | **No error for a key in a protected area** (2026-11-13, asked by the owner; D18). A character, Delete, Backspace, Erase EOF or Field Exit typed where the cursor is not in an input field does nothing: no operator error, no "Press Reset", the screen unchanged. Tab, Shift+Tab, the arrows and a click still move the cursor to an input field. Other operator errors (a letter in a numeric field, a full field in insert mode, …) are unchanged. *(Changes R-KEY-1 and R-UI-2: the protected-area error is gone.)* | 4 |
-| R-UI-13 | **Icons** (2026-11-12, the owner; D17). Parley bundles the Phosphor icon font (Regular) beside its other fonts, in a font family of its own, and names each icon it uses in one `icons` module; `bundled_fonts_have_every_symbol_the_ui_uses` checks every one. Menu items, the session pill, the Keys menu and the status bar's chips show an icon before their text where one helps. | 4 |
-| R-UI-14 | **An interactive status bar** (2026-11-12, the owner; option S3). *Changes R-UI-2, R-UI-4 and R-KEY-6: the boxes go.* A flat bar. On the left a green check icon (Ready) and beside it a processing slot of its own: an amber hourglass while the host works after an AID key (X SYSTEM), also when nothing else would draw a frame, empty otherwise but as wide, so nothing moves; the check stays while the host works (the owner, 2026-11-13); the operator error with "Press Reset" as a red pill; Connecting…, or Offline with why the last connection ended and, when a saved session was in use, a "Connect again" button; a notice from the host follows the pill in muted text. While a macro is recorded, a red "REC m:ss" pill and a Stop button that does what Tools ▸ Stop recording does (R-KEY-6); while one runs, a pill with its name. On the right, each only while it applies: message waiting (amber pill), INS, TLS (hover: how the host's certificate is checked), the keyboard map (click: a menu of the maps; the one chosen is saved to the session, R-KEY-2), the code page (CCSID; hover: its name), the size of the screen in use (24×80, 27×132), the response time (from an AID key locking the keyboard to the host unlocking it, measured by the UI; under 1 s in ms), and the cursor's row, column. When the window is too narrow, response time, then size, code page and keyboard map hide first. The bar keeps one height. | 4 |
-| R-UI-15 | **One header** (2026-11-12, the owner; option T2). *Changes R-UI-4: the toolbar row goes.* The menu bar keeps the brand, File, Edit, View, Tools, Help and the update link (R-UI-10, R-UI-11), and gains a session pill on the right while connected: a status dot, the session's name, host:port and a lock when TLS is on. It opens a menu with Connect to ▸, Edit session… and Disconnect. Menu items have icons (R-UI-13); those with a key show the key of the map in use. | 4 |
-| R-UI-16 | **The 5250 keys in a Keys menu** (2026-11-12, the owner; option T2. *Changed 2026-11-13 by the owner: the key strip under the screen was too busy for keys seldom used, so they moved into the status bar.*) While connected, a "Keys" button after the state pill in the status bar (R-UI-14) opens a menu: Attention, System Request, Reset, Clear, Help, Print, Roll Down and Roll Up, each with the keys of the map in use that press it, then F1–F24 in a grid whose buttons show their keys on hover as key caps. A click sends the key. | 4 |
-| R-UI-17 | **A keyboard shortcut sheet** (2026-11-12, the owner; option K1). *Changes R-UI-2's list of shortcuts and R-UI-7: the side panel goes.* Help ▸ Keyboard shortcuts, View ▸ Keyboard shortcuts and a new bindable function `shortcuts` (Ctrl+/ in the Default map, R-KEY-2) open a dialog over the screen: the keys of the map in use under the same headings as Settings ▸ Keyboard, as key caps, with a filter field and "Change keys…" (Settings on the Keyboard page). Esc, the same key, 🗙 or Close closes it. | 4 |
 
 ## 6. Ideas
 
@@ -114,10 +122,10 @@ Ideas that might become requirements later are in [IDEAS.md](IDEAS.md) (`IDEA-n`
 | D7 | What does Parley send as Save Screen restore data? | **An id** (ESC X'12', "PY", 2-byte id) **for a copy of the screen kept in the session** (the last 16), not a rebuilt data stream as tn5250 sends. Restore data from elsewhere is reported and ignored. | Re-encode the screen as Write To Display orders. |
 | D8 | Destructive Backspace? | **Yes**: Backspace deletes the character left of the cursor inside a field, as PC users expect; a real 5250 only moves the cursor. | The 5250 behaviour. |
 | D9 | How are installers built? | **cargo-packager** from `[package.metadata.packager]`, on each OS in the Release workflow, as in Tortuga (2026-11-12). | cargo-dist; per-OS tools (WiX, create-dmg) by hand. |
+| D10 | Are installers signed? | **Not yet**: macOS and Windows warn on first start (docs/RELEASING.md says how to go on). Signing needs an Apple Developer ID and a Windows certificate. | Sign from the first release. |
 | D11 | Where are passwords kept? *Replaced by D16 (2026-11-12): Parley keeps none.* | **The operating system's keychain** through the `keyring` crate (Keychain Services on macOS, Credential Manager on Windows, Secret Service on Linux), filed under service "Parley" and the session's name; the UI reaches it through a `Keychain` trait so tests use memory (2026-11-12). Without a keychain (e.g. WSL with no Secret Service) the password is not saved, and the dialog says why. | Encrypt the settings file with a master password; never save passwords. |
 | D12 | How does Parley look? | **Like Tortuga** (2026-11-12): the same design system, ported as `parley-ui-egui/src/theme.rs` (fonts, palette, sizes, visuals, building blocks) and `dialog.rs` (dialog frame, close button, actions, `fitting_scroll_area`), the same fonts (`assets/fonts`), and the same UI rules (CLAUDE.md "UI look"). A change to the shared look is made in both repositories. Parley's own additions: the terminal font family and the 5250 screen colours. | A look of Parley's own. |
 | D13 | How does Parley tell that a new version is available (R-UI-11)? | **As Tortuga (its D63): a check at start-up, on by default, that can be turned off, plus "Check now" in Settings → About**; the source is GitHub's latest published release, asked with `ureq` (blocking, on a thread; rustls with the OS trust store as D6) from `parley_core::update`; the result is a quiet link in the menu bar, never a pop-up (2026-11-12). It is the one connection Parley makes besides the IBM i hosts; it sends nothing but the request. Tests use a fake checker or a local server, never GitHub. | Only a button the user clicks; no check at all. |
-| D10 | Are installers signed? | **Not yet**: macOS and Windows warn on first start (docs/RELEASING.md says how to go on). Signing needs an Apple Developer ID and a Windows certificate. | Sign from the first release. |
 | D14 | How are macros saved (R-KEY-3)? | **One UTF-8 text file per macro**, `<name>.macro` in a `macros` folder beside the settings (eframe's folder for the app id `parley`: `~/.local/share/parley/macros` on Linux, `~/Library/Application Support/parley/macros` on macOS, `%APPDATA%\parley\data\macros` on Windows), behind a `MacroStore` trait so tests use memory (2026-11-12). One step per line: `text "…"`, a key name (`enter`, `f3`, `field-exit`, …), `wait`, `password`, `move ROW COLUMN`; an optional `session "NAME"` line first keeps a macro to one saved session; `#` starts a comment (`parley_core::macros`). Passwords are never in the file. The name is the file name, so names may not hold `/ \ : * ? " < > \|` or start with a dot. | JSON or TOML through serde; all macros inside the settings file. |
 | D15 | How are features not everyone needs added (add-ons)? Changes R-KEY-3, R-KEY-4. | **As Tortuga (its D78): add-ons are built in, each with its own default, turned on or off in Settings ▸ Add-ons, and not loaded while off** (2026-11-12). One `AddOn` enum in `parley-ui-egui/src/addons.rs` is the list the rest of the UI asks ("is this add-on on?"); the settings keep only the ids that differ from each default. Each add-on keeps its code in its own modules (macros: `parley-ui-egui/src/macros.rs`, `parley_core::macros`, `session/playback`). Not a plugin system for third parties. Macros are the first add-on, on by default since they are a main feature of Phase 3 (the owner, 2026-11-12). | Hide features in a Settings page without unloading them; a Cargo feature per add-on (separate builds); plugins loaded at run time. |
 | D16 | Should Parley sign on by itself (R-NET-4)? Changes D11, R-P-3, R-KEY-3, R-KEY-4. | **No: auto sign-on and saved passwords are removed** (the owner, 2026-11-12: a security risk). A password kept on the computer lets anyone with the unlocked desktop open a session as that user, and the bypass sign-on also needs the host's QRMTSIGN opened up. The operator signs on, or a macro asks for the password each time; passwords already saved are deleted from the keychain (R-NET-7). The RFC 4777 password-substitute code is removed from `parley-core`; `keyring` stays in `parley-app` only to delete the old passwords. | Keep it with a warning; keep it but ask for the password at each connect (bypass still keeps it out of clear text); make it an add-on, off by default. |
@@ -138,4 +146,4 @@ Decisions D19–D27 are about SQL and are in [sql/ROADMAP.md](sql/ROADMAP.md) §
   (`D`), phases and ideas (`IDEA`, in [IDEAS.md](IDEAS.md)) take their next number here, whichever roadmap uses it,
   so a number never means two things.
 
-Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-10` · `R-DS-6` · `R-EBC-2` · `R-KEY-9` · `R-UI-20` · `R-ADD-4` · `R-NF-3` · `D37` · `Phase 20` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); ideas: last line of IDEAS.md).
+Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-11` · `R-DS-8` · `R-EBC-2` · `R-KEY-9` · `R-UI-24` · `R-ADD-4` · `R-NF-3` · `D37` · `Phase 22` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); ideas: last line of IDEAS.md).

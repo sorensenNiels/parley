@@ -38,6 +38,10 @@ pub struct Settings {
     pub density: Density,
     /// The terminal font's family name: a bundled font or an installed one.
     pub terminal_font: String,
+    /// The 5250 screen's colours, unless a session chooses its own (R-UI-23).
+    pub screen_colors: terminal::Scheme,
+    /// The colours of the Custom scheme (R-UI-23).
+    pub custom_colors: terminal::CustomColors,
     /// Look for a new version when Parley starts (R-UI-11).
     pub check_for_updates: bool,
     /// Which add-ons are on (R-ADD-1).
@@ -53,6 +57,8 @@ impl Default for Settings {
             text_size: 100,
             density: Density::Comfortable,
             terminal_font: fonts::DEFAULT_TERMINAL_FONT.to_owned(),
+            screen_colors: terminal::Scheme::default(),
+            custom_colors: terminal::CustomColors::default(),
             check_for_updates: true,
             addons: AddOnSettings::default(),
             keyboard_maps: Vec::new(),
@@ -104,7 +110,11 @@ impl Page {
                 settings.text_size = defaults.text_size;
                 settings.density = defaults.density;
             }
-            Self::Terminal => settings.terminal_font = defaults.terminal_font,
+            Self::Terminal => {
+                settings.terminal_font = defaults.terminal_font;
+                settings.screen_colors = defaults.screen_colors;
+                settings.custom_colors = defaults.custom_colors;
+            }
             // The map shown gets the Default map's keys: see `keyboard::Page::restore`.
             Self::Keyboard => {}
             Self::AddOns => {
@@ -268,8 +278,26 @@ impl Dialog {
                         .labelled_by(name);
                 },
             );
+        });
+        group(ui, "Colours", None, |rows| {
+            rows.row(
+                "Colours",
+                Some("A session can have its own, in the session dialog."),
+                |ui, _| {
+                    theme::segmented(ui, &mut settings.screen_colors, &terminal::Scheme::ALL);
+                },
+            );
+            if settings.screen_colors == terminal::Scheme::Custom {
+                rows.row(
+                    "Custom colours",
+                    Some("The background, then the seven 5250 colours."),
+                    |ui, _| custom_colors(ui, &mut settings.custom_colors),
+                );
+            }
             rows.full_row(|ui| {
-                preview(ui);
+                let palette =
+                    terminal::Palette::of(settings.screen_colors, &settings.custom_colors);
+                preview(ui, &palette);
                 theme::hint(
                     ui,
                     "The font's size follows the window: the screen always fills it.",
@@ -306,11 +334,25 @@ fn font_choice(ui: &mut Ui, font: &mut String, installed: Option<&[String]>) -> 
         .response
 }
 
-/// A few lines of a 5250 screen in the terminal font and colours.
-fn preview(ui: &mut Ui) {
+/// A colour button for the background and for each 5250 colour, named for screen readers.
+fn custom_colors(ui: &mut Ui, custom: &mut terminal::CustomColors) {
+    ui.horizontal(|ui| {
+        let named = |ui: &mut Ui, rgb: &mut [u8; 3], name: &str| {
+            let button = egui::color_picker::color_edit_button_srgb(ui, rgb).on_hover_text(name);
+            button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
+        };
+        named(ui, &mut custom.background, "Background");
+        for (rgb, (_, name)) in custom.colors.iter_mut().zip(terminal::COLORS) {
+            named(ui, rgb, name);
+        }
+    });
+}
+
+/// A few lines of a 5250 screen in the terminal font and `palette`, with every colour named.
+fn preview(ui: &mut Ui, palette: &terminal::Palette) {
     let font = fonts::terminal_font(ui.ctx(), 15.0);
     Frame::new()
-        .fill(terminal::BACKGROUND)
+        .fill(palette.background)
         .inner_margin(Margin::same(10))
         .corner_radius(CornerRadius::same(6))
         .show(ui, |ui| {
@@ -319,12 +361,17 @@ fn preview(ui: &mut Ui) {
             let line = |ui: &mut Ui, text: &str, color| {
                 ui.label(RichText::new(text).font(font.clone()).color(color));
             };
-            let white = terminal::color(parley_core::Color::White);
-            let green = terminal::color(parley_core::Color::Green);
+            let white = palette.color(parley_core::Color::White);
+            let green = palette.color(parley_core::Color::Green);
             line(ui, "            Sign On             ", white);
             line(ui, "System . . . . . :   PUB400     ", green);
             line(ui, "User . . . . . . . . QSECOFR    ", green);
             line(ui, "0Oo 1lI| {}[] æøå ÆØÅ €  ", green);
+            ui.horizontal_wrapped(|ui| {
+                for (color, name) in terminal::COLORS {
+                    line(ui, name, palette.color(color));
+                }
+            });
         });
     ui.add_space(4.0);
 }
