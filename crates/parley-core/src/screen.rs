@@ -263,6 +263,9 @@ pub struct Screen {
     size: ScreenSize,
     buffer: Vec<u8>,
     fields: Vec<Field>,
+    /// The Start of Header's command key switches (R-DS-8): bit n set means F(n+1) sends no
+    /// field data. Part of the format table, so clearing the fields clears them.
+    keys_without_data: u32,
     /// The cursor's buffer position.
     pub cursor: usize,
 }
@@ -273,6 +276,7 @@ impl Screen {
             size,
             buffer: vec![0; size.positions()],
             fields: Vec::new(),
+            keys_without_data: 0,
             cursor: 0,
         }
     }
@@ -294,8 +298,24 @@ impl Screen {
         *self = Self::new(size);
     }
 
+    /// Clears the format table: its fields and the command key switches (R-DS-8).
     pub fn clear_fields(&mut self) {
         self.fields.clear();
+        self.keys_without_data = 0;
+    }
+
+    /// Sets the Start of Header's command key switches, bytes 5-7 as sent (SC30-3533-04
+    /// §15.6.9): byte 5 bits 0-7 are F24-F17, byte 6 F16-F9, byte 7 F8-F1, bit 0 high-order.
+    pub fn set_key_switches(&mut self, switches: [u8; 3]) {
+        self.keys_without_data = u32::from_be_bytes([0, switches[0], switches[1], switches[2]]);
+    }
+
+    /// Whether function key `n` (1-24) sends the input fields with its AID (R-DS-8).
+    pub const fn function_key_sends_data(&self, n: u8) -> bool {
+        match n {
+            1..=24 => self.keys_without_data & (1 << (n - 1)) == 0,
+            _ => true,
+        }
     }
 
     /// The buffer position of a 1-based row and column, if it is on the screen.
@@ -494,6 +514,19 @@ mod tests {
             (ScreenSize::Wide.rows(), ScreenSize::Wide.columns()),
             (27, 132)
         );
+    }
+
+    #[test]
+    fn the_key_switches_map_byte_5_to_f24_f17_and_byte_7_to_f8_f1_r_ds_8() {
+        let mut screen = Screen::new(ScreenSize::Standard);
+        screen.set_key_switches([0x80, 0x01, 0x01]);
+        let off: Vec<u8> = (1..=24)
+            .filter(|&n| !screen.function_key_sends_data(n))
+            .collect();
+        assert_eq!(off, [1, 9, 24]);
+        assert!(screen.function_key_sends_data(0) && screen.function_key_sends_data(25));
+        screen.clear_fields();
+        assert!((1..=24).all(|n| screen.function_key_sends_data(n)));
     }
 
     #[test]

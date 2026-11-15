@@ -278,6 +278,10 @@ impl Session {
         }
         let header = r.take(usize::from(len), "Start of Header")?;
         self.screen.clear_fields();
+        // Bytes 5-7 (after the length): the command key switches, only when all are there.
+        if let [_, _, _, _, a, b, c] = *header {
+            self.screen.set_key_switches([a, b, c]);
+        }
         let rows = self.screen.size().rows();
         self.error_row = header
             .get(3)

@@ -515,6 +515,85 @@ fn read_mdt_immediate_alternate_answers_at_once_with_cursor_aid_00_and_modified_
     assert_eq!(s.keyboard(), KeyboardState::Unlocked);
 }
 
+/// The sign-on screen with its Start of Header's command key switches set to `switches`, or
+/// with a Start of Header of `len` bytes.
+fn sign_on_with_header(len: u8, switches: [u8; 3]) -> Session {
+    let mut data = sign_on();
+    let soh = data
+        .windows(9)
+        .position(|w| w == [0x01, 0x07, 0, 0, 0, 24, 0, 0, 0])
+        .expect("the Start of Header");
+    let mut header = vec![
+        0x01,
+        len,
+        0,
+        0,
+        0,
+        24,
+        switches[0],
+        switches[1],
+        switches[2],
+    ];
+    header.truncate(2 + usize::from(len));
+    data.splice(soh..soh + 9, header);
+    let mut s = session();
+    s.receive(&host(&data));
+    assert_eq!(s.notice(), None);
+    s
+}
+
+fn press(s: &mut Session, n: u8) -> Vec<u8> {
+    s.key(Key::Aid(Aid::function(n).expect("F1-F24")));
+    sent_one(s).2
+}
+
+#[test]
+fn a_function_key_switched_off_in_the_header_sends_only_cursor_and_aid_r_ds_8() {
+    // F3 (byte 7 bit 5) and F24 (byte 5 bit 0).
+    let mut s = sign_on_with_header(7, [0x80, 0x00, 0x04]);
+    keys(&mut s, "ab");
+    assert_eq!(press(&mut s, 3), [6, 55, 0x33]);
+    assert_eq!(
+        s.keyboard(),
+        KeyboardState::Locked,
+        "it still waits for the host"
+    );
+
+    let mut s = sign_on_with_header(7, [0x80, 0x00, 0x04]);
+    keys(&mut s, "ab");
+    assert_eq!(press(&mut s, 24), [6, 55, 0xBC]);
+
+    let mut s = sign_on_with_header(7, [0x80, 0x00, 0x04]);
+    keys(&mut s, "ab");
+    let f4 = press(&mut s, 4);
+    assert_eq!(&f4[..6], &[6, 55, 0x34, SBA, 6, 53], "F4 sends its data");
+}
+
+#[test]
+fn a_header_without_the_switches_lets_every_key_send_data_r_ds_8() {
+    let mut s = sign_on_with_header(6, [0xFF, 0xFF, 0xFF]);
+    keys(&mut s, "ab");
+    assert!(press(&mut s, 3).len() > 3);
+}
+
+#[test]
+fn clear_format_table_switches_the_keys_back_on_and_restore_screen_keeps_them_r_ds_8() {
+    let mut s = sign_on_with_header(7, [0x00, 0x00, 0x04]);
+    s.receive(&host_record(Opcode::SaveScreen, &[]));
+    let (_, _, saved) = sent_one(&mut s);
+    s.receive(&host(&[ESC, 0x50]));
+    s.receive(&host_record(Opcode::RestoreScreen, &saved));
+    keys(&mut s, "ab");
+    assert_eq!(press(&mut s, 3), [6, 55, 0x33], "restored with the screen");
+
+    let mut s = sign_on_with_header(7, [0x00, 0x00, 0x04]);
+    s.receive(&host(&[ESC, 0x50, ESC, 0x52, 0x00, 0x00]));
+    assert!(
+        s.screen().function_key_sends_data(3),
+        "the switches went with the table"
+    );
+}
+
 #[test]
 fn roll_up_moves_rows_and_blanks_the_bottom() {
     let mut s = session();

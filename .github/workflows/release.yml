@@ -115,6 +115,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Only for the release notes' header (--notes-file below); the packages come from the artifacts.
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
       - uses: actions/download-artifact@v8
         with:
           path: downloads
@@ -133,3 +137,14 @@ jobs:
             --title "Parley ${GITHUB_REF_NAME#v}" \
             --notes-file .github/release-install.md \
             --generate-notes
+      - name: Keep only the newest three releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Deletes older published releases and their files; the git tags stay. Drafts are left alone.
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 1000 \
+              --json tagName,createdAt --jq 'sort_by(.createdAt) | reverse | .[3:] | .[].tagName' |
+            while read -r tag; do
+              echo "Deleting release $tag"
+              gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes
+            done

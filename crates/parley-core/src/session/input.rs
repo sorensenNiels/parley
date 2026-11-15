@@ -38,6 +38,15 @@ impl Aid {
     pub const fn code(self) -> u8 {
         self.0
     }
+
+    /// The function key's number, 1-24, for F1-F24.
+    pub const fn function_number(self) -> Option<u8> {
+        match self.0 {
+            0x31..=0x3C => Some(self.0 - 0x30),
+            0xB1..=0xBC => Some(self.0 - 0xB0 + 12),
+            _ => None,
+        }
+    }
 }
 
 /// A 5250 keyboard function. The UI maps PC keys to these.

@@ -213,4 +213,13 @@ Checked by the owner in the running app (2026-11-15); `make verify` on Linux und
   cursor, AID X'00' and only modified fields after SBA, trailing nulls left out; the query reply sets byte 0 bit 7.
   **Where the sources differ:** the manual says X'83' is "the same as READ IMMEDIATE" (no cursor or AID); RFC 1205
   says AID X'00' after the cursor, which Parley follows. **Not checked against a real IBM i** (the test profile could
-  not sign on); marked done by the owner (2026-11-15).
+  not sign on); marked done by the owner (2026-11-15). In a later trace of DKSOFT00 (help windows, F4 list windows,
+  F12) the host sent neither command: it rewrites the whole screen.
+
+- **R-DS-8** (2026-11-15): function keys a Start of Header switches off send no field data (SC30-3533-04 §15.6.9).
+  **Automated** (`make test`): F3 and F24 switched off send cursor and AID only and still lock the keyboard, F4 sends
+  its data; a 6-byte Start of Header leaves every key sending data; Clear Format Table switches them back on and
+  Save/Restore Screen keeps them; the bit order (byte 5 = F24–F17, byte 7 = F8–F1). **Against the owner's IBM i**
+  (DKSOFT00, the owner signed on in Parley with `PARLEY_TRACE`, inbound only): the DSPLIB prompt's Start of Header
+  switches off F5 (`00 00 10`); replaying the recorded screen with a changed field, F5 sends 3 bytes (cursor, AID)
+  and F4 and F12 send the field. Marked done by the owner (2026-11-15).

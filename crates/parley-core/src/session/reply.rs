@@ -15,11 +15,19 @@ impl Session {
     /// The reply to a read command: cursor row and column and the AID (not for Read Immediate),
     /// then fields. Read MDT Fields sends the modified fields, each after a Set Buffer Address;
     /// Read Input Fields sends every field, without addresses, if any was modified.
+    /// A function key whose Start of Header switch is set sends no fields (R-DS-8).
     pub(super) fn send_fields(&mut self, kind: ReadKind, aid: Option<Aid>) {
         let mut data = Vec::new();
         if let Some(aid) = aid {
             let (row, column) = self.screen.row_column(self.screen.cursor);
             data.extend([one_based(row), one_based(column), aid.code()]);
+            if aid
+                .function_number()
+                .is_some_and(|n| !self.screen.function_key_sends_data(n))
+            {
+                self.send_record(0, Opcode::PutGet, &data);
+                return;
+            }
         }
         let any_modified = self.screen.fields().iter().any(|f| f.modified);
         let with_address = matches!(
