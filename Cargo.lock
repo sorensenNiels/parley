@@ -2854,7 +2854,7 @@ checksum = "73072a9470554c8e794778acece2312661218aaabb635600957d952cf01c716e"
 
 [[package]]
 name = "parley-app"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "eframe",
  "keyring",
@@ -2870,7 +2870,7 @@ dependencies = [
 
 [[package]]
 name = "parley-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "rustls",
  "rustls-platform-verifier",
@@ -2882,7 +2882,7 @@ dependencies = [
 
 [[package]]
 name = "parley-sql-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "des",
@@ -2901,7 +2901,7 @@ dependencies = [
 
 [[package]]
 name = "parley-sql-ui"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "egui",
  "egui_kittest",
@@ -2915,7 +2915,7 @@ dependencies = [
 
 [[package]]
 name = "parley-ui-egui"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "egui",
  "egui_kittest",
