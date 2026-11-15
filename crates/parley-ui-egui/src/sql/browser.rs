@@ -1,9 +1,13 @@
-//! The schema browser (R-SQL-34): the SQL job's library list and the libraries pinned, each
-//! opening to its tables, views, indexes, procedures and functions, a table to its columns.
-//! Read through the second connection (D21), lazily, a level at a time.
+//! The schema browser (R-SQL-34), the side panel's Libraries (R-SQL-83): the SQL job's library
+//! list and the operator's library groups, each library opening to its tables, views, indexes,
+//! procedures and functions, a table to its columns. Read through the second connection (D21),
+//! lazily, a level at a time.
+
+mod groups;
 
 use std::collections::BTreeMap;
 
+use egui::collapsing_header::CollapsingState;
 use egui::{CollapsingHeader, RichText, ScrollArea, TextEdit, Ui};
 use parley_core::sql::catalog::{self, ColumnInfo, Kind, Object};
 use parley_core::sql::text;
@@ -15,6 +19,8 @@ use super::database::{Answered, Ask, Database, State};
 use super::editor::Item;
 use super::snippets::field_row;
 use crate::{icons, theme};
+
+pub use groups::{LibraryGroup, from_pinned};
 
 /// Something read, being read, or not readable.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,15 +48,19 @@ pub enum Pick {
 }
 
 /// The browser's state.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Browser {
-    /// Libraries pinned for this session, kept in the settings.
-    pinned: Vec<String>,
-    /// The library typed to pin.
-    pin_field: String,
-    pin_error: Option<String>,
-    /// The library pinned last, shown open at once: pinned closed, it seemed to show nothing.
-    just_pinned: Option<String>,
+    /// The operator's library groups for this connection, kept in the settings (R-SQL-83).
+    groups: Vec<LibraryGroup>,
+    /// Whether the "Library list" group is open.
+    list_open: bool,
+    /// The name dialog open: a new group, a new name, or a library to add.
+    asking: Option<groups::Asking>,
+    /// The group asked about before deleting.
+    deleting: Option<usize>,
+    /// The library added last, by group, shown open at once: added closed, it seemed to show
+    /// nothing.
+    just_added: Option<(usize, String)>,
     query: String,
     /// Why the last DDL could not be read.
     error: Option<String>,
@@ -60,14 +70,24 @@ pub struct Browser {
     parameters: BTreeMap<(String, String), Load<Vec<catalog::Signature>>>,
 }
 
-impl Browser {
-    pub fn with_pinned(pinned: Vec<String>) -> Self {
+impl Default for Browser {
+    fn default() -> Self {
         Self {
-            pinned,
-            ..Self::default()
+            groups: Vec::new(),
+            list_open: true,
+            asking: None,
+            deleting: None,
+            just_added: None,
+            query: String::new(),
+            error: None,
+            objects: BTreeMap::new(),
+            columns: BTreeMap::new(),
+            parameters: BTreeMap::new(),
         }
     }
+}
 
+impl Browser {
     /// The signatures of the routine `name` in `qualifier`, or else the current `schema`
     /// (R-SQL-65): read once per window, asked for the first time it is wanted; `None` while
     /// read, or when there is no such routine.
@@ -91,11 +111,6 @@ impl Browser {
             Some(Load::Ready(found)) if !found.is_empty() => Some(found),
             Some(Load::Ready(_) | Load::Reading | Load::Failed(_)) | None => None,
         }
-    }
-
-    /// The libraries pinned, to keep.
-    pub fn pinned(&self) -> &[String] {
-        &self.pinned
     }
 
     /// Takes the catalog's answers; a DDL read opens a script.
@@ -134,10 +149,13 @@ impl Browser {
         picks
     }
 
-    /// The panel. `list` is the SQL job's library list: system name and kind.
+    /// The tree, under a root named `system`, the IBM i, described by `about` on hover
+    /// (R-SQL-83). `list` is the SQL job's library list: system name and kind.
     pub fn show(
         &mut self,
         ui: &mut Ui,
+        system: &str,
+        about: &str,
         list: &[(String, String)],
         db: &mut Database,
     ) -> Option<Pick> {
@@ -163,25 +181,116 @@ impl Browser {
             .show(ui, |ui| {
                 // A long name is cut, not let widen the panel.
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                theme::section_label(ui, "Library list");
-                if list.is_empty() {
-                    theme::hint(ui, "Read after sign-on.");
-                }
-                for (library, kind) in list {
-                    picked = self.library(ui, library, Some(kind), db).or(picked.take());
-                }
-                ui.add_space(6.0);
-                theme::section_label(ui, "Pinned");
-                let pinned = self.pinned.clone();
-                if pinned.is_empty() {
-                    theme::hint(ui, "Pin a library to keep it here for this session.");
-                }
-                for library in &pinned {
-                    picked = self.library(ui, library, None, db).or(picked.take());
-                }
-                ui.add_space(6.0);
-                self.pin_row(ui);
+                let (_, root, _) = group_header(ui, "sql-system", true, |ui| {
+                    ui.add(
+                        egui::Label::new(theme::semibold(system))
+                            .truncate()
+                            .sense(egui::Sense::click()),
+                    )
+                    .on_hover_text(about)
+                })
+                .body(|ui| {
+                    picked = self.library_list(ui, list, db);
+                    for i in 0..self.groups.len() {
+                        picked = self.group(ui, i, db).or(picked.take());
+                    }
+                    if self.groups.is_empty() {
+                        ui.add_space(6.0);
+                        theme::hint(
+                            ui,
+                            "Make a group, such as Development or Testing, with New group, to keep libraries at hand.",
+                        );
+                    }
+                });
+                root.inner.context_menu(|ui| self.system_menu(ui));
             });
+        picked
+    }
+
+    /// The IBM i's menu, on the root of the tree (R-SQL-83).
+    fn system_menu(&mut self, ui: &mut Ui) {
+        if ui.button("New group…").clicked() {
+            self.new_group();
+            ui.close();
+        }
+        if ui.button("Read the catalog again").clicked() {
+            self.objects.clear();
+            self.columns.clear();
+            ui.close();
+        }
+    }
+
+    /// The group "Library list": the SQL job's, which cannot be changed (R-SQL-83).
+    fn library_list(
+        &mut self,
+        ui: &mut Ui,
+        list: &[(String, String)],
+        db: &mut Database,
+    ) -> Option<Pick> {
+        let mut picked = None;
+        let open = self.list_open;
+        group_header(ui, "sql-library-list", open, |ui| {
+            ui.label(theme::semibold("Library list"))
+                .on_hover_text("The SQL job's library list");
+        })
+        .body(|ui| {
+            if list.is_empty() {
+                theme::hint(ui, "Read after sign-on.");
+            }
+            for (library, kind) in list {
+                picked = self
+                    .library(ui, library, Some(kind), None, db)
+                    .or(picked.take());
+            }
+        });
+        self.list_open = open_now(ui, "sql-library-list", open);
+        picked
+    }
+
+    /// Group `i`, with its menu (R-SQL-83).
+    fn group(&mut self, ui: &mut Ui, i: usize, db: &mut Database) -> Option<Pick> {
+        let group = self.groups.get(i)?;
+        let (name, libraries, open) = (group.name.clone(), group.libraries.clone(), group.open);
+        let id = ("sql-library-group", i);
+        let mut picked = None;
+        let (_, header, _) = group_header(ui, id, open, |ui| {
+            let label = ui.add(
+                egui::Label::new(theme::semibold(&name))
+                    .truncate()
+                    .sense(egui::Sense::click()),
+            );
+            let menu = theme::button_row(ui, |ui| {
+                let glyph = icons::icon(icons::LIST).color(theme::palette(ui).muted);
+                ui.menu_button(glyph, |ui| self.group_menu(ui, i)).response
+            });
+            menu.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::accesskit::Role::Button,
+                    true,
+                    format!("{name} menu"),
+                )
+            });
+            label
+        })
+        .body(|ui| {
+            if libraries.is_empty() {
+                theme::hint(ui, "Add a library from the group's menu.");
+            }
+            for library in &libraries {
+                picked = self
+                    .library(ui, library, None, Some(i), db)
+                    .or(picked.take());
+            }
+        });
+        let label = header.inner;
+        let mut open = open_now(ui, id, open);
+        if label.clicked() {
+            open = !open;
+        }
+        label.context_menu(|ui| self.group_menu(ui, i));
+        if let Some(group) = self.groups.get_mut(i) {
+            group.open = open;
+        }
         picked
     }
 
@@ -202,49 +311,25 @@ impl Browser {
         }
     }
 
-    fn pin_row(&mut self, ui: &mut Ui) {
-        let (field, add) = field_row(
-            ui,
-            None,
-            TextEdit::singleline(&mut self.pin_field).hint_text("Library to pin"),
-            icons::PLUS,
-            "Pin library",
-        );
-        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        if add.clicked() || entered {
-            self.pin(&self.pin_field.clone());
-        }
-        if let Some(error) = &self.pin_error {
-            theme::error(ui, error);
-        }
-    }
-
-    fn pin(&mut self, typed: &str) {
-        match text::system_name(typed) {
-            Some(name) => {
-                if !self.pinned.contains(&name) {
-                    self.pinned.push(name.clone());
-                }
-                self.just_pinned = Some(name);
-                self.pin_field.clear();
-                self.pin_error = None;
-            }
-            None => self.pin_error = Some(format!("\"{}\" is not a library name.", typed.trim())),
-        }
-    }
-
-    /// One library: opening it reads its objects.
+    /// One library, in group `group` or in the library list (`None`): opening it reads its
+    /// objects.
     fn library(
         &mut self,
         ui: &mut Ui,
         library: &str,
         kind: Option<&str>,
+        group: Option<usize>,
         db: &mut Database,
     ) -> Option<Pick> {
         let mut picked = None;
+        let just_added = group.is_some_and(|g| {
+            self.just_added
+                .as_ref()
+                .is_some_and(|(i, l)| *i == g && l == library)
+        });
         let header = CollapsingHeader::new(RichText::new(library))
-            .id_salt(("sql-library", library, kind.is_some()))
-            .default_open(kind.is_none() && self.just_pinned.as_deref() == Some(library))
+            .id_salt(("sql-library", library, group))
+            .default_open(just_added)
             .show(ui, |ui| {
                 let Some(load) = self.objects.get(library).cloned() else {
                     self.objects.insert(library.to_owned(), Load::Reading);
@@ -264,16 +349,29 @@ impl Browser {
         if response.double_clicked() {
             picked = Some(Pick::Insert(catalog::identifier(library)));
         }
-        response.context_menu(|ui| {
-            if self.pinned.iter().any(|p| p == library) {
-                if ui.button("Unpin").clicked() {
-                    self.pinned.retain(|p| p != library);
-                }
-            } else if ui.button("Pin").clicked() {
-                self.pin(library);
-            }
-        });
+        response.context_menu(|ui| self.library_menu(ui, library, group));
         picked
+    }
+
+    /// A library's menu: into another group, or out of this one (R-SQL-83).
+    fn library_menu(&mut self, ui: &mut Ui, library: &str, group: Option<usize>) {
+        let others = self.groups_without(library);
+        ui.add_enabled_ui(!others.is_empty(), |ui| {
+            ui.menu_button("Add to group", |ui| {
+                for (i, name) in others {
+                    if ui.button(name).clicked() {
+                        self.add_to(i, library);
+                        ui.close();
+                    }
+                }
+            });
+        });
+        if let Some(i) = group
+            && ui.button("Remove from group").clicked()
+        {
+            self.remove_from(i, library);
+            ui.close();
+        }
     }
 
     /// A library's objects, a group per kind, filtered by the search.
@@ -398,6 +496,25 @@ impl Browser {
     }
 }
 
+/// A group's header row, open as `open` says; its caret may change that, which
+/// [`open_now`] reads after the body.
+fn group_header<R>(
+    ui: &mut Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    open: bool,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> egui::collapsing_header::HeaderResponse<'_, R> {
+    let id = ui.make_persistent_id(id);
+    let mut state = CollapsingState::load_with_default_open(ui.ctx(), id, open);
+    state.set_open(open);
+    state.show_header(ui, add)
+}
+
+/// Whether the group `id` is open after this frame's clicks on its caret.
+fn open_now(ui: &Ui, id: impl std::hash::Hash + std::fmt::Debug, was: bool) -> bool {
+    CollapsingState::load(ui.ctx(), ui.make_persistent_id(id)).map_or(was, |s| s.is_open())
+}
+
 // ---------------------------------------------------------------- completion (R-SQL-36)
 
 impl Browser {
@@ -477,7 +594,9 @@ impl Browser {
             if let Some(schema) = schema {
                 self.object_items(schema, prefix, db, &mut items);
             }
-            let libraries = list.iter().map(|(l, _)| l).chain(&self.pinned);
+            // R-SQL-83: the libraries of every group, as the pinned ones were (R-SQL-36).
+            let grouped = self.groups.iter().flat_map(|g| &g.libraries);
+            let libraries = list.iter().map(|(l, _)| l).chain(grouped);
             for library in libraries {
                 if starts(library, prefix) && !items.iter().any(|i: &Item| i.label == *library) {
                     items.push(Item {
@@ -919,19 +1038,6 @@ mod tests {
     }
 
     #[test]
-    fn only_a_library_name_can_be_pinned_and_once_r_sql_34() {
-        let mut b = Browser::default();
-        b.pin(" qgpl ");
-        b.pin("QGPL");
-        assert_eq!(b.pinned(), ["QGPL"]);
-        assert_eq!(b.just_pinned.as_deref(), Some("QGPL"), "shown open at once");
-        b.pin("not a name");
-        assert!(b.pin_error.is_some());
-        b.pin("ÆØÅ");
-        assert_eq!(b.pinned().len(), 1);
-    }
-
-    #[test]
     fn answers_fill_the_tree_and_failures_are_kept_r_sql_34() {
         let mut b = Browser::default();
         b.receive(vec![
@@ -973,6 +1079,7 @@ mod tests {
         w.job = Some(JobContext {
             schema: "QGPL".to_owned(),
             libraries: vec![("QGPL".to_owned(), "USER".to_owned())],
+            server: "SYSÆØÅ".to_owned(),
         });
         w.browser.receive(vec![(
             Ask::Objects("QGPL".to_owned()),
@@ -984,8 +1091,6 @@ mod tests {
             ]]),
         )]);
         let mut harness = drawn(w, Vec::new());
-        harness.get_by_label("Database").click();
-        harness.run();
         harness.get_by_label("QGPL").click();
         harness.run();
         harness.get_by_label("Tables (1)").click();
@@ -995,8 +1100,8 @@ mod tests {
             "the table is listed"
         );
         assert!(
-            harness.query_by_label("PINNED").is_some(),
-            "the pinned section"
+            harness.query_by_label("SYSÆØÅ").is_some(),
+            "R-SQL-83: the IBM i is the tree's root"
         );
     }
 
@@ -1044,13 +1149,13 @@ mod tests {
     }
 
     #[test]
-    fn the_side_panel_keeps_its_width_on_every_tab_r_sql_34() {
+    fn the_side_panel_keeps_its_width_with_a_long_name_open_r_sql_82() {
         use egui_kittest::kittest::Queryable;
 
         use super::super::tests::{drawn, window};
         use super::super::tools::JobContext;
 
-        for side in ["History", "Snippets", "Database"] {
+        {
             let mut w = window();
             w.database.state = State::Ready {
                 job: "1/QUSER/QZDASOINIT".to_owned(),
@@ -1058,6 +1163,7 @@ mod tests {
             w.job = Some(JobContext {
                 schema: "QGPL".to_owned(),
                 libraries: vec![("QGPL".to_owned(), "USER".to_owned())],
+                ..JobContext::default()
             });
             let long = "KUNDER_MED_ET_MEGET_LANGT_NAVN_ÆØÅ_DER_BLIVER_VED_OG_VED";
             w.browser.receive(vec![(
@@ -1070,21 +1176,18 @@ mod tests {
                 ]]),
             )]);
             let mut harness = drawn(w, Vec::new());
-            harness.get_by_label(side).click();
+            harness.get_by_label("QGPL").click();
             harness.run_steps(2);
-            if side == "Database" {
-                harness.get_by_label("QGPL").click();
-                harness.run_steps(2);
-                harness.get_by_label("Tables (1)").click();
-                harness.run_steps(2);
-            }
-            let before = harness.get_by_label(side).rect();
+            harness.get_by_label("Tables (1)").click();
+            harness.run_steps(2);
+            let edge = "Hide the side panel";
+            let before = harness.get_by_label(edge).rect();
             harness.run_steps(4);
-            let after = harness.get_by_label(side).rect();
+            let after = harness.get_by_label(edge).rect();
             // The panel grew a few points each frame when a row guessed its width.
             assert!(
-                (after.left() - before.left()).abs() < 0.5,
-                "{side} stays put: {before:?} then {after:?}"
+                (after.right() - before.right()).abs() < 0.5,
+                "the panel's edge stays put: {before:?} then {after:?}"
             );
         }
     }
@@ -1117,7 +1220,7 @@ mod tests {
 
     #[test]
     fn completion_offers_columns_tables_libraries_and_keywords_r_sql_36() {
-        let mut b = Browser::with_pinned(vec!["KUNDELIB".to_owned()]);
+        let mut b = Browser::with_groups(from_pinned(vec!["KUNDELIB".to_owned()]), true);
         let cell = |t: &str| Some(t.to_owned());
         b.receive(vec![
             (

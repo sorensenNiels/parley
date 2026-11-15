@@ -36,11 +36,13 @@ pub enum SqlAction {
     ZoomIn,
     ZoomOut,
     ZoomReset,
+    /// Fold or open the side panel (R-SQL-82).
+    SidePanel,
 }
 
 impl SqlAction {
     /// Every action, in the order the settings list them.
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 24] = [
         Self::Run,
         Self::RunAll,
         Self::Cancel,
@@ -64,6 +66,7 @@ impl SqlAction {
         Self::ZoomIn,
         Self::ZoomOut,
         Self::ZoomReset,
+        Self::SidePanel,
     ];
 
     /// How the settings keep it; never changes.
@@ -92,6 +95,7 @@ impl SqlAction {
             Self::ZoomIn => "zoom-in",
             Self::ZoomOut => "zoom-out",
             Self::ZoomReset => "zoom-reset",
+            Self::SidePanel => "side-panel",
         }
     }
 
@@ -120,6 +124,7 @@ impl SqlAction {
             Self::ZoomIn => "Larger text",
             Self::ZoomOut => "Smaller text",
             Self::ZoomReset => "Text at 100 %",
+            Self::SidePanel => "Show or hide the side panel",
         }
     }
 
@@ -141,6 +146,7 @@ impl SqlAction {
             | Self::Complete
             | Self::SelectNext => "Editing",
             Self::ZoomIn | Self::ZoomOut | Self::ZoomReset => "Zoom",
+            Self::SidePanel => "Window",
         }
     }
 
@@ -169,7 +175,8 @@ impl SqlAction {
             | Self::GoToLine
             | Self::Format
             | Self::UpperCase
-            | Self::LowerCase => false,
+            | Self::LowerCase
+            | Self::SidePanel => false,
         }
     }
 
@@ -200,6 +207,7 @@ impl SqlAction {
             Self::ZoomIn => &["Ctrl+Plus", "Ctrl+Equals"],
             Self::ZoomOut => &["Ctrl+Minus"],
             Self::ZoomReset => &["Ctrl+0"],
+            Self::SidePanel => &["Ctrl+B"],
         }
     }
 

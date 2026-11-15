@@ -71,8 +71,13 @@ pub struct Settings {
     pub sql_history: std::collections::BTreeMap<String, Vec<String>>,
     /// The SQL window's scripts, by saved session (R-SQL-20).
     pub sql_scripts: std::collections::BTreeMap<String, Vec<crate::sql::editor::SavedScript>>,
-    /// The libraries pinned in the SQL window's schema browser, by saved session (R-SQL-34).
+    /// The libraries pinned in the SQL window's schema browser, by saved session (R-SQL-34):
+    /// read once to make a connection's group "Pinned", then removed (R-SQL-83).
     pub sql_pinned: std::collections::BTreeMap<String, Vec<String>>,
+    /// The SQL window's library groups, by saved connection (R-SQL-83).
+    pub sql_groups: std::collections::BTreeMap<String, Vec<crate::sql::browser::LibraryGroup>>,
+    /// The SQL window's side panel: its width, folded, its sections (R-SQL-82, R-SQL-84).
+    pub sql_side: crate::sql::side::SideLayout,
     /// The SQL assistant's provider, model and address; never a key (R-SQL-48, D27).
     pub assistant: parley_core::sql::assistant::AssistantConfig,
 }
@@ -99,6 +104,8 @@ impl Default for Settings {
             sql_history: std::collections::BTreeMap::new(),
             sql_scripts: std::collections::BTreeMap::new(),
             sql_pinned: std::collections::BTreeMap::new(),
+            sql_groups: std::collections::BTreeMap::new(),
+            sql_side: crate::sql::side::SideLayout::default(),
             assistant: parley_core::sql::assistant::AssistantConfig::default(),
         }
     }

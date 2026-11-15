@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use parley_core::SessionConfig;
 use parley_core::sql::helper::HelperFiles;
 
-use super::SqlWindow;
+use super::{SqlWindow, browser};
 use crate::settings::Settings;
 use crate::{dialog, theme};
 
@@ -18,8 +18,8 @@ const HISTORY: usize = 100;
 const NO_HELPER: &str =
     "This Parley was installed without the SQL helper, so the SQL window cannot open.";
 
-/// The window for `name` on `config`'s host, with `settings`' limits, headings, scripts and
-/// pinned libraries; `user` is filled in. The helper's jars are in `helpers`; Java is the one
+/// The window for `name` on `config`'s host, with `settings`' limits, headings, scripts, side
+/// panel and library groups; `user` is filled in. The helper's jars are in `helpers`; Java is the one
 /// the settings name, or found. `Err` says why it cannot open.
 pub fn open(
     name: &str,
@@ -33,7 +33,10 @@ pub fn open(
         (!settings.java_path.trim().is_empty()).then(|| PathBuf::from(settings.java_path.trim()));
     let java = parley_core::sql::java::find(configured.as_deref()).map_err(|e| e.to_string())?;
     let scripts = settings.sql_scripts.get(name).cloned().unwrap_or_default();
-    let pinned = settings.sql_pinned.get(name).cloned().unwrap_or_default();
+    // R-SQL-83: a connection without groups yet gets its pinned libraries as one.
+    let groups = settings.sql_groups.get(name).cloned().unwrap_or_else(|| {
+        browser::from_pinned(settings.sql_pinned.get(name).cloned().unwrap_or_default())
+    });
     Ok(SqlWindow::open(
         config,
         java.path,
@@ -43,22 +46,25 @@ pub fn open(
     )
     .with_limits(settings.sql_rows, settings.sql_timeout)
     .with_header(settings.sql_header)
-    .with_pinned(pinned))
+    .with_side(settings.sql_side, groups))
 }
 
 /// Keeps what `window` for session `name` changed in `settings`: the statements it ran
-/// (R-SQL-7), the headings chosen (R-SQL-29), the pinned libraries (R-SQL-34) and the scripts
-/// (R-SQL-20), these only when their count moved on from `scripts_kept`.
+/// (R-SQL-7), the headings chosen (R-SQL-29), the side panel's layout and the library groups
+/// (R-SQL-82, R-SQL-83) and the scripts (R-SQL-20), these only when their count moved on from
+/// `scripts_kept`.
 pub fn keep(window: &mut SqlWindow, name: &str, settings: &mut Settings, scripts_kept: &mut u64) {
     settings.sql_header = window.header;
-    let pinned = window.pinned();
-    if settings
-        .sql_pinned
-        .get(name)
-        .map_or(!pinned.is_empty(), |p| p != pinned)
-    {
-        settings.sql_pinned.insert(name.to_owned(), pinned.to_vec());
+    let side = window.side_layout();
+    if settings.sql_side != side {
+        settings.sql_side = side;
     }
+    let groups = window.library_groups();
+    if settings.sql_groups.get(name).map(Vec::as_slice) != Some(groups) {
+        settings.sql_groups.insert(name.to_owned(), groups.to_vec());
+    }
+    // The pinned libraries are in the groups now (R-SQL-83).
+    settings.sql_pinned.remove(name);
     if window.scripts_generation() != *scripts_kept {
         let (generation, scripts) = window.scripts();
         *scripts_kept = generation;
@@ -73,7 +79,7 @@ pub fn keep(window: &mut SqlWindow, name: &str, settings: &mut Settings, scripts
     }
 }
 
-/// Moves what the settings keep for session `old` (history, scripts, pinned libraries) to its
+/// Moves what the settings keep for session `old` (history, scripts, library groups) to its
 /// new name `new` (R-SQL-46).
 pub fn rename(settings: &mut Settings, old: &str, new: &str) {
     if let Some(history) = settings.sql_history.remove(old) {
@@ -84,6 +90,9 @@ pub fn rename(settings: &mut Settings, old: &str, new: &str) {
     }
     if let Some(pinned) = settings.sql_pinned.remove(old) {
         settings.sql_pinned.insert(new.to_owned(), pinned);
+    }
+    if let Some(groups) = settings.sql_groups.remove(old) {
+        settings.sql_groups.insert(new.to_owned(), groups);
     }
 }
 
@@ -153,6 +162,25 @@ mod tests {
         assert!(!settings.sql_history.contains_key("Prod"));
         assert_eq!(settings.sql_history["Production"], ["VALUES 1"]);
         assert_eq!(settings.sql_pinned["Production"], ["QSYS2"]);
+    }
+
+    /// R-SQL-83: a connection's pinned libraries become its group "Pinned", which is kept in
+    /// their place, and follows a renamed connection (R-SQL-46).
+    #[test]
+    fn pinned_libraries_are_kept_as_a_group_that_follows_a_rename_r_sql_83() {
+        let mut settings = Settings::default();
+        settings
+            .sql_pinned
+            .insert("Prod".to_owned(), vec!["QSYS2".to_owned()]);
+        let groups = browser::from_pinned(settings.sql_pinned["Prod"].clone());
+        let mut window = crate::sql::tests::window().with_side(settings.sql_side, groups);
+        keep(&mut window, "Prod", &mut settings, &mut 0);
+        assert!(settings.sql_pinned.is_empty(), "read once, then removed");
+        assert_eq!(settings.sql_groups["Prod"][0].name, "Pinned");
+        assert_eq!(settings.sql_groups["Prod"][0].libraries, ["QSYS2"]);
+        rename(&mut settings, "Prod", "Production");
+        assert_eq!(settings.sql_groups["Production"][0].libraries, ["QSYS2"]);
+        assert!(!settings.sql_groups.contains_key("Prod"));
     }
 
     #[test]

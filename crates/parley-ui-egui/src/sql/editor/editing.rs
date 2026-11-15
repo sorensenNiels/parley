@@ -71,7 +71,9 @@ impl Scripts {
         let text = self.text().to_owned();
         let selection = self.selection;
         let edit = match action {
-            SqlAction::Run | SqlAction::RunAll | SqlAction::Cancel => return false,
+            SqlAction::Run | SqlAction::RunAll | SqlAction::Cancel | SqlAction::SidePanel => {
+                return false;
+            }
             SqlAction::NewScript => {
                 self.new_tab();
                 None

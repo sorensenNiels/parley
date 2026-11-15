@@ -22,6 +22,8 @@ pub struct JobContext {
     pub schema: String,
     /// (library, kind), in order.
     pub libraries: Vec<(String, String)>,
+    /// The IBM i's relational database name, by default its system name (R-SQL-83).
+    pub server: String,
 }
 
 /// An error's help, by its place in Messages.
@@ -198,6 +200,7 @@ impl SqlWindow {
             self.job = Some(JobContext {
                 schema: rows.first().map(|r| text(r, 0)).unwrap_or_default(),
                 libraries: rows.iter().map(|r| (text(r, 1), text(r, 2))).collect(),
+                server: rows.first().map(|r| text(r, 3)).unwrap_or_default(),
             });
         }
     }
@@ -397,6 +400,7 @@ mod tests {
                 ("QSYS".to_owned(), "SYSTEM".to_owned()),
                 ("MSGSUDTA".to_owned(), "USER".to_owned()),
             ],
+            ..JobContext::default()
         });
         w.connected = Some(
             serde_json::from_str(r#"{"user":"USR","release":"V7R3M0","job":"1/QUSER/QZDASOINIT"}"#)

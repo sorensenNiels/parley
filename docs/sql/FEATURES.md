@@ -16,6 +16,13 @@ None.
 
 ## Implemented
 
+- **R-SQL-82..85** (2026-11-15): the work area, rearranged (Phase 18). **Automated** (`make test`): the panel
+  on the left folds and opens by its buttons and Ctrl+B and keeps its edge with a long name open (R-SQL-82); groups
+  named once ignoring case, renamed, moved, libraries in several groups, `æøå` and bad names refused, pinned libraries
+  becoming "Pinned" in the settings and following a rename, the IBM i as the tree's root (R-SQL-83); the sections'
+  heights within their limits, folding on their own (R-SQL-84); History as a tab putting a statement back (R-SQL-85).
+  **Checked in the running app** by the owner, Linux under WSL
+  (2026-11-15).
 - **R-SQL-74..77** (2026-11-15): the editor, safer (Phase 16). **Automated** (`make test`): typing reaches the
   kept settings in the same frame and Parley SQL saves every 5 seconds (R-SQL-74); the name an error stopped at read
   from SQL0104, SQL0199, SQL0204..SQL0206 and none from `<END-OF-STATEMENT>` or other messages, its place as a whole

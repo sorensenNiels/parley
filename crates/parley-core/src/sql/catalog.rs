@@ -4,9 +4,10 @@
 use super::protocol::Row;
 
 /// The SQL job's current schema and library list, in order: each library's system name and
-/// its kind (SYSTEM, PRODUCT, CURRENT, USER) (R-SQL-32).
-pub const JOB: &str = "SELECT CURRENT SCHEMA, SYSTEM_SCHEMA_NAME, TYPE FROM QSYS2.LIBRARY_LIST_INFO \
-    ORDER BY ORDINAL_POSITION";
+/// its kind (SYSTEM, PRODUCT, CURRENT, USER) (R-SQL-32); and the IBM i's relational database
+/// name, by default its system name, for the root of the side panel's tree (R-SQL-83).
+pub const JOB: &str = "SELECT CURRENT SCHEMA, SYSTEM_SCHEMA_NAME, TYPE, CURRENT SERVER \
+    FROM QSYS2.LIBRARY_LIST_INFO ORDER BY ORDINAL_POSITION";
 
 /// At most this many objects of a library are listed in the browser (R-SQL-34).
 pub const MAX_OBJECTS: u32 = 5000;

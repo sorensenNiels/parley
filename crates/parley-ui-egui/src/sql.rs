@@ -4,7 +4,7 @@
 //! never waits for the host.
 
 pub(crate) mod assistant;
-mod browser;
+pub mod browser;
 mod chart;
 mod database;
 mod download;
@@ -15,6 +15,7 @@ pub mod keys;
 pub mod layout;
 mod parameters;
 pub mod results;
+pub mod side;
 pub mod snippets;
 mod tools;
 mod upload;
@@ -96,14 +97,6 @@ pub enum Phase {
     Busy,
 }
 
-/// A small icon button that folds or opens the side panel, named `name`; true when clicked.
-fn panel_button(ui: &mut Ui, icon: &str, name: &str) -> bool {
-    let glyph = icons::icon(icon).color(theme::palette(ui).muted);
-    icons::add_named(ui, true, theme::ghost_button(glyph), name)
-        .on_hover_text(name)
-        .clicked()
-}
-
 /// What the window says about itself, for the status bar of Parley SQL (R-SQL-45).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowStatus {
@@ -131,23 +124,6 @@ enum Place {
     OwnWindow,
     /// Parley SQL's main window (R-SQL-45).
     Embedded,
-}
-
-/// What the panel beside the editor shows (R-SQL-25).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Side {
-    History,
-    Snippets,
-    /// The schema browser (R-SQL-34).
-    Database,
-}
-
-/// Whether the panel with History, Snippets and Database is shown (R-SQL-51).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SidePanel {
-    Open,
-    /// Folded to a narrow strip with a button that opens it again.
-    Folded,
 }
 
 /// How far the window is.
@@ -189,11 +165,12 @@ enum Waiting {
     UploadEnd(bool),
 }
 
-/// Results or messages under the editor.
+/// Results, messages or the history under the editor (R-SQL-85).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Results,
     Messages,
+    History,
 }
 
 /// The answer to the question asked on closing with uncommitted changes.
@@ -227,7 +204,6 @@ pub struct SqlWindow {
     run_started: Option<std::time::Instant>,
     results: results::Results,
     tab: Tab,
-    side: Side,
     snippets: snippets::SnippetPanel,
     browser: browser::Browser,
     messages: Vec<(bool, String)>,
@@ -275,8 +251,10 @@ pub struct SqlWindow {
     around_the_text: f32,
     /// Results below the editor: the height its text was dragged to (R-SQL-50).
     editor_height: Option<f32>,
-    /// Whether History, Snippets and Database are shown or folded away (R-SQL-51).
-    side_panel: SidePanel,
+    /// The side panel's layout: width, folded, its sections (R-SQL-82, R-SQL-84).
+    side: side::SideLayout,
+    /// A width to set the side panel to once: the one kept, or the usual one (R-SQL-82).
+    side_width: Option<u16>,
 }
 
 impl SqlWindow {
@@ -304,7 +282,6 @@ impl SqlWindow {
             run_started: None,
             results: results::Results::reading(config.code_page),
             tab: Tab::Results,
-            side: Side::History,
             snippets: snippets::SnippetPanel::default(),
             browser: browser::Browser::default(),
             messages: Vec::new(),
@@ -333,7 +310,8 @@ impl SqlWindow {
             editor_share: layout::DEFAULT_SHARE,
             around_the_text: BELOW_THE_TEXT,
             editor_height: None,
-            side_panel: SidePanel::Open,
+            side: side::SideLayout::default(),
+            side_width: None,
         }
     }
 
@@ -374,9 +352,12 @@ impl SqlWindow {
         self
     }
 
-    /// The libraries pinned in the schema browser for this session (R-SQL-34).
-    pub fn with_pinned(mut self, pinned: Vec<String>) -> Self {
-        self.browser = browser::Browser::with_pinned(pinned);
+    /// The side panel laid out as `side` and the library groups `groups` of this connection
+    /// (R-SQL-82, R-SQL-83).
+    pub fn with_side(mut self, side: side::SideLayout, groups: Vec<browser::LibraryGroup>) -> Self {
+        self.browser = browser::Browser::with_groups(groups, side.library_list_open);
+        self.side = side;
+        self.side_width = Some(side.width);
         self
     }
 
@@ -395,9 +376,9 @@ impl SqlWindow {
         self.assistant.keys = keys.cloned();
     }
 
-    /// The libraries pinned now, to keep in the settings.
-    pub fn pinned(&self) -> &[String] {
-        self.browser.pinned()
+    /// The library groups now, to keep in the settings (R-SQL-83).
+    pub fn library_groups(&self) -> &[browser::LibraryGroup] {
+        self.browser.library_groups()
     }
 
     /// Fetches `rows` at a time and stops a statement after `timeout` seconds (0: never).
@@ -462,20 +443,7 @@ impl SqlWindow {
                 CentralPanel::default().show(ui, |ui| self.sign_in(ui));
             }
             Stage::Ready => {
-                match self.side_panel {
-                    SidePanel::Open => {
-                        Panel::right("sql-history")
-                            .resizable(true)
-                            .default_size(250.0)
-                            .show(ui, |ui| self.side(ui, around));
-                    }
-                    SidePanel::Folded => {
-                        Panel::right("sql-history-folded")
-                            .resizable(false)
-                            .exact_size(36.0)
-                            .show(ui, |ui| self.folded_side(ui));
-                    }
-                }
+                self.side_panel(ui, around);
                 CentralPanel::default().show(ui, |ui| self.work(ui, around));
             }
         }
@@ -493,6 +461,7 @@ impl SqlWindow {
         if let Some(used) = used {
             self.use_snippet(used);
         }
+        self.browser.dialogs(ui.ctx());
         self.confirm_dialog(ui.ctx());
         self.download_dialog(ui.ctx(), around.files);
         self.upload_dialog(ui.ctx(), around.files);
@@ -677,46 +646,7 @@ impl SqlWindow {
         self.pending_connect = Some(connect);
     }
 
-    // ---------------------------------------------------------------- history and snippets
-
-    /// History or Snippets, beside the editor (R-SQL-7, R-SQL-25).
-    fn side(&mut self, ui: &mut Ui, around: Around<'_>) {
-        ui.horizontal(|ui| {
-            theme::segmented(
-                ui,
-                &mut self.side,
-                &[
-                    (Side::History, "History"),
-                    (Side::Snippets, "Snippets"),
-                    (Side::Database, "Database"),
-                ],
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if panel_button(ui, icons::CARET_RIGHT, "Hide the side panel") {
-                    self.side_panel = SidePanel::Folded;
-                }
-            });
-        });
-        ui.add_space(6.0);
-        match self.side {
-            Side::History => self.history(ui, around.history),
-            Side::Snippets => {
-                if let Some(used) = self.snippets.show(ui, around.snippets, around.shared) {
-                    self.use_snippet(used);
-                }
-            }
-            Side::Database => {
-                let libraries = self
-                    .job
-                    .as_ref()
-                    .map(|j| j.libraries.clone())
-                    .unwrap_or_default();
-                if let Some(pick) = self.browser.show(ui, &libraries, &mut self.database) {
-                    self.use_pick(pick);
-                }
-            }
-        }
-    }
+    // ---------------------------------------------------------------- snippets and the history
 
     /// The Ask row and the question's progress; its SQL opens in a new tab (R-SQL-44).
     fn assistant_row(&mut self, ui: &mut Ui) {
@@ -846,15 +776,7 @@ impl SqlWindow {
         self.next_statement();
     }
 
-    /// The folded side panel: a button that opens it again (R-SQL-51).
-    fn folded_side(&mut self, ui: &mut Ui) {
-        ui.vertical_centered(|ui| {
-            if panel_button(ui, icons::CARET_LEFT, "Show History, Snippets and Database") {
-                self.side_panel = SidePanel::Open;
-            }
-        });
-    }
-
+    /// The statements run, newest first; a click puts one back in the editor (R-SQL-85).
     fn history(&mut self, ui: &mut Ui, history: &[String]) {
         if history.is_empty() {
             theme::hint(ui, "Statements you run are listed here.");
@@ -918,7 +840,7 @@ impl SqlWindow {
             Some(layout::Drag::Reset) => self.editor_height = None,
             None => {}
         }
-        self.results_and_messages(ui, around.files);
+        self.results_and_messages(ui, around);
     }
 
     /// The editor on the left, the results on the right, a divider between them (R-SQL-49).
@@ -951,7 +873,7 @@ impl SqlWindow {
         }
         let right = egui::Rect::from_min_max(egui::pos2(divider.right(), full.top()), full.max);
         let mut right_ui = ui.new_child(egui::UiBuilder::new().max_rect(right));
-        self.results_and_messages(&mut right_ui, around.files);
+        self.results_and_messages(&mut right_ui, around);
         ui.allocate_rect(full, egui::Sense::hover());
     }
 
@@ -977,17 +899,22 @@ impl SqlWindow {
         shown
     }
 
-    /// The Results and Messages tabs.
-    fn results_and_messages(&mut self, ui: &mut Ui, saver: Option<&dyn SqlFiles>) {
+    /// The Results, Messages and History tabs (R-SQL-85).
+    fn results_and_messages(&mut self, ui: &mut Ui, around: Around<'_>) {
         theme::segmented(
             ui,
             &mut self.tab,
-            &[(Tab::Results, "Results"), (Tab::Messages, "Messages")],
+            &[
+                (Tab::Results, "Results"),
+                (Tab::Messages, "Messages"),
+                (Tab::History, "History"),
+            ],
         );
         ui.add_space(4.0);
         match self.tab {
-            Tab::Results => self.results(ui, saver),
+            Tab::Results => self.results(ui, around.files),
             Tab::Messages => self.messages(ui),
+            Tab::History => self.history(ui, around.history),
         }
     }
 
@@ -999,6 +926,7 @@ impl SqlWindow {
                 keys::SqlAction::Run => self.run_current(),
                 keys::SqlAction::RunAll => self.run_all(),
                 keys::SqlAction::Cancel => self.cancel(),
+                keys::SqlAction::SidePanel => self.toggle_side_panel(),
                 _ => {}
             }
         }
@@ -1043,7 +971,7 @@ impl SqlWindow {
                     .clicked();
                 if clicked && let Some(sql) = current {
                     self.snippets.save_as(&sql);
-                    self.side = Side::Snippets;
+                    self.show_snippets();
                 }
             });
         });
@@ -1769,7 +1697,8 @@ mod tests {
             "Fetch more",
             "Copy all",
             "History",
-            "Snippets",
+            "Fold Libraries",
+            "Fold Snippets",
             "Save as snippet…",
         ] {
             harness.get_by_label(label);
@@ -1907,9 +1836,10 @@ mod tests {
         assert!(tab.bottom() < 760.0 - 100.0, "results shown: {tab:?}");
     }
 
-    /// R-SQL-51: the side panel folds to a strip and opens again, and the editor gets the room.
+    /// R-SQL-82: the side panel folds to a strip and opens again, by its buttons and by
+    /// Ctrl+B, and the editor gets the room.
     #[test]
-    fn the_side_panel_folds_away_and_opens_again_r_sql_51() {
+    fn the_side_panel_folds_away_and_opens_again_r_sql_82() {
         use egui_kittest::kittest::Queryable;
 
         let mut harness = drawn_with_results(1100.0, layout::ResultsPlace::Below);
@@ -1919,18 +1849,63 @@ mod tests {
             .width();
         harness.get_by_label("Hide the side panel").click();
         harness.run();
-        assert!(harness.query_by_label("History").is_none());
+        assert!(harness.query_by_label("Fold Libraries").is_none());
+        assert!(harness.state().side_layout().folded, "kept in the settings");
         let wider = harness
             .get_by_label("Editor and results divider")
             .rect()
             .width();
         assert!(wider > wide + 150.0, "{wide} then {wider}");
-        harness
-            .get_by_label("Show History, Snippets and Database")
-            .click();
+        harness.get_by_label("Show Libraries and Snippets").click();
         harness.run();
-        harness.get_by_label("History");
+        harness.get_by_label("Fold Libraries");
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::B);
+        harness.run();
+        assert!(harness.query_by_label("Fold Libraries").is_none(), "Ctrl+B");
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::B);
+        harness.run();
         harness.get_by_label("Hide the side panel");
+    }
+
+    /// R-SQL-84: each section folds on its own, and the other gets the room.
+    #[test]
+    fn libraries_and_snippets_fold_on_their_own_r_sql_84() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = drawn_with_results(1100.0, layout::ResultsPlace::Below);
+        let snippets = harness.get_by_label("Fold Snippets").rect().top();
+        harness.get_by_label("Fold Libraries").click();
+        harness.run();
+        let higher = harness.get_by_label("Fold Snippets").rect().top();
+        assert!(higher < snippets - 100.0, "{snippets} then {higher}");
+        assert!(!harness.state().side_layout().libraries_open);
+        harness.get_by_label("Open Libraries").click();
+        harness.run();
+        harness.get_by_label("Fold Snippets").click();
+        harness.run();
+        harness.get_by_label("Open Snippets");
+        harness.get_by_label("Fold Libraries");
+    }
+
+    /// R-SQL-85: History is a tab beside Results and Messages; a click puts a statement back
+    /// in the editor.
+    #[test]
+    fn the_history_is_a_tab_under_the_editor_r_sql_85() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = drawn(window(), vec!["SELECT 'æøå' FROM T".to_owned()]);
+        assert!(harness.query_by_label("SELECT 'æøå' FROM T").is_none());
+        harness.get_by_label("History").click();
+        harness.run();
+        harness.get_by_label("SELECT 'æøå' FROM T").click();
+        harness.run();
+        assert!(
+            harness
+                .state()
+                .scripts
+                .text()
+                .contains("SELECT 'æøå' FROM T")
+        );
     }
 
     /// R-SQL-49: beside, the editor fills the column: the Run buttons are at its foot, and they
@@ -1967,12 +1942,13 @@ mod tests {
     }
 
     #[test]
-    fn the_snippets_tab_lists_the_starters_and_runs_one_r_sql_25() {
+    fn the_snippets_section_lists_the_starters_and_runs_one_r_sql_25_r_sql_84() {
         use egui_kittest::kittest::Queryable;
         let mut w = window();
         running(&mut w, "VALUES 1");
         let mut harness = drawn(w, Vec::new());
-        harness.get_by_label("Snippets").click();
+        // Snippets gets the panel's height, so the starter is in view (R-SQL-84).
+        harness.get_by_label("Fold Libraries").click();
         // The spinner keeps repainting while a statement runs.
         harness.run_steps(3);
         harness.get_by_label("Run System status").click();

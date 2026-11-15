@@ -56,4 +56,4 @@
 | IDEA-11 | Macros: record and play keystrokes, and run one after sign-on ("Run macro" in the session dialog, disabled until then). *Recording*: Tools ▸ Record macro starts it, the status bar shows "REC" until Stop, then Parley asks for a name; after each AID key (Enter, F-keys…) the macro waits for the host to unlock the keyboard before going on, so it does not race the host. Text typed into non-display fields (passwords) is never recorded: the macro stores a "password" step that uses the session's keychain password (D11) or asks for it. *Running*: Tools ▸ Run macro ▸ (name), a key the user assigns, or after sign-on; Esc or Reset stops a running macro. Macros are saved as readable text the user can edit, global or per session. *→ R-KEY-3, R-KEY-4 (Phase 3).* |
 | IDEA-27 | A command bar (Ctrl+K): type a CL command, pick from recent ones, and Parley types it on the command line and presses Enter; it refuses when the screen has no command line. |
 
-Next free ID: `IDEA-35`.
+Next free ID: `IDEA-37`.

@@ -94,6 +94,8 @@ pub(super) enum Axis {
     Columns,
     /// A horizontal line between the editor above and the results below.
     Rows,
+    /// A horizontal line between Libraries and Snippets in the side panel (R-SQL-84).
+    Sections,
 }
 
 /// What was done to a divider this frame.
@@ -118,6 +120,11 @@ pub(super) fn divider(ui: &Ui, rect: Rect, axis: Axis) -> Option<Drag> {
             "Drag to change the editor's height; double-click for the usual height.",
             egui::CursorIcon::ResizeVertical,
         ),
+        Axis::Sections => (
+            "sql-side-sections-divider",
+            "Drag to change the heights; double-click for the usual heights.",
+            egui::CursorIcon::ResizeVertical,
+        ),
     };
     let response = ui
         .interact(rect, ui.make_persistent_id(salt), Sense::click_and_drag())
@@ -126,7 +133,10 @@ pub(super) fn divider(ui: &Ui, rect: Rect, axis: Axis) -> Option<Drag> {
         egui::WidgetInfo::labeled(
             egui::accesskit::Role::Splitter,
             true,
-            "Editor and results divider",
+            match axis {
+                Axis::Columns | Axis::Rows => "Editor and results divider",
+                Axis::Sections => "Libraries and Snippets divider",
+            },
         )
     });
     let p = theme::palette(ui);
@@ -140,7 +150,7 @@ pub(super) fn divider(ui: &Ui, rect: Rect, axis: Axis) -> Option<Drag> {
         Axis::Columns => {
             ui.painter().vline(rect.center().x, rect.y_range(), stroke);
         }
-        Axis::Rows => {
+        Axis::Rows | Axis::Sections => {
             ui.painter().hline(rect.x_range(), rect.center().y, stroke);
         }
     }
@@ -153,7 +163,7 @@ pub(super) fn divider(ui: &Ui, rect: Rect, axis: Axis) -> Option<Drag> {
         let delta = response.drag_delta();
         Some(Drag::Moved(match axis {
             Axis::Columns => delta.x,
-            Axis::Rows => delta.y,
+            Axis::Rows | Axis::Sections => delta.y,
         }))
     } else {
         None
