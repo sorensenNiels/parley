@@ -1794,6 +1794,19 @@ mod tests {
     }
 
     #[test]
+    fn the_error_pill_shows_the_5250_code_before_the_message_r_key_9() {
+        let mut session = test_support::waiting_session();
+        for c in "abcdefghij".chars() {
+            session.key(parley_core::Key::Char(c));
+        }
+        session.key(parley_core::Key::Home);
+        session.key(parley_core::Key::ToggleInsert);
+        session.key(parley_core::Key::Char('x'));
+        let harness = status_harness(session, status::Clock::default(), 900.0);
+        harness.get_by_label("X 0012 No room to insert: the field is full.");
+    }
+
+    #[test]
     fn the_hourglass_has_its_own_slot_beside_the_ready_icon_r_ui_14() {
         // The check stays while the host works; the hourglass comes beside it and nothing moves.
         use parley_core::{Aid, Key};

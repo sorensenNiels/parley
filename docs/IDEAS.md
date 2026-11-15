@@ -17,7 +17,6 @@
 
 | ID | Idea |
 |---|---|
-| IDEA-2 | Operator error codes (0005 and so on) next to the messages, as IBM's emulators show them, once the codes are checked against the manual. |
 | IDEA-3 | Mandatory enter, mandatory fill and self-check (modulo 10/11) fields: not enforced yet; the host checks them. |
 | IDEA-5 | Extended attributes (Write Extended Attribute) and the GUI structured fields (windows, menus, scroll bars, WDSF): ignored now; Parley's query reply does not ask for them. |
 | IDEA-8 | Insert mode accepts trailing blanks as room, not only nulls as on a real 5250: kinder, but check it does not surprise people. |

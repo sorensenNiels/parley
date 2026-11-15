@@ -119,6 +119,31 @@ impl OperatorError {
             Self::Host => "See the message from the host.",
         }
     }
+
+    /// The 5250 operator error code a standard 5250 display shows for it (R-KEY-9), as ASNA's
+    /// "5250 Terminal Error Codes" list the standard codes; 0012 is also in IBM's SC30-3533-04
+    /// (word wrap, "insert failed operator errors (0012)"). `None` for Parley's own check of
+    /// the code page and for the host's own message.
+    pub const fn code(self) -> Option<&'static str> {
+        match self {
+            Self::NotKeyboardInput => Some("0004"),
+            Self::AlphaOnly => Some("0008"),
+            Self::NumericOnly => Some("0009"),
+            Self::DigitsOnly => Some("0010"),
+            Self::SignPosition => Some("0011"),
+            Self::NoRoomToInsert => Some("0012"),
+            Self::FieldMinusNotAllowed => Some("0016"),
+            Self::NotInCodePage | Self::Host => None,
+        }
+    }
+
+    /// The error as the status bar shows it: its code, if it has one, then its message.
+    pub fn display(self) -> String {
+        match self.code() {
+            Some(code) => format!("{code} {}", self.message()),
+            None => self.message().to_owned(),
+        }
+    }
 }
 
 /// The keyboard as the operator information area shows it.

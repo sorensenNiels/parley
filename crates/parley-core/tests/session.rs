@@ -873,6 +873,23 @@ fn a_hotspot_s_move_to_its_option_field_is_recorded_r_ui_20() {
 }
 
 #[test]
+fn an_operator_error_has_the_standard_5250_code_r_key_9() {
+    let mut s = numeric_screen();
+    s.key(Key::Char('a')); // digits only
+    let KeyboardState::Error(error) = s.keyboard() else {
+        panic!("an error, got {:?}", s.keyboard());
+    };
+    assert_eq!(error.code(), Some("0010"));
+    assert_eq!(error.display(), "0010 Only digits are allowed here.");
+    assert_eq!(OperatorError::NoRoomToInsert.code(), Some("0012"));
+    assert_eq!(OperatorError::Host.code(), None);
+    assert_eq!(
+        OperatorError::NotInCodePage.display(),
+        "That character is not in the session's code page."
+    );
+}
+
+#[test]
 fn recording_leaves_out_refused_keys_and_the_reset_after_them_r_key_3() {
     let mut s = numeric_screen();
     s.start_recording();

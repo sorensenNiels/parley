@@ -196,7 +196,7 @@ fn left(ui: &mut Ui, status: &Status<'_>) -> Option<StatusAction> {
         KeyboardState::Unlocked => ready_icon(ui, true),
         KeyboardState::Locked => ready_icon(ui, false),
         KeyboardState::Error(error) => {
-            theme::badge(ui, format!("X {}", error.message()), p.fail);
+            theme::badge(ui, format!("X {}", error.display()), p.fail);
             ui.label(RichText::new("Press Reset").color(p.muted));
         }
     }

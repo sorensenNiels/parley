@@ -229,3 +229,9 @@ Checked by the owner in the running app (2026-11-15); `make verify` on Linux und
   flashes once with Sound and flash, flashes without a beep with Flash, does neither with Off; the Terminal page
   saves the alarm and the switch. The beep builds with ALSA (`libasound2-dev`) and `make verify` passes; the beep, the flash and blinking text were not
   seen or heard in the running app. Marked done by the owner (2026-11-15).
+
+- **R-KEY-9** (2026-11-15): operator error codes before the message (IDEA-2). **Automated** (`make test`): a letter in a
+  digits-only field is 0010 with its message; 0012 for no room to insert; no code for the code page check and the
+  host's message; the status bar shows "X 0012 No room to insert: the field is full.". The codes come from ASNA's
+  5250 Terminal Error Codes (which says they are the standard 5250 ones); only 0012 is also in IBM's SC30-3533-04.
+  Not seen in the running app; marked done by the owner (2026-11-15).
