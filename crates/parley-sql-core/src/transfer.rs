@@ -1,5 +1,6 @@
 //! Data transfer (Phase 15, D31): every row of a query written to a CSV or Excel file as it
-//! arrives (R-SQL-71, R-SQL-72).
+//! arrives (R-SQL-71, R-SQL-72), or as `INSERT` statements to an SQL file, of one table or a
+//! library's (R-SQL-95, R-SQL-96).
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -7,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use rust_xlsxwriter::{ExcelDateTime, Format as CellFormat, Workbook, Worksheet};
 
+use super::export;
 use super::protocol::{Column, Row};
 use crate::error::{Error, Result};
 
@@ -18,6 +20,8 @@ pub enum Format {
     Csv,
     /// An `.xlsx` workbook (R-SQL-72).
     Excel,
+    /// An `.sql` script of `INSERT` statements, UTF-8 (R-SQL-95).
+    Sql,
 }
 
 impl Format {
@@ -26,6 +30,7 @@ impl Format {
         match self {
             Self::Csv => "csv",
             Self::Excel => "xlsx",
+            Self::Sql => "sql",
         }
     }
 }
@@ -65,6 +70,16 @@ pub struct Download {
 enum Sink {
     Csv(BufWriter<File>),
     Excel(Box<Excel>),
+    Sql(Box<Script>),
+}
+
+/// An SQL file being written: `INSERT INTO table (columns)` for the table now read, and its
+/// columns.
+#[derive(Debug)]
+struct Script {
+    out: BufWriter<File>,
+    head: String,
+    columns: Vec<Column>,
 }
 
 impl Download {
@@ -90,12 +105,65 @@ impl Download {
                 Sink::Csv(out)
             }
             Format::Excel => Sink::Excel(Box::new(Excel::new(columns, names, sheet)?)),
+            Format::Sql => {
+                let mut download = Self::script(path, "")?;
+                let table =
+                    export::source_table(columns).unwrap_or_else(|| export::NO_TABLE.to_owned());
+                download.table(&table, columns, false);
+                return Ok(download);
+            }
         };
         Ok(Self {
             path: path.to_owned(),
             rows: 0,
             sink,
         })
+    }
+
+    /// Starts the SQL file `path` with `text`; each table's rows follow [`Self::table`]
+    /// (R-SQL-95, R-SQL-96).
+    ///
+    /// # Errors
+    /// When the file cannot be created.
+    pub fn script(path: &Path, text: &str) -> Result<Self> {
+        let file = File::create(path).map_err(|e| file_error(path, &e))?;
+        let mut out = BufWriter::new(file);
+        out.write_all(text.as_bytes())
+            .map_err(|e| file_error(path, &e))?;
+        Ok(Self {
+            path: path.to_owned(),
+            rows: 0,
+            sink: Sink::Sql(Box::new(Script {
+                out,
+                head: String::new(),
+                columns: Vec::new(),
+            })),
+        })
+    }
+
+    /// The rows written next go into `table` (as written in SQL), from `columns`; with
+    /// `overriding`, its `GENERATED ALWAYS` values go back as they were. Only an SQL file has
+    /// tables: for CSV and Excel it does nothing.
+    pub fn table(&mut self, table: &str, columns: &[Column], overriding: bool) {
+        if let Sink::Sql(script) = &mut self.sink {
+            script.head = export::insert_head(table, columns, overriding);
+            script.columns = columns.to_vec();
+        }
+    }
+
+    /// Writes `text` as it is into an SQL file: a comment, or statements. For CSV and Excel
+    /// it does nothing.
+    ///
+    /// # Errors
+    /// When the file cannot be written.
+    pub fn text(&mut self, text: &str) -> Result<()> {
+        if let Sink::Sql(script) = &mut self.sink {
+            script
+                .out
+                .write_all(text.as_bytes())
+                .map_err(|e| file_error(&self.path, &e))?;
+        }
+        Ok(())
     }
 
     /// Writes `rows` after those already written.
@@ -114,6 +182,19 @@ impl Download {
             Sink::Excel(excel) => {
                 for row in rows {
                     excel.row(row)?;
+                }
+            }
+            Sink::Sql(script) => {
+                for row in rows {
+                    let line = format!(
+                        "{} {};\n",
+                        script.head,
+                        export::values(&script.columns, row)
+                    );
+                    script
+                        .out
+                        .write_all(line.as_bytes())
+                        .map_err(|e| file_error(&self.path, &e))?;
                 }
             }
         }
@@ -137,6 +218,7 @@ impl Download {
     pub fn finish(self) -> Result<u64> {
         match self.sink {
             Sink::Csv(mut out) => out.flush().map_err(|e| file_error(&self.path, &e))?,
+            Sink::Sql(mut script) => script.out.flush().map_err(|e| file_error(&self.path, &e))?,
             Sink::Excel(mut excel) => excel.workbook.save(&self.path).map_err(|e| {
                 Error::Transfer(format!("{} was not saved: {e}", self.path.display()))
             })?,
@@ -428,9 +510,55 @@ mod tests {
     }
 
     #[test]
+    fn an_sql_download_is_an_insert_a_row_into_the_table_it_reads_r_sql_95() {
+        let scratch = Scratch::new("sql");
+        let path = scratch.file("kunder.sql");
+        let columns = vec![
+            column("NAVN", "VARCHAR", false),
+            column("BELOB", "DECIMAL", true),
+        ];
+        let mut download =
+            Download::create(&path, Format::Sql, &columns, &[], "KUNDER").expect("created");
+        download
+            .write(&[
+                row(&[Some("Søren's æøå"), Some("12.50")]),
+                row(&[None, None]),
+            ])
+            .expect("written");
+        assert_eq!(download.finish().expect("finished"), 2);
+        let text = std::fs::read_to_string(&path).expect("the file");
+        assert_eq!(
+            text,
+            "INSERT INTO LIB.KUNDER (NAVN, BELOB) VALUES ('Søren''s æøå', 12.50);\n\
+             INSERT INTO LIB.KUNDER (NAVN, BELOB) VALUES (NULL, NULL);\n"
+        );
+    }
+
+    #[test]
+    fn a_backup_script_has_its_text_and_each_tables_rows_in_turn_r_sql_96() {
+        let scratch = Scratch::new("backup");
+        let path = scratch.file("lib.sql");
+        let mut download = Download::script(&path, "CREATE TABLE A (N INT);\n").expect("created");
+        download.table("LIB.A", &[column("N", "INTEGER", true)], false);
+        download.write(&[row(&[Some("1")])]).expect("written");
+        download.table("LIB.\"Ø\"", &[column("ID", "INTEGER", true)], true);
+        download.write(&[row(&[Some("7")])]).expect("written");
+        download.text("-- Indexes\n").expect("written");
+        assert_eq!(download.finish().expect("finished"), 2);
+        let text = std::fs::read_to_string(&path).expect("the file");
+        assert_eq!(
+            text,
+            "CREATE TABLE A (N INT);\n\
+             INSERT INTO LIB.A (N) VALUES (1);\n\
+             INSERT INTO LIB.\"Ø\" (ID) OVERRIDING SYSTEM VALUE VALUES (7);\n\
+             -- Indexes\n"
+        );
+    }
+
+    #[test]
     fn a_stopped_download_leaves_no_file_r_sql_71() {
         let scratch = Scratch::new("abandon");
-        for format in [Format::Csv, Format::Excel] {
+        for format in [Format::Csv, Format::Excel, Format::Sql] {
             let path = scratch.file(&format!("stopped.{}", format.extension()));
             let columns = vec![column("A", "INTEGER", true)];
             let mut download =

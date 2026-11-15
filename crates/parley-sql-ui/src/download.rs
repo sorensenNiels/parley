@@ -1,12 +1,17 @@
 //! Download every row (R-SQL-71, R-SQL-72, D31): the dialog, then the rows written to the file
-//! as they come, from a result tab's open cursor or from a table read whole.
+//! as they come, from a result tab's open cursor or from a table read whole; as `INSERT`
+//! statements, one table's or, after its SQL, a whole library's (R-SQL-95, R-SQL-96).
+
+use std::collections::{BTreeSet, VecDeque};
 
 use egui::{Context, Ui};
 use parley_sql_core::catalog;
+use parley_sql_core::generate::DataTable;
 use parley_sql_core::protocol::{Column, MoreRows, Outcome, Request, Row};
 use parley_sql_core::runner::Event;
 use parley_sql_core::transfer::{self, Format};
 
+use super::browser::{self, Goal};
 use super::grid::{HeaderMode, header_text};
 use super::{Note, SqlFiles, SqlWindow, WAIT, Waiting};
 use parley_ui_egui::{dialog, theme};
@@ -39,6 +44,21 @@ pub struct Downloading {
     /// The cursor the rest comes from, while there is more.
     cursor: Option<u64>,
     cancelled: bool,
+    /// A backup's tables, read one after the other into its SQL file (R-SQL-95, R-SQL-96).
+    tables: Option<Tables>,
+}
+
+/// The tables of a backup.
+#[derive(Debug)]
+pub struct Tables {
+    library: String,
+    left: VecDeque<DataTable>,
+    /// The table being read, as written in SQL, and whether its rows override.
+    current: Option<(String, bool)>,
+    /// What the file ends with after the rows.
+    after: String,
+    read: usize,
+    whole: bool,
 }
 
 /// The download dialog and the download under way.
@@ -116,6 +136,8 @@ impl SqlWindow {
             Ok(None) => return,
             Err(e) => return self.fail(e),
         };
+        // A failure said before is not this download's.
+        self.error_line = None;
         match choice.source {
             Source::Tab => {
                 let Some((columns, rows, cursor)) = self.results.take_for_download() else {
@@ -130,11 +152,21 @@ impl SqlWindow {
                             pending: None,
                             cursor,
                             cancelled: false,
+                            tables: None,
                         });
                         self.download_rows(&rows, cursor.is_some());
                     }
                     Err(e) => self.fail(e.to_string()),
                 }
+            }
+            // As INSERT statements: the catalog says first whether its rows override (R-SQL-95).
+            Source::Table { library, name } if choice.format == Format::Sql => {
+                let goal = Goal::Backup {
+                    path,
+                    only: Some(name),
+                };
+                self.browser
+                    .generate(&library, BTreeSet::new(), goal, &mut self.database);
             }
             Source::Table { library, name } => {
                 self.transfer.running = Some(Downloading {
@@ -142,6 +174,7 @@ impl SqlWindow {
                     pending: Some((path, choice.format, choice.headings, name.clone())),
                     cursor: None,
                     cancelled: false,
+                    tables: None,
                 });
                 let run = Request::Run {
                     sql: format!("SELECT * FROM {}", catalog::qualified(&library, &name)),
@@ -174,8 +207,124 @@ impl SqlWindow {
                 };
                 self.send(fetch, Waiting::DownloadFetch(cursor));
             }
-            Some(_) | None => self.end_download(None),
+            Some(_) | None => {
+                let more_tables = !running.cancelled
+                    && running.tables.as_ref().is_some_and(|t| !t.left.is_empty());
+                if more_tables {
+                    self.next_table();
+                } else {
+                    self.end_download(None);
+                }
+            }
         }
+    }
+
+    /// Generate SQL… or Back up as SQL… chosen on a library (R-SQL-93, R-SQL-96): a backup
+    /// asks for its file first.
+    pub(super) fn generate_chosen(
+        &mut self,
+        chosen: browser::Chosen,
+        files: Option<&dyn SqlFiles>,
+    ) {
+        let goal = if chosen.backup {
+            let Some(files) = files else {
+                return;
+            };
+            if self.busy() {
+                return self.fail(WAIT.to_owned());
+            }
+            let file = format!("{}.{}", chosen.library, Format::Sql.extension());
+            match files.download_path(&file, Format::Sql) {
+                Ok(Some(path)) => Goal::Backup { path, only: None },
+                Ok(None) => return,
+                Err(e) => return self.fail(e),
+            }
+        } else {
+            Goal::Script
+        };
+        self.browser
+            .generate(&chosen.library, chosen.kinds, goal, &mut self.database);
+    }
+
+    /// A backup's SQL came from the catalog: the file starts with it, then each table's rows
+    /// are read into it (R-SQL-95, R-SQL-96).
+    pub(super) fn start_backup(&mut self, backup: browser::Backup) {
+        let not = if backup.whole {
+            "Not backed up"
+        } else {
+            "Not downloaded"
+        };
+        // The SQL was read on the catalog job meanwhile; a statement may have started.
+        if self.busy() {
+            return self.fail(format!("{not}: {WAIT}"));
+        }
+        let writer = match transfer::Download::script(&backup.path, &backup.before) {
+            Ok(writer) => writer,
+            Err(e) => return self.fail(format!("{not}: {e}")),
+        };
+        self.error_line = None;
+        self.transfer.running = Some(Downloading {
+            writer: Some(writer),
+            pending: None,
+            cursor: None,
+            cancelled: false,
+            tables: Some(Tables {
+                library: backup.library,
+                left: backup.tables.into(),
+                current: None,
+                after: backup.after,
+                read: 0,
+                whole: backup.whole,
+            }),
+        });
+        self.next_table();
+    }
+
+    /// Reads the backup's next table, or ends it when there is none.
+    fn next_table(&mut self) {
+        let Some(tables) = self
+            .transfer
+            .running
+            .as_mut()
+            .and_then(|r| r.tables.as_mut())
+        else {
+            return;
+        };
+        let Some(table) = tables.left.pop_front() else {
+            return self.end_download(None);
+        };
+        let name = catalog::qualified(&tables.library, &table.name);
+        tables.current = Some((name.clone(), table.overriding));
+        let run = Request::Run {
+            sql: format!("SELECT * FROM {name}"),
+            max_rows: self.rows,
+            timeout: self.timeout,
+            params: Vec::new(),
+        };
+        self.send(run, Waiting::DownloadRun);
+    }
+
+    /// A backup's table answered: its rows go into the file after a comment naming it.
+    fn table_rows(&mut self, columns: &[Column], rows: &[Row], more: bool, cursor: u64) {
+        let Some(running) = self.transfer.running.as_mut() else {
+            return;
+        };
+        let (Some(writer), Some(tables)) = (running.writer.as_mut(), running.tables.as_mut())
+        else {
+            return;
+        };
+        let Some((name, overriding)) = tables.current.take() else {
+            return;
+        };
+        tables.read += 1;
+        if tables.whole
+            && let Err(e) = writer.text(&format!("\n-- The rows of {name}\n"))
+        {
+            return self.end_download(Some(e.to_string()));
+        }
+        writer.table(&name, columns, overriding);
+        running.cursor = more.then_some(cursor);
+        self.download_rows(rows, more);
     }
 
     /// The answer to a table's `SELECT *`: the writer is made from its columns.
@@ -194,7 +343,7 @@ impl SqlWindow {
                 more,
             }) => {
                 let Some((path, format, headings, sheet)) = running.pending.take() else {
-                    return;
+                    return self.table_rows(&columns, &rows, more, cursor);
                 };
                 running.cursor = more.then_some(cursor);
                 let names = names(&columns, headings);
@@ -259,15 +408,30 @@ impl SqlWindow {
                 .push(Note::Info(format!("Download stopped; {path} removed.")));
             return;
         }
+        let whole = running.tables.as_ref().is_some_and(|t| t.whole);
+        let not = if whole {
+            "Not backed up"
+        } else {
+            "Not downloaded"
+        };
+        let mut writer = writer;
+        let after = running.tables.as_ref().map_or("", |t| t.after.as_str());
+        let error = error.or_else(|| writer.text(after).err().map(|e| e.to_string()));
         if let Some(e) = error {
             writer.abandon();
-            return self.fail(format!("Not downloaded: {e}"));
+            return self.fail(format!("{not}: {e}"));
         }
         match writer.finish() {
+            Ok(rows) if whole => {
+                let tables = running.tables.as_ref().map_or(0, |t| t.read);
+                self.messages.push(Note::Info(format!(
+                    "Backed up {tables} tables, {rows} rows, to {path}."
+                )));
+            }
             Ok(rows) => self
                 .messages
                 .push(Note::Info(format!("Downloaded {rows} rows to {path}."))),
-            Err(e) => self.fail(format!("Not downloaded: {e}")),
+            Err(e) => self.fail(format!("{not}: {e}")),
         }
         self.tab = super::Tab::Messages;
     }
@@ -291,14 +455,25 @@ fn choose(ui: &mut Ui, choice: &mut Choice, blocked: Option<&str>) -> (bool, boo
     theme::segmented(
         ui,
         &mut choice.format,
-        &[(Format::Csv, "CSV"), (Format::Excel, "Excel")],
+        &[
+            (Format::Csv, "CSV"),
+            (Format::Excel, "Excel"),
+            (Format::Sql, "SQL INSERT"),
+        ],
     );
     ui.add_space(8.0);
-    theme::switch_row(
-        ui,
-        "IBM i column headings as the first row",
-        &mut choice.headings,
-    );
+    if choice.format == Format::Sql {
+        theme::hint(
+            ui,
+            "One INSERT statement a row, into the table the rows come from: a backup that can be run.",
+        );
+    } else {
+        theme::switch_row(
+            ui,
+            "IBM i column headings as the first row",
+            &mut choice.headings,
+        );
+    }
     if let Some(why) = blocked {
         theme::warning(ui, why);
     }
@@ -560,5 +735,176 @@ mod tests {
             .click();
         harness.run_steps(2);
         assert!(harness.state().transfer.dialog.is_none());
+    }
+
+    fn backup(path: PathBuf, whole: bool) -> browser::Backup {
+        browser::Backup {
+            path,
+            library: "LIB".to_owned(),
+            before: "-- head\n".to_owned(),
+            after: "\n-- Indexes\n".to_owned(),
+            tables: vec![
+                DataTable {
+                    name: "A".to_owned(),
+                    overriding: false,
+                },
+                DataTable {
+                    name: "Ø".to_owned(),
+                    overriding: true,
+                },
+            ],
+            whole,
+        }
+    }
+
+    fn rows_answer(name: &str, cursor: u64, more: bool, rows: &[&str]) -> Event {
+        answer(serde_json::json!({
+            "kind": "rows", "cursor": cursor, "more": more,
+            "columns": [column_json(name)], "rows": rows.iter().map(|r| [r]).collect::<Vec<_>>(),
+        }))
+    }
+
+    #[test]
+    fn a_backup_writes_its_sql_then_each_tables_rows_then_the_rest_r_sql_96() {
+        let scratch = Scratch::new("backup");
+        let path = scratch.0.join("lib.sql");
+        let mut w = window();
+        w.start_backup(backup(path.clone(), true));
+        assert!(w.busy(), "the backup holds the connection");
+        w.on_download_run(rows_answer("N", 1, true, &["1"]));
+        w.on_download_fetch(answer(serde_json::json!({"rows": [["2"]], "more": false})));
+        assert!(
+            w.transfer.running.is_some(),
+            "the second table is read next"
+        );
+        w.on_download_run(rows_answer("ID", 2, false, &["æøå"]));
+        assert!(w.transfer.running.is_none(), "done");
+        let text = std::fs::read_to_string(&path).expect("the file");
+        assert_eq!(
+            text,
+            "-- head\n\
+             \n-- The rows of LIB.A\n\
+             INSERT INTO LIB.A (N) VALUES ('1');\n\
+             INSERT INTO LIB.A (N) VALUES ('2');\n\
+             \n-- The rows of LIB.\"Ø\"\n\
+             INSERT INTO LIB.\"Ø\" (ID) OVERRIDING SYSTEM VALUE VALUES ('æøå');\n\
+             \n-- Indexes\n"
+        );
+        assert!(
+            w.messages
+                .iter()
+                .any(|m| m.text().starts_with("Backed up 2 tables, 3 rows")),
+            "{:?}",
+            w.messages
+        );
+    }
+
+    #[test]
+    fn a_stopped_backup_reads_no_more_tables_and_leaves_no_file_r_sql_96() {
+        let scratch = Scratch::new("backup-cancel");
+        let path = scratch.0.join("lib.sql");
+        let mut w = window();
+        w.start_backup(backup(path.clone(), true));
+        w.cancel();
+        // The first table's rows came before the cancel reached the host.
+        w.on_download_run(rows_answer("N", 1, false, &["1"]));
+        assert!(w.transfer.running.is_none(), "the second table is not read");
+        assert!(!path.exists(), "nothing of it left");
+        assert!(w.error_line.is_none(), "stopped, not failed");
+    }
+
+    /// The owner, 2026-11-15: after an SQL download failed, a CSV one that worked still showed
+    /// the old error.
+    #[test]
+    fn a_download_that_starts_clears_an_earlier_failure_r_sql_71() {
+        let scratch = Scratch::new("clears");
+        let path = scratch.0.join("kunder.csv");
+        let mut w = window();
+        w.fail("Not downloaded: SQL0104".to_owned());
+        let table = Source::Table {
+            library: "LIB".to_owned(),
+            name: "KUNDER".to_owned(),
+        };
+        w.start_download(choice(table, false), Some(&PicksFile(path.clone())));
+        assert_eq!(w.error_line, None);
+        let mut w = window();
+        w.fail("Not backed up: SQL0104".to_owned());
+        w.start_backup(backup(scratch.0.join("lib.sql"), true));
+        assert_eq!(w.error_line, None);
+    }
+
+    #[test]
+    fn a_backup_waits_while_a_statement_runs_r_sql_96() {
+        let scratch = Scratch::new("backup-busy");
+        let path = scratch.0.join("lib.sql");
+        let mut w = window();
+        crate::tests::running(&mut w, "SELECT * FROM ÆØÅ");
+        w.start_backup(backup(path.clone(), true));
+        assert!(w.transfer.running.is_none(), "not started");
+        assert!(!path.exists());
+        assert!(
+            w.error_line
+                .as_deref()
+                .is_some_and(|e| e.starts_with("Not backed up: Wait"))
+        );
+    }
+
+    #[test]
+    fn one_table_as_sql_asks_the_catalog_then_says_downloaded_r_sql_95() {
+        let scratch = Scratch::new("table-sql");
+        let path = scratch.0.join("kunder.sql");
+        let mut w = window();
+        let table = Source::Table {
+            library: "LIB".to_owned(),
+            name: "Ø".to_owned(),
+        };
+        let choice = Choice {
+            source: table,
+            format: Format::Sql,
+            headings: false,
+        };
+        w.start_download(choice, Some(&PicksFile(path.clone())));
+        assert!(
+            w.transfer.running.is_none(),
+            "the catalog is asked first whether its rows override"
+        );
+        let mut one = backup(path.clone(), false);
+        one.tables.remove(0);
+        one.after = String::new();
+        w.use_pick(browser::Pick::Backup(one));
+        w.on_download_run(rows_answer("ID", 2, false, &["7"]));
+        let text = std::fs::read_to_string(&path).expect("the file");
+        assert_eq!(
+            text,
+            "-- head\nINSERT INTO LIB.\"Ø\" (ID) OVERRIDING SYSTEM VALUE VALUES ('7');\n"
+        );
+        assert!(
+            w.messages
+                .iter()
+                .any(|m| m.text().starts_with("Downloaded 1 rows"))
+        );
+    }
+
+    #[test]
+    fn the_download_dialog_offers_sql_insert_without_headings_r_sql_95() {
+        use egui_kittest::kittest::Queryable;
+        let mut w = window().signed_on_for_tests();
+        w.transfer.ask(Source::Tab);
+        let mut harness = drawn(w, Vec::new());
+        harness.run_steps(2);
+        harness.get_by_label("SQL INSERT").click();
+        harness.run_steps(2);
+        let button = harness.get_by_label("Download…").rect();
+        harness.run_steps(5);
+        assert_eq!(harness.get_by_label("Download…").rect(), button, "D12");
+        assert!(
+            harness
+                .query_by_label("IBM i column headings as the first row")
+                .is_none()
+        );
+        assert_eq!(
+            harness.state().transfer.dialog.as_ref().map(|c| c.format),
+            Some(Format::Sql)
+        );
     }
 }

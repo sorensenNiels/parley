@@ -10,6 +10,7 @@ pub mod complete;
 pub mod edit;
 pub mod error;
 pub mod export;
+pub mod generate;
 pub mod helper;
 pub mod history;
 pub mod hostserver;

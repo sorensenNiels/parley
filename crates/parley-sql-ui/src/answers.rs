@@ -21,7 +21,7 @@ impl SqlWindow {
             self.database.job(),
         ];
         let rest = self.system.receive(answers, own);
-        for pick in self.browser.receive(rest) {
+        for pick in self.browser.receive(rest, &mut self.database) {
             self.use_pick(pick);
         }
     }

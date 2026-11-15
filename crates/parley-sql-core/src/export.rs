@@ -60,30 +60,41 @@ pub(crate) fn source_table(columns: &[Column]) -> Option<String> {
 /// One `INSERT` statement a row, into the table the columns come from or [`NO_TABLE`].
 pub fn inserts(columns: &[Column], rows: &[&Row]) -> String {
     let table = source_table(columns).unwrap_or_else(|| NO_TABLE.to_owned());
+    let head = insert_head(&table, columns, false);
+    rows.iter()
+        .map(|row| format!("{head} {};", values(columns, row)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `INSERT INTO table (columns)`, with `OVERRIDING SYSTEM VALUE` when the table has columns
+/// `GENERATED ALWAYS` whose values must go back as they were (R-SQL-95).
+pub fn insert_head(table: &str, columns: &[Column], overriding: bool) -> String {
     let names: Vec<String> = columns
         .iter()
         .map(|c| catalog::identifier(c.field.as_deref().unwrap_or(&c.name)))
         .collect();
-    let names = names.join(", ");
-    rows.iter()
-        .map(|row| {
-            let values: Vec<String> = columns
-                .iter()
-                .enumerate()
-                .map(|(i, column)| match row.get(i).cloned().flatten() {
-                    None => "NULL".to_owned(),
-                    Some(v) if column.numeric && is_number(&v) => v,
-                    Some(v) if is_binary(column) => format!("X'{v}'"),
-                    Some(v) => format!("'{}'", v.replace('\'', "''")),
-                })
-                .collect();
-            format!(
-                "INSERT INTO {table} ({names}) VALUES ({});",
-                values.join(", ")
-            )
+    let overriding = if overriding {
+        " OVERRIDING SYSTEM VALUE"
+    } else {
+        ""
+    };
+    format!("INSERT INTO {table} ({}){overriding}", names.join(", "))
+}
+
+/// `VALUES (…)` of one row: nulls as `NULL`, numbers as they are, bytes as `X'…'`, text quoted.
+pub fn values(columns: &[Column], row: &Row) -> String {
+    let values: Vec<String> = columns
+        .iter()
+        .enumerate()
+        .map(|(i, column)| match row.get(i).cloned().flatten() {
+            None => "NULL".to_owned(),
+            Some(v) if column.numeric && is_number(&v) => v,
+            Some(v) if is_binary(column) => format!("X'{v}'"),
+            Some(v) => format!("'{}'", v.replace('\'', "''")),
         })
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect();
+    format!("VALUES ({})", values.join(", "))
 }
 
 /// A JSON array of objects keyed by column name.

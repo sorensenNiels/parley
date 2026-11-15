@@ -12,6 +12,14 @@
 
 ## In progress
 
+- **R-SQL-93..96** (2026-11-15): a library's SQL, a table with its indexes and views, rows as `INSERT` statements, a
+  library backed up as SQL (Phase 23, D39). Built; **automated** (`make test`): the `GENERATE_SQL` calls and catalog
+  queries, the order of a library's parts, failures kept as comments, a table's indexes and views, the backup's file
+  (its SQL, each table's rows with `OVERRIDING SYSTEM VALUE` where needed, the rest), Cancel and a busy connection,
+  and the dialogs keeping their buttons in place. Not yet checked on the owner's IBM i (in particular `'%'` for
+  `CONSTRAINT` and `TRIGGER`, and `QSYS2.SYSVIEWDEP` on 7.3) or in the running app. First try by the owner (7.3): SQL0104 at
+  `EXISTS` in the contents query, rewritten without `EXISTS`; a download now clears an earlier error line.
+
 - **R-SQL-87, R-SQL-88** (2026-11-15): Explorer and Current library; Snippets as a tree. Built; **automated**
   (`make test`): the side panel's tests fold and open "Explorer", the top bar's test clicks "Current library MSGSUDTA",
   a snippet's Run shows only while the pointer is on its line, and a starter's right-click menu inserts it and has no

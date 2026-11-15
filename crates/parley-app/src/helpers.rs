@@ -94,6 +94,7 @@ impl parley_sql_ui::SqlFiles for SqlFileWindow {
         let (name, extension) = match format {
             parley_sql_core::transfer::Format::Csv => ("CSV", "csv"),
             parley_sql_core::transfer::Format::Excel => ("Excel", "xlsx"),
+            parley_sql_core::transfer::Format::Sql => ("SQL", "sql"),
         };
         Ok(rfd::FileDialog::new()
             .set_title("Download rows")

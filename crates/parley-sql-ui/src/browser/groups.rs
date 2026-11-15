@@ -230,10 +230,12 @@ impl Browser {
         }
     }
 
-    /// The name dialog and the question before deleting a group.
+    /// The name dialog, the question before deleting a group, and the dialog of generated SQL
+    /// (R-SQL-93, R-SQL-96).
     pub fn dialogs(&mut self, ctx: &egui::Context) {
         self.name_dialog(ctx);
         self.delete_dialog(ctx);
+        self.generate_dialog(ctx);
     }
 
     fn name_dialog(&mut self, ctx: &egui::Context) {

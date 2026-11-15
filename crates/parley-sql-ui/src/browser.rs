@@ -5,6 +5,7 @@
 
 mod assistant;
 mod complete;
+mod generate;
 mod groups;
 
 use std::collections::BTreeMap;
@@ -19,6 +20,7 @@ use super::system::SystemPick;
 use parley_sql_core::services::View;
 use parley_ui_egui::{icons, theme};
 
+pub use generate::{Backup, Chosen, Goal};
 pub use groups::{LibraryGroup, from_pinned};
 
 /// Something read, being read, or not readable.
@@ -46,6 +48,10 @@ pub enum Pick {
     Upload { library: String, name: String },
     /// Something from the System node (R-SQL-78..80).
     System(SystemPick),
+    /// A backup's SQL, ready for its rows (R-SQL-95, R-SQL-96).
+    Backup(Backup),
+    /// Generated SQL that could not be made: why, for Messages (R-SQL-93..96).
+    Failed(String),
 }
 
 /// The root of the tree, the IBM i (R-SQL-83), and the System node's views with their labels
@@ -81,6 +87,12 @@ pub struct Browser {
     columns: BTreeMap<(String, String), Load<Vec<ColumnInfo>>>,
     /// The signatures of routines, by library and name (R-SQL-65).
     parameters: BTreeMap<(String, String), Load<Vec<catalog::Signature>>>,
+    /// The dialog of Generate SQL… or Back up as SQL… (R-SQL-93, R-SQL-96), and what it chose.
+    generating: Option<generate::Asking>,
+    chosen: Option<generate::Chosen>,
+    /// Generated SQL being read, and the last batch's number (R-SQL-93..96).
+    batches: Vec<generate::Batch>,
+    serial: u64,
 }
 
 impl Default for Browser {
@@ -97,6 +109,10 @@ impl Default for Browser {
             objects: BTreeMap::new(),
             columns: BTreeMap::new(),
             parameters: BTreeMap::new(),
+            generating: None,
+            chosen: None,
+            batches: Vec::new(),
+            serial: 0,
         }
     }
 }
@@ -155,8 +171,8 @@ impl Browser {
         }
     }
 
-    /// Takes the catalog's answers; a DDL read opens a script.
-    pub fn receive(&mut self, answers: Vec<Answered>) -> Vec<Pick> {
+    /// Takes the catalog's answers; a DDL read opens a script, and generated SQL may ask more.
+    pub fn receive(&mut self, answers: Vec<Answered>, db: &mut Database) -> Vec<Pick> {
         let mut picks = Vec::new();
         for (ask, rows) in answers {
             match ask {
@@ -177,6 +193,9 @@ impl Browser {
                 }
                 // The System node's, taken by `system` before the browser sees them.
                 Ask::Service(_) | Ask::Text { .. } => {}
+                Ask::Batch { batch, step, .. } => {
+                    picks.extend(self.receive_batch(batch, step, rows, db));
+                }
                 Ask::Ddl { title, .. } => match rows {
                     Ok(rows) => {
                         self.error = None;
@@ -446,8 +465,18 @@ impl Browser {
         picked
     }
 
-    /// A library's menu: into another group, or out of this one (R-SQL-83).
+    /// A library's menu: its SQL or a backup (R-SQL-93, R-SQL-96); into another group, or out
+    /// of this one (R-SQL-83).
     fn library_menu(&mut self, ui: &mut Ui, library: &str, group: Option<usize>) {
+        if ui.button("Generate SQL…").clicked() {
+            self.ask_generate(library, false);
+            ui.close();
+        }
+        if ui.button("Back up as SQL…").clicked() {
+            self.ask_generate(library, true);
+            ui.close();
+        }
+        ui.separator();
         let others = self.groups_without(library);
         ui.add_enabled_ui(!others.is_empty(), |ui| {
             ui.menu_button("Add to group", |ui| {
@@ -552,6 +581,11 @@ impl Browser {
                     kind: object.kind,
                     title: qualified.clone(),
                 });
+                ui.close();
+            }
+            if object.kind == Kind::Table && ui.button("Show SQL with indexes and views").clicked()
+            {
+                self.generate_table(library, object, db);
                 ui.close();
             }
             if object.kind.has_columns() && ui.button("Select first rows").clicked() {
@@ -696,24 +730,27 @@ mod tests {
     #[test]
     fn answers_fill_the_tree_and_failures_are_kept_r_sql_34() {
         let mut b = Browser::default();
-        b.receive(vec![
-            (
-                Ask::Objects("QGPL".to_owned()),
-                Ok(vec![vec![
-                    Some("T".to_owned()),
-                    Some("KUNDER".to_owned()),
-                    Some("KUNDER".to_owned()),
-                    None,
-                ]]),
-            ),
-            (
-                Ask::Columns {
-                    library: "QGPL".to_owned(),
-                    table: "GONE".to_owned(),
-                },
-                Err("not found".to_owned()),
-            ),
-        ]);
+        b.receive(
+            vec![
+                (
+                    Ask::Objects("QGPL".to_owned()),
+                    Ok(vec![vec![
+                        Some("T".to_owned()),
+                        Some("KUNDER".to_owned()),
+                        Some("KUNDER".to_owned()),
+                        None,
+                    ]]),
+                ),
+                (
+                    Ask::Columns {
+                        library: "QGPL".to_owned(),
+                        table: "GONE".to_owned(),
+                    },
+                    Err("not found".to_owned()),
+                ),
+            ],
+            &mut Database::default(),
+        );
         assert!(matches!(&b.objects["QGPL"], Load::Ready(o) if o.len() == 1));
         assert_eq!(
             b.columns[&("QGPL".to_owned(), "GONE".to_owned())],
@@ -737,15 +774,18 @@ mod tests {
             libraries: vec![("QGPL".to_owned(), "USER".to_owned())],
             server: "SYSÆØÅ".to_owned(),
         });
-        w.browser.receive(vec![(
-            Ask::Objects("QGPL".to_owned()),
-            Ok(vec![vec![
-                Some("T".to_owned()),
-                Some("KUNDER".to_owned()),
-                Some("KUNDER".to_owned()),
-                Some("Kunder æøå".to_owned()),
-            ]]),
-        )]);
+        w.browser.receive(
+            vec![(
+                Ask::Objects("QGPL".to_owned()),
+                Ok(vec![vec![
+                    Some("T".to_owned()),
+                    Some("KUNDER".to_owned()),
+                    Some("KUNDER".to_owned()),
+                    Some("Kunder æøå".to_owned()),
+                ]]),
+            )],
+            &mut Database::default(),
+        );
         let mut harness = drawn(w, Vec::new());
         harness.get_by_label("QGPL").click();
         harness.run();
@@ -785,17 +825,26 @@ mod tests {
                 Some(t.to_owned()),
             ]
         };
-        for pick in w.browser.receive(vec![ddl(Ok(vec![
-            line("CREATE TABLE QGPL.KUNDER ("),
-            line("  NAVN VARCHAR(50) -- æøå )"),
-        ]))]) {
+        for pick in w.browser.receive(
+            vec![ddl(Ok(vec![
+                line("CREATE TABLE QGPL.KUNDER ("),
+                line("  NAVN VARCHAR(50) -- æøå )"),
+            ]))],
+            &mut Database::default(),
+        ) {
             w.use_pick(pick);
         }
         assert_eq!(
             w.scripts.text(),
             "CREATE TABLE QGPL.KUNDER (\n  NAVN VARCHAR(50) -- æøå )"
         );
-        assert_eq!(w.browser.receive(vec![ddl(Err("SQL0204".to_owned()))]), []);
+        assert_eq!(
+            w.browser.receive(
+                vec![ddl(Err("SQL0204".to_owned()))],
+                &mut Database::default()
+            ),
+            []
+        );
         assert!(
             w.browser
                 .error
@@ -822,15 +871,18 @@ mod tests {
                 ..JobContext::default()
             });
             let long = "KUNDER_MED_ET_MEGET_LANGT_NAVN_ÆØÅ_DER_BLIVER_VED_OG_VED";
-            w.browser.receive(vec![(
-                Ask::Objects("QGPL".to_owned()),
-                Ok(vec![vec![
-                    Some("T".to_owned()),
-                    Some(long.to_owned()),
-                    Some("KUNDER".to_owned()),
-                    None,
-                ]]),
-            )]);
+            w.browser.receive(
+                vec![(
+                    Ask::Objects("QGPL".to_owned()),
+                    Ok(vec![vec![
+                        Some("T".to_owned()),
+                        Some(long.to_owned()),
+                        Some("KUNDER".to_owned()),
+                        None,
+                    ]]),
+                )],
+                &mut Database::default(),
+            );
             let mut harness = drawn(w, Vec::new());
             harness.get_by_label("QGPL").click();
             harness.run_steps(2);
@@ -878,41 +930,44 @@ mod tests {
     fn completion_offers_columns_tables_libraries_and_keywords_r_sql_36() {
         let mut b = Browser::with_groups(from_pinned(vec!["KUNDELIB".to_owned()]), true, false);
         let cell = |t: &str| Some(t.to_owned());
-        b.receive(vec![
-            (
-                Ask::Objects("QGPL".to_owned()),
-                Ok(vec![
-                    vec![cell("T"), cell("KUNDER"), cell("KUNDER"), None],
-                    vec![cell("I"), cell("KUNDER_IX"), cell("KUNDE00001"), None],
-                ]),
-            ),
-            (
-                Ask::Columns {
-                    library: "QGPL".to_owned(),
-                    table: "KUNDER".to_owned(),
-                },
-                Ok(vec![
-                    vec![
-                        cell("NAVN"),
-                        cell("VARCHAR"),
-                        cell("50"),
-                        None,
-                        cell("N"),
-                        cell("Navn æøå"),
-                        None,
-                    ],
-                    vec![
-                        cell("NUMMER"),
-                        cell("DECIMAL"),
-                        cell("7"),
-                        cell("0"),
-                        cell("N"),
-                        None,
-                        None,
-                    ],
-                ]),
-            ),
-        ]);
+        b.receive(
+            vec![
+                (
+                    Ask::Objects("QGPL".to_owned()),
+                    Ok(vec![
+                        vec![cell("T"), cell("KUNDER"), cell("KUNDER"), None],
+                        vec![cell("I"), cell("KUNDER_IX"), cell("KUNDE00001"), None],
+                    ]),
+                ),
+                (
+                    Ask::Columns {
+                        library: "QGPL".to_owned(),
+                        table: "KUNDER".to_owned(),
+                    },
+                    Ok(vec![
+                        vec![
+                            cell("NAVN"),
+                            cell("VARCHAR"),
+                            cell("50"),
+                            None,
+                            cell("N"),
+                            cell("Navn æøå"),
+                            None,
+                        ],
+                        vec![
+                            cell("NUMMER"),
+                            cell("DECIMAL"),
+                            cell("7"),
+                            cell("0"),
+                            cell("N"),
+                            None,
+                            None,
+                        ],
+                    ]),
+                ),
+            ],
+            &mut Database::default(),
+        );
         let mut db = Database::default();
         let labels = |items: Vec<Item>| items.into_iter().map(|i| i.label).collect::<Vec<_>>();
         let typed =
@@ -949,32 +1004,35 @@ mod tests {
     fn hovering_a_table_shows_its_text_and_columns_r_sql_37() {
         let mut b = Browser::default();
         let cell = |t: &str| Some(t.to_owned());
-        b.receive(vec![
-            (
-                Ask::Objects("QGPL".to_owned()),
-                Ok(vec![vec![
-                    cell("T"),
-                    cell("KUNDER"),
-                    cell("KUNDER"),
-                    cell("Kunder æøå"),
-                ]]),
-            ),
-            (
-                Ask::Columns {
-                    library: "QGPL".to_owned(),
-                    table: "KUNDER".to_owned(),
-                },
-                Ok(vec![vec![
-                    cell("NAVN"),
-                    cell("VARCHAR"),
-                    cell("50"),
-                    None,
-                    cell("N"),
-                    cell("Navn"),
-                    None,
-                ]]),
-            ),
-        ]);
+        b.receive(
+            vec![
+                (
+                    Ask::Objects("QGPL".to_owned()),
+                    Ok(vec![vec![
+                        cell("T"),
+                        cell("KUNDER"),
+                        cell("KUNDER"),
+                        cell("Kunder æøå"),
+                    ]]),
+                ),
+                (
+                    Ask::Columns {
+                        library: "QGPL".to_owned(),
+                        table: "KUNDER".to_owned(),
+                    },
+                    Ok(vec![vec![
+                        cell("NAVN"),
+                        cell("VARCHAR"),
+                        cell("50"),
+                        None,
+                        cell("N"),
+                        cell("Navn"),
+                        None,
+                    ]]),
+                ),
+            ],
+            &mut Database::default(),
+        );
         let mut db = Database::default();
         let statement = "SELECT k.navn FROM qgpl.kunder k";
         let shown = b
@@ -1018,35 +1076,38 @@ mod tests {
             None,
             "asked, then waited for"
         );
-        b.receive(vec![
-            (
-                Ask::Objects("QGPL".to_owned()),
-                Ok(vec![
-                    vec![
-                        cell("T"),
-                        cell("KUNDER"),
-                        cell("KUNDER"),
-                        cell("Kunder æøå"),
-                    ],
-                    vec![cell("I"), cell("KUNDER_IX"), cell("KUNDE00001"), None],
-                ]),
-            ),
-            (
-                Ask::Columns {
-                    library: "QGPL".to_owned(),
-                    table: "KUNDER".to_owned(),
-                },
-                Ok(vec![vec![
-                    cell("NAVN"),
-                    cell("VARCHAR"),
-                    cell("50"),
-                    None,
-                    cell("N"),
-                    cell("Navn"),
-                    None,
-                ]]),
-            ),
-        ]);
+        b.receive(
+            vec![
+                (
+                    Ask::Objects("QGPL".to_owned()),
+                    Ok(vec![
+                        vec![
+                            cell("T"),
+                            cell("KUNDER"),
+                            cell("KUNDER"),
+                            cell("Kunder æøå"),
+                        ],
+                        vec![cell("I"), cell("KUNDER_IX"), cell("KUNDE00001"), None],
+                    ]),
+                ),
+                (
+                    Ask::Columns {
+                        library: "QGPL".to_owned(),
+                        table: "KUNDER".to_owned(),
+                    },
+                    Ok(vec![vec![
+                        cell("NAVN"),
+                        cell("VARCHAR"),
+                        cell("50"),
+                        None,
+                        cell("N"),
+                        cell("Navn"),
+                        None,
+                    ]]),
+                ),
+            ],
+            &mut Database::default(),
+        );
         assert_eq!(
             b.tool_answer(&tables, &mut db).as_deref(),
             Some("KUNDER (table) - Kunder æøå")

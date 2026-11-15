@@ -535,6 +535,9 @@ impl SqlWindow {
             self.use_snippet(used);
         }
         self.browser.dialogs(ui.ctx());
+        if let Some(chosen) = self.browser.take_chosen() {
+            self.generate_chosen(chosen, around.files);
+        }
         self.system.viewers(ui.ctx(), around.files);
         self.confirm_dialog(ui.ctx());
         self.download_dialog(ui.ctx(), around.files);

@@ -166,7 +166,8 @@ impl System {
                 Ask::Objects(_)
                 | Ask::Columns { .. }
                 | Ask::Parameters { .. }
-                | Ask::Ddl { .. } => rest.push((ask, rows)),
+                | Ask::Ddl { .. }
+                | Ask::Batch { .. } => rest.push((ask, rows)),
             }
         }
         rest

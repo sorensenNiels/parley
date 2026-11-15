@@ -42,7 +42,31 @@ pub enum Ask {
         sql: String,
         viewer: u64,
     },
+    /// A step of the browser's generated script or backup `batch` (R-SQL-93..96).
+    Batch {
+        batch: u64,
+        step: Step,
+        sql: String,
+    },
 }
+
+/// What a step of a batch reads (R-SQL-93..96).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// What the library holds.
+    Contents,
+    /// A table's indexes and views.
+    Dependents,
+    /// The SQL of this section of the script.
+    Section(usize),
+}
+
+/// The most rows a catalog question reads: above every FETCH FIRST in the catalog queries, so
+/// no cursor stays open.
+const MAX_ROWS: u32 = 10_000;
+
+/// The most lines a generated script reads (R-SQL-93): a library's SQL can be long.
+const MAX_LINES: u32 = 1_000_000;
 
 impl Ask {
     fn sql(&self) -> String {
@@ -57,7 +81,19 @@ impl Ask {
                 ..
             } => catalog::ddl(library, name, *kind),
             Ask::Service(view) => view.sql(),
-            Ask::Text { sql, .. } => sql.clone(),
+            Ask::Text { sql, .. } | Ask::Batch { sql, .. } => sql.clone(),
+        }
+    }
+
+    fn max_rows(&self) -> u32 {
+        match self {
+            Ask::Batch { .. } => MAX_LINES,
+            Ask::Objects(_)
+            | Ask::Columns { .. }
+            | Ask::Parameters { .. }
+            | Ask::Ddl { .. }
+            | Ask::Service(_)
+            | Ask::Text { .. } => MAX_ROWS,
         }
     }
 }
@@ -174,12 +210,28 @@ impl Database {
         };
         let run = Request::Run {
             sql: ask.sql(),
-            // Above every FETCH FIRST in the catalog queries, so no cursor stays open.
-            max_rows: 10_000,
+            max_rows: ask.max_rows(),
             timeout: TIMEOUT,
             params: Vec::new(),
         };
         self.waiting = Some((runner.send(run), Some(ask)));
+    }
+
+    /// Signed on as `job`, without a helper: questions wait in the queue (tests).
+    #[cfg(test)]
+    pub fn ready_for_tests(job: &str) -> Self {
+        Self {
+            state: State::Ready {
+                job: job.to_owned(),
+            },
+            ..Self::default()
+        }
+    }
+
+    /// Takes the questions waiting to be sent (tests).
+    #[cfg(test)]
+    pub fn take_queued(&mut self) -> Vec<Ask> {
+        self.queue.drain(..).collect()
     }
 
     /// Takes what its helper answered since the last frame.
@@ -201,6 +253,15 @@ impl Database {
             None => self.signed_on(event),
             Some(ask) => {
                 let rows = match event.result.and_then(Answer::into_result::<Outcome>) {
+                    Ok(Outcome::Rows {
+                        more: true, cursor, ..
+                    }) => {
+                        if let Some(runner) = &mut self.runner {
+                            // Not read further; the helper frees the cursor, nothing waits.
+                            runner.send(Request::CloseCursor { cursor });
+                        }
+                        Err(format!("More than {} rows.", ask.max_rows()))
+                    }
                     Ok(Outcome::Rows { rows, .. }) => Ok(rows),
                     Ok(Outcome::Count { .. }) => Ok(Vec::new()),
                     Err(e) => Err(e.to_string()),

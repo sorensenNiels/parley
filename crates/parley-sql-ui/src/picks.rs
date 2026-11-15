@@ -117,6 +117,8 @@ impl SqlWindow {
             browser::Pick::System(system::SystemPick::Refresh) => {
                 self.system.read(&mut self.database);
             }
+            browser::Pick::Backup(backup) => self.start_backup(backup),
+            browser::Pick::Failed(why) => self.fail(why),
             browser::Pick::Script { title, text, run } => {
                 self.scripts.open_new(&title, &text);
                 if run {
