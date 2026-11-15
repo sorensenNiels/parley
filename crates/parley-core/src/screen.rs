@@ -10,9 +10,13 @@ use crate::CodePage;
 mod extended;
 mod hotspots;
 mod region;
+mod windows;
 pub use extended::ExtendedKind;
 pub use hotspots::{Hotspot, Target, hotspots};
 pub use region::{Rectangle, Span, find, rectangle_text, table_text};
+pub use windows::{
+    Align, BorderChars, Caption, DEFAULT_BORDER_ATTRIBUTE, MAX_WINDOWS, Window, WindowSpec,
+};
 
 /// The display sizes a 5250 session can use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -280,6 +284,10 @@ pub struct Screen {
     keys_without_data: u32,
     /// The extended character buffer (R-DS-9).
     extended: extended::Extended,
+    /// GUI windows, oldest first (R-DS-10).
+    windows: Vec<Window>,
+    /// The inside of the window the cursor must stay in (R-DS-10).
+    cursor_limit: Option<Rectangle>,
     /// The cursor's buffer position.
     pub cursor: usize,
 }
@@ -292,6 +300,8 @@ impl Screen {
             fields: Vec::new(),
             keys_without_data: 0,
             extended: extended::Extended::new(size.positions()),
+            windows: Vec::new(),
+            cursor_limit: None,
             cursor: 0,
         }
     }

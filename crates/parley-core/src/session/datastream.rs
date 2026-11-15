@@ -262,11 +262,13 @@ impl Session {
                 }
                 IC => self.insert_cursor = Some(self.read_address(r, "Insert Cursor")?),
                 MC => self.screen.cursor = self.read_address(r, "Move Cursor")?,
-                // Windows, menus and scroll bars: only sent to displays that report GUI support
-                // in the query reply, which Parley does not.
+                // Windows, menus and scroll bars: only sent to displays that claim GUI support in
+                // the query reply, which Parley does with the GUI switch on (R-DS-10, D38).
                 WDSF => {
                     let len = usize::from(r.u16("Write to Display Structured Field")?);
-                    r.take(len.saturating_sub(2), "Write to Display Structured Field")?;
+                    let body =
+                        r.take(len.saturating_sub(2), "Write to Display Structured Field")?;
+                    self.gui_structured_field(body, address)?;
                 }
                 SF => self.start_of_field(r, &mut address)?,
                 _ => {

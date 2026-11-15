@@ -14,7 +14,18 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
-Nothing at the moment.
+- **R-DS-10** (2026-11-15): GUI windows behind the session switch "GUI elements (beta)" (D38). **Automated** (`make
+  test`): a window is written as the 5494 writes it (border attribute and characters, centred title `Æble`, cleared
+  inside) and kept; removing it puts back what it covered and frees the cursor; Remove All and Clear Unit take every
+  window away; one that does not fit is refused, one at the same place and size replaces the other; a long title is
+  cut and a right footer sits right; on a whole session WDSF Create Window draws it only with the switch on, keeps
+  the cursor inside, Remove GUI Window takes it away, and the query reply's byte 4 is X'0E' only with the switch on;
+  the UI's frame covers the border characters but not the title; the session dialog saves the switch.
+  **First try on DKSOFT00** (the owner, switch on, tour macro, `PARLEY_TRACE`): the host asked the query but sent
+  no WDSF at all with byte 4 = X'0E' in a 58-byte reply. The reply now claims what tn5250j's enhanced mode claims
+  (byte 4 X'07', byte 5 X'08' level 3, 64 bytes); two more tries, the second on a device created fresh by that
+  reply (PARLYGUI, 3477 FC), and the host still sent no WDSF. **Not seen live**: Phase 22 is paused until IBM i's
+  rules for the enhanced interface are known (ROADMAP §4).
 
 ## Implemented
 

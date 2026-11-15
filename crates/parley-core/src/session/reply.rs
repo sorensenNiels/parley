@@ -13,6 +13,12 @@ const COLOUR: u8 = 0x01;
 // Device capability byte 2 (SC30-3533-04 §15.27.2).
 const EXTENDED_PRIMARY: u8 = 0x04;
 const EXTENDED_COLOURS_MAPPED: u8 = 0x01;
+// Device capability byte 4.
+const GUI_CHARACTERS: u8 = 0x04;
+const ENHANCED_UI_1: u8 = 0x02;
+const ERROR_TO_WINDOW: u8 = 0x01;
+// Device capability byte 5.
+const ENHANCED_UI_3: u8 = 0x08;
 
 impl Session {
     /// The reply to a read command: cursor row and column and the AID (not for Read Immediate),
@@ -106,15 +112,22 @@ impl Session {
                 .map(|&c| page.to_byte(char::from(c)).unwrap_or(0))
                 .collect()
         };
+        let gui = self.config.gui;
+        let query_length: u8 = if gui { 0x40 } else { 0x3A };
         let mut data = vec![
-            0x00, 0x00, // cursor row and column
+            0x00,
+            0x00, // cursor row and column
             0x88, // AID: inbound write structured field
-            0x00, 0x3A, // length of the query reply, from here
-            0xD9, 0x70, // class and type: 5250 query
+            0x00,
+            query_length, // length of the query reply, from here
+            0xD9,
+            0x70, // class and type: 5250 query
             0x80, // flags: a query response
             0x06,
             0x00, // controller hardware class: another 5250 emulator (a 5494 says X'0043')
-            0x01, 0x01, 0x00, // controller code level
+            0x01,
+            0x01,
+            0x00, // controller code level
         ];
         data.extend([0; 16]); // reserved
         data.push(0x01); // a display
@@ -140,8 +153,22 @@ impl Session {
             // Byte 2 (R-DS-9): extended primary attributes in DP mode (bit 5), and 7 extended
             // foreground colours with the other 7 mapped onto them (bits 6-7 = B'01').
             EXTENDED_PRIMARY | EXTENDED_COLOURS_MAPPED,
+            0x00, // byte 3: no ideographic or bidirectional support
+            // Bytes 4 and 5 (R-DS-10, D38): with the GUI switch on, GUI-like characters (byte 4
+            // bit 5), enhanced user interface level 1 (bit 6), Write Error Code to Window (bit
+            // 7), and level 3 (byte 5 bit 4: window titles and footers), as tn5250j's enhanced
+            // mode claims; with level 1 alone IBM i sent no windows (DKSOFT00, 2026-11-15).
+            // No pointer device until the mouse is handled (R-DS-11).
+            if gui {
+                GUI_CHARACTERS | ENHANCED_UI_1 | ERROR_TO_WINDOW
+            } else {
+                0x00
+            },
+            if gui { ENHANCED_UI_3 } else { 0x00 },
         ]);
-        data.resize(61, 0x00); // device capability bytes 2-11
+        // The rest of the device capabilities, zero; tn5250j's enhanced mode sends a 64-byte
+        // reply, and so does Parley with the GUI switch on.
+        data.resize(3 + usize::from(query_length), 0x00);
         self.send_record(0, Opcode::NoOperation, &data);
     }
 }

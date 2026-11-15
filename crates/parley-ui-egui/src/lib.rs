@@ -2575,6 +2575,20 @@ mod tests {
     }
 
     #[test]
+    fn the_session_dialog_turns_gui_elements_on_r_ds_10() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("New session…").click();
+        harness.run();
+        type_into(&mut harness, "Name", "Prod");
+        type_into(&mut harness, "Host", "prod");
+        harness.get_by_label("GUI elements (beta)").click();
+        harness.run();
+        harness.get_by_label("Apply").click();
+        harness.run();
+        assert!(harness.state().profiles()[0].config.gui);
+    }
+
+    #[test]
     fn the_session_dialog_turns_reconnecting_on_r_net_10() {
         let mut harness = app_with(Vec::new());
         harness.get_by_label("New session…").click();

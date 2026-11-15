@@ -1096,6 +1096,113 @@ fn the_query_reply_claims_extended_attributes_and_seven_colours_r_ds_9() {
     assert_eq!(sent_one(&mut s).2[51], 0x05, "device capability byte 2");
 }
 
+fn gui_session(on: bool) -> Session {
+    Session::new(SessionConfig {
+        gui: on,
+        ..SessionConfig::default()
+    })
+}
+
+/// WDSF with a 5250-class structured field of `kind` and `rest` (SC30-3533-04 §15.6.13).
+fn wdsf(kind: u8, rest: &[u8]) -> Vec<u8> {
+    let len = u16::try_from(4 + rest.len()).expect("short");
+    let mut o = vec![0x15];
+    o.extend(len.to_be_bytes());
+    o.extend([0xD9, kind]);
+    o.extend(rest);
+    o
+}
+
+/// Write To Display: SBA 5,10, then a Create Window of 3 rows by 20 columns that keeps the
+/// cursor inside, with a centred title, then an input field inside it.
+fn window_screen() -> Vec<u8> {
+    let mut title = vec![0x00, 0x10, 0x00, 0x00, 0x00, 0x00];
+    title.extend(ebcdic("Æble"));
+    title[0] = u8::try_from(title.len()).expect("short");
+    let mut create = vec![0x80, 0x00, 0x00, 3, 20];
+    create.extend(&title);
+    let mut o = vec![SBA, 5, 10];
+    o.extend(wdsf(0x51, &create));
+    o.extend([SBA, 6, 13]);
+    o.extend(field([0x40, 0x00], 0x24, 5));
+    o.extend([0x13, 6, 14]);
+    screen_with(&o)
+}
+
+#[test]
+fn with_the_gui_switch_on_create_window_draws_a_window_r_ds_10() {
+    let mut s = gui_session(true);
+    s.receive(&host(&window_screen()));
+    assert_eq!(s.notice(), None);
+    assert_eq!(s.screen().windows().len(), 1);
+    assert!(row_text(&s, 5).contains("Æble"), "{}", row_text(&s, 5));
+    assert!(row_text(&s, 6).contains(':'));
+    // The cursor stays inside: a move out of the window does not happen.
+    s.key(Key::MoveTo { row: 0, column: 0 });
+    assert_eq!(s.screen().row_column(s.screen().cursor), (5, 13));
+}
+
+#[test]
+fn with_the_gui_switch_off_create_window_is_skipped_r_ds_10() {
+    let mut s = gui_session(false);
+    s.receive(&host(&window_screen()));
+    assert_eq!(s.notice(), None);
+    assert_eq!(s.screen().windows().len(), 0);
+    s.key(Key::MoveTo { row: 0, column: 0 });
+    assert_eq!(s.screen().row_column(s.screen().cursor), (0, 0));
+}
+
+#[test]
+fn remove_gui_window_and_clear_unit_take_the_window_away_r_ds_10() {
+    let mut s = gui_session(true);
+    s.receive(&host(&window_screen()));
+    let mut remove = vec![ESC, 0x11, 0x00, 0x00, SBA, 5, 10];
+    remove.extend(wdsf(0x59, &[0x00, 0x00, 0x00]));
+    s.receive(&host(&remove));
+    assert_eq!(s.notice(), None);
+    assert_eq!(s.screen().windows().len(), 0);
+    assert_eq!(s.screen().cursor_limit(), None);
+    s.receive(&host(&window_screen()));
+    s.receive(&host(&[ESC, 0x40]));
+    assert_eq!(s.screen().windows().len(), 0);
+}
+
+#[test]
+fn a_window_that_does_not_fit_is_a_bad_record_r_ds_10() {
+    let mut s = gui_session(true);
+    let mut o = vec![SBA, 23, 1];
+    o.extend(wdsf(0x51, &[0x00, 0x00, 0x00, 3, 20]));
+    s.receive(&host(&screen_with(&o)));
+    assert!(
+        s.notice().is_some_and(|n| n.contains("does not fit")),
+        "{:?}",
+        s.notice()
+    );
+}
+
+#[test]
+fn the_query_reply_claims_the_gui_only_with_the_switch_on_r_ds_10() {
+    let query = host(&[ESC, 0xF3, 0x00, 0x05, 0xD9, 0x70, 0x00]);
+    let mut on = gui_session(true);
+    on.receive(&query);
+    let reply = sent_one(&mut on).2;
+    assert_eq!(
+        &reply[3..5],
+        &[0x00, 0x40],
+        "64 bytes, as tn5250j's enhanced mode"
+    );
+    assert_eq!(reply.len(), 3 + 0x40);
+    assert_eq!(
+        reply[53], 0x07,
+        "byte 4: GUI-like characters, level 1, error to window"
+    );
+    assert_eq!(reply[54], 0x08, "byte 5: level 3");
+    let mut off = gui_session(false);
+    off.receive(&query);
+    let reply = sent_one(&mut off).2;
+    assert_eq!((reply.len(), reply[53]), (61, 0x00));
+}
+
 #[test]
 fn recording_leaves_out_refused_keys_and_the_reset_after_them_r_key_3() {
     let mut s = numeric_screen();

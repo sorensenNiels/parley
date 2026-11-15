@@ -5,6 +5,7 @@
 
 mod colors;
 mod find;
+mod windows;
 
 pub use colors::{COLORS, CustomColors, Palette, Scheme};
 
@@ -193,6 +194,7 @@ pub fn show(
         &cells,
         &Marks::of(view, session, blink),
     );
+    windows::draw(&painter, &grid, session.screen(), &view.palette);
     flash_border(ui, &painter, response.rect, view, now);
     if let Some(spot) = hovered {
         underline_hotspot(&painter, &grid, &cells, spot, palette);

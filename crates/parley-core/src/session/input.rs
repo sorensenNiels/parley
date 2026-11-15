@@ -423,7 +423,14 @@ impl Session {
             | Key::Attention
             | Key::SystemRequest => cursor,
         };
-        self.screen.cursor = to;
+        // A window that keeps the cursor inside (R-DS-10): a move out of it does not happen.
+        let (row, column) = screen.row_column(to);
+        if screen
+            .cursor_limit()
+            .is_none_or(|w| w.contains(row, column))
+        {
+            self.screen.cursor = to;
+        }
     }
 }
 

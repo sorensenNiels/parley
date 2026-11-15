@@ -24,6 +24,8 @@ Exit when the session ends: close Parley when the IBM i ends the session (sign-o
 Confirm exit: ask before closing Parley while connected.
 Reconnect when the connection drops: when the network fails (not when the IBM i ends the \
 session), connect again after 2, 4, 8 … up to 60 seconds; the session's macro runs again.
+GUI elements (beta): tell the IBM i that Parley can show its GUI-like windows, and draw them as \
+frames. Menus, buttons and scroll bars are not drawn yet, so leave it off for daily work.
 Send keep-alive: send a telnet no-operation after a minute without traffic, so firewalls \
 keep an idle connection open.
 Connect on program start: connect to this session when Parley starts.
@@ -174,6 +176,7 @@ impl Editor {
             &mut profile.reconnect,
         );
         theme::switch_row(ui, "Send keep-alive", &mut profile.config.keep_alive);
+        theme::switch_row(ui, "GUI elements (beta)", &mut profile.config.gui);
         theme::switch_row(
             ui,
             "Connect to this session on program start",

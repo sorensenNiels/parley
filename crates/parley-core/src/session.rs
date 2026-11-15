@@ -4,6 +4,7 @@
 
 mod checks;
 mod datastream;
+mod gui;
 mod input;
 mod playback;
 mod reply;
@@ -44,6 +45,8 @@ pub struct SessionConfig {
     pub device_name: String,
     /// Send a telnet No Operation after a minute without traffic (R-NET-5).
     pub keep_alive: bool,
+    /// Claim IBM i's GUI-like 5250 and draw its windows (R-DS-10, D38): "GUI elements (beta)".
+    pub gui: bool,
 }
 
 impl Default for SessionConfig {
@@ -57,6 +60,7 @@ impl Default for SessionConfig {
             screen_size: ScreenSize::default(),
             device_name: String::new(),
             keep_alive: false,
+            gui: false,
         }
     }
 }
