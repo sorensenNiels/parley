@@ -7,8 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::CodePage;
 
+mod extended;
 mod hotspots;
 mod region;
+pub use extended::ExtendedKind;
 pub use hotspots::{Hotspot, Target, hotspots};
 pub use region::{Rectangle, Span, find, rectangle_text, table_text};
 
@@ -276,6 +278,8 @@ pub struct Screen {
     /// The Start of Header's command key switches (R-DS-8): bit n set means F(n+1) sends no
     /// field data. Part of the format table, so clearing the fields clears them.
     keys_without_data: u32,
+    /// The extended character buffer (R-DS-9).
+    extended: extended::Extended,
     /// The cursor's buffer position.
     pub cursor: usize,
 }
@@ -287,6 +291,7 @@ impl Screen {
             buffer: vec![0; size.positions()],
             fields: Vec::new(),
             keys_without_data: 0,
+            extended: extended::Extended::new(size.positions()),
             cursor: 0,
         }
     }
@@ -451,6 +456,18 @@ impl Screen {
     /// A non-display input field (a password) is underlined, so the operator sees where to type;
     /// its contents stay hidden.
     pub fn cells(&self, code_page: CodePage) -> Vec<Cell> {
+        let mut cells = self.screen_cells(code_page);
+        self.extended.overlay(&self.buffer, &mut cells);
+        cells
+    }
+
+    /// Writes an extended attribute at `address` (R-DS-9); it takes no position.
+    pub fn put_extended(&mut self, address: usize, kind: ExtendedKind, value: u8) {
+        self.extended.put(address, kind, value);
+    }
+
+    /// The cells as the screen attributes alone make them.
+    fn screen_cells(&self, code_page: CodePage) -> Vec<Cell> {
         let blank = |style| Cell { ch: ' ', style };
         let normal = Style::from_attribute(NORMAL);
         let mut field_ends = vec![false; self.buffer.len()];

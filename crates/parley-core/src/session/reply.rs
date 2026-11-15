@@ -10,6 +10,9 @@ use crate::screen::{BLANK, Field, MINUS, ScreenSize, negative_zone};
 const SIZE_27X132: u8 = 0x20;
 const SIZE_24X80: u8 = 0x10;
 const COLOUR: u8 = 0x01;
+// Device capability byte 2 (SC30-3533-04 §15.27.2).
+const EXTENDED_PRIMARY: u8 = 0x04;
+const EXTENDED_COLOURS_MAPPED: u8 = 0x01;
 
 impl Session {
     /// The reply to a read command: cursor row and column and the AID (not for Read Immediate),
@@ -134,6 +137,9 @@ impl Session {
             // Immediate Alternate (R-DS-7); Parley claims none of the other optional commands.
             0x01,
             sizes | COLOUR, // byte 1: screen sizes and colour
+            // Byte 2 (R-DS-9): extended primary attributes in DP mode (bit 5), and 7 extended
+            // foreground colours with the other 7 mapped onto them (bits 6-7 = B'01').
+            EXTENDED_PRIMARY | EXTENDED_COLOURS_MAPPED,
         ]);
         data.resize(61, 0x00); // device capability bytes 2-11
         self.send_record(0, Opcode::NoOperation, &data);

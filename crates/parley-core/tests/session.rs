@@ -1073,6 +1073,30 @@ fn type_ahead_keeps_at_most_its_limit_r_key_11() {
 }
 
 #[test]
+fn write_extended_attribute_colours_text_without_taking_a_position_r_ds_9() {
+    let mut o = vec![SBA, 3, 1, 0x12, 0x03, 0x88]; // red from row 3, column 1
+    o.extend(ebcdic("red"));
+    o.extend([0x12, 0x03, 0x80]); // back to the screen's colour
+    o.extend(ebcdic("green"));
+    o.extend([0x12, 0x05, 0x81]); // ideographic: not claimed, ignored
+    let mut s = session();
+    s.receive(&host(&screen_with(&o)));
+    assert_eq!(s.notice(), None);
+    assert_eq!(row_text(&s, 3), "redgreen", "no positions taken");
+    let cells = s.screen().cells(CodePage::Ccsid37);
+    let start = address(&s, 3, 1);
+    assert_eq!(cells[start].style.color, parley_core::Color::Red);
+    assert_eq!(cells[start + 3].style.color, parley_core::Color::Green);
+}
+
+#[test]
+fn the_query_reply_claims_extended_attributes_and_seven_colours_r_ds_9() {
+    let mut s = session();
+    s.receive(&host(&[ESC, 0xF3, 0x00, 0x05, 0xD9, 0x70, 0x00]));
+    assert_eq!(sent_one(&mut s).2[51], 0x05, "device capability byte 2");
+}
+
+#[test]
 fn recording_leaves_out_refused_keys_and_the_reset_after_them_r_key_3() {
     let mut s = numeric_screen();
     s.start_recording();
@@ -1434,8 +1458,12 @@ fn malformed_commands_and_orders_are_reported_not_applied_r_ds_1() {
             "ends inside Start of Field",
         ),
         (
-            with_wtd(&[0x12, 0x00]),
+            with_wtd(&[0x12, 0x01]),
             "ends inside Write Extended Attribute",
+        ),
+        (
+            with_wtd(&[0x12, 0x07, 0x80]),
+            "extended attribute of type X'07'",
         ),
         (
             with_wtd(&[0x15, 0x00, 0x09, 0x00]),

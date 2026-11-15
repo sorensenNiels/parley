@@ -249,3 +249,12 @@ Checked by the owner in the running app (2026-11-15); `make verify` on Linux und
   leaves the rest for the screen after; Reset drops them; an error while replaying drops the rest; at most 256 are
   kept and turning it off drops them; the status bar says "2 keys typed ahead"; the Terminal page saves the switch.
   Not tried in the running app; marked done by the owner (2026-11-15).
+
+- **R-DS-9** (2026-11-15): extended attributes (IDEA-5, first part). **Automated** (`make test`): an extended colour
+  holds until the next, a null continues it and X'80' gives the screen's back; primary attributes replace the
+  screen's highlighting (underline, reverse, high intensity as white, also on `æøå`); X'81' hides text; Clear Unit
+  drops them; an address past the end is ignored; on a whole screen WEA takes no position, colours red then green,
+  ideographic attributes are ignored and an unknown type is a bad record; the query reply's byte 2 is X'05'.
+  **Against DKSOFT00** (the owner ran a read-only tour macro with `PARLEY_TRACE`: help, a prompt and
+  its list, WRKSPLF, WRKACTJOB, DSPLIB, GO CMDLIB): the host sent no extended attributes on those screens. Marked
+  done by the owner (2026-11-15).

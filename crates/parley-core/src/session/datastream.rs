@@ -7,7 +7,7 @@
 use super::{MAX_SAVED_SCREENS, ReadKind, SavedScreen, Session};
 use crate::error::{Error, Result};
 use crate::record::Opcode;
-use crate::screen::{Field, FieldFormat, ScreenSize, SelfCheck, is_attribute};
+use crate::screen::{ExtendedKind, Field, FieldFormat, ScreenSize, SelfCheck, is_attribute};
 
 pub(super) const ESC: u8 = 0x04;
 
@@ -242,9 +242,23 @@ impl Session {
                     }
                 }
                 SBA => address = self.read_address(r, "Set Buffer Address")?,
-                // Extended attributes (colours, ideographic text): not shown yet.
+                // R-DS-9, SC30-3533-04 §15.6.11: type and attribute, at the current address,
+                // which does not move. Ideographic attributes (X'05') are not claimed: ignored.
                 WEA => {
-                    r.take(2, "Write Extended Attribute")?;
+                    let kind = match r.byte("Write Extended Attribute")? {
+                        0x01 => Some(ExtendedKind::Primary),
+                        0x03 => Some(ExtendedKind::Color),
+                        0x05 => None,
+                        other => {
+                            return Err(Error::data(format!(
+                                "an extended attribute of type X'{other:02X}'"
+                            )));
+                        }
+                    };
+                    let value = r.byte("Write Extended Attribute")?;
+                    if let Some(kind) = kind {
+                        self.screen.put_extended(address, kind, value);
+                    }
                 }
                 IC => self.insert_cursor = Some(self.read_address(r, "Insert Cursor")?),
                 MC => self.screen.cursor = self.read_address(r, "Move Cursor")?,
