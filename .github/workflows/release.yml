@@ -131,4 +131,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --latest \
             --title "Parley ${GITHUB_REF_NAME#v}" \
+            --notes-file .github/release-install.md \
             --generate-notes

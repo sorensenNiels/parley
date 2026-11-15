@@ -69,10 +69,35 @@ resources = [
 # the settings, to list the installed fonts; GTK 3 by the macro file windows (R-KEY-7).
 depends = ["libgtk-3-0", "libxkbcommon-x11-0", "libegl1", "libgl1", "libfontconfig1"]
 section = "net"
+# R-NF-2: Parley SQL in the application menu beside Parley; the generated entry is Parley's only.
+files = { "linux/parley-sql.desktop" = "usr/share/applications/parley-sql.desktop" }
 
 [package.metadata.packager.appimage]
 # Loaded at run time by the window library on X11, and missing on some minimal systems.
 libs = ["libxkbcommon-x11.so.0"]
+
+[package.metadata.packager.wix]
+# R-NF-2: the install folder on the system PATH, so `parley` and `parley-sql` work in a new
+# terminal (removed again on uninstall), and Parley SQL in the Start menu beside Parley. Ids from
+# cargo-packager's main.wxs: INSTALLDIR, ApplicationProgramsFolder. Inline, so no path to resolve.
+component-refs = ["ParleyOnPath", "ParleySqlShortcut"]
+fragments = ["""<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="ParleyOnPath" Guid="6F2B9C1E-4D3A-4B7E-9A51-2C8D7E0F3A64" KeyPath="yes">
+        <Environment Id="ParleyPathEntry" Name="PATH" Value="[INSTALLDIR]" Permanent="no" Part="last" Action="set" System="yes"/>
+      </Component>
+    </DirectoryRef>
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="ParleySqlShortcut" Guid="B4E1D7A2-8C35-4F69-A0D2-5E7B9C3F1A86">
+        <Shortcut Id="ParleySqlStartMenuShortcut" Name="Parley SQL" Description="SQL for IBM i" Target="[INSTALLDIR]parley-sql.exe" WorkingDirectory="INSTALLDIR"/>
+        <RegistryValue Root="HKCU" Key="Software\\SoftDesign\\Parley" Name="Parley SQL Shortcut" Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>
+"""]
 
 [package.metadata.packager.macos]
 minimum-system-version = "11.0"

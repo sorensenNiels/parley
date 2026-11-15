@@ -1,0 +1,9 @@
+[Desktop Entry]
+Categories=Utility;Development;Database;
+Comment=SQL for IBM i
+Exec=parley-sql
+Icon=parley
+Name=Parley SQL
+StartupWMClass=parley-sql
+Terminal=false
+Type=Application

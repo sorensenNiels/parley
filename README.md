@@ -25,6 +25,8 @@ A TN5250 terminal emulator for IBM i, written in Rust, for Windows, Linux and ma
 ```sh
 parley                      # the connection form: host, port, TLS, code page, screen size, device name
 parley ibmi.example.com     # connect at once (port 23); --tls for port 992
+parley-sql                  # Parley SQL: SQL for IBM i, its saved connections (also: parley --sql)
+parley-sql Production       # sign on to the saved connection "Production"
 ```
 
 The last settings are remembered. Keys: Enter is Enter, Shift+Enter is Field Exit, a Ctrl key on its own is Reset,
@@ -47,11 +49,13 @@ GNU make, rustup). Under WSL2 the app needs WSLg; `make run` selects the GPU dri
 |---|---|
 | `crates/parley-core` | The TN5250 engine: telnet negotiation, the 5250 data stream, EBCDIC, the screen model, and the TCP/TLS connection. No UI code. |
 | `crates/parley-ui-egui` | The user interface, built with [egui](https://github.com/emilk/egui). |
-| `crates/parley-app` | The `parley` binary: opens the window and runs the UI. |
+| `crates/parley-app` | The `parley` and `parley-sql` binaries: open the window and run the UI. |
 
 ## Releases
 
 Installers for Windows, macOS and Linux are attached to each [GitHub release](https://github.com/sorensenNiels/parley/releases).
+Each holds both programs, `parley` and `parley-sql`; how to install them and have both commands in a terminal on
+each OS is in [.github/release-install.md](.github/release-install.md), which heads every release's notes.
 `make release-patch` (or `-minor`, `-major`) makes one; see [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Editor

@@ -15,6 +15,7 @@ Without HOST, connects to the session marked \"connect on program start\", if an
 
 Options:
   --tls                Connect with TLS
+  --sql [ARGS]         Start Parley SQL instead, with ARGS (see parley-sql --help)
   --screenshot FILE    After a few seconds, save the window as a PPM image and quit
                        (for development)
   --version            Print the version and quit
@@ -29,8 +30,20 @@ struct Args {
 }
 
 pub fn run() -> eframe::Result {
+    // R-NF-2: `parley --sql`, or a link named parley-sql to the AppImage, is Parley SQL.
+    let all: Vec<String> = std::env::args().skip(1).collect();
+    let argv0 = std::env::var("ARGV0").ok();
+    if let Some(sql) = parley_app::sql_start::sql_args(&all, argv0.as_deref()) {
+        match parley_app::sql_start::hand_over(&sql) {
+            Ok(code) => std::process::exit(code),
+            Err(e) => {
+                eprintln!("parley: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
     let mut args = Args::default();
-    let mut command_line = std::env::args().skip(1);
+    let mut command_line = all.into_iter();
     while let Some(arg) = command_line.next() {
         match arg.as_str() {
             "--version" | "-V" => {

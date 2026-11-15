@@ -10,6 +10,19 @@ How installers are built (R-NF-1) and how a release is made. The tool is
 | macOS | `.dmg` (Apple silicon and Intel) | `macos-latest` | Minimum macOS 11. |
 | Linux | `.deb`, `.AppImage` | `ubuntu-22.04` | Built on the oldest supported Ubuntu, so they run on its glibc (2.35) and newer. |
 
+Every installer holds both programs, `parley` and `parley-sql` (D26), and makes both commands work in a terminal
+where the OS allows it (R-NF-2):
+
+| Package | Commands | Menu |
+|---|---|---|
+| `.msi` | The install folder goes on the system PATH (removed on uninstall): both in a new terminal. | Parley and Parley SQL in the Start menu. |
+| `.deb` | Both in `/usr/bin`. | Parley and Parley SQL (`linux/parley-sql.desktop`). |
+| `.AppImage` | It starts `parley`; `--sql`, or a link named `parley-sql`, starts Parley SQL. The user makes the links. | Parley only. |
+| `.dmg` | Both in `Parley.app/Contents/MacOS`; the user links them into `/usr/local/bin`. | Parley only. |
+
+The Windows PATH entry and Start menu shortcut are a WiX fragment in `[package.metadata.packager.wix]`. The install
+notes users see head every release's notes: `.github/release-install.md`.
+
 The installers are **not signed** yet (D10). macOS will say the app "cannot be opened because the developer
 cannot be verified": right-click the app, choose **Open**, then **Open** again (needed once). Windows SmartScreen
 may warn: **More info → Run anyway**.
@@ -56,11 +69,13 @@ installers are then attached to the run as artifacts.
 On each OS, after installing:
 
 - The app starts from the Start menu / Launchpad / application menu, with the Parley icon.
-- `parley --version` prints the release version (on macOS:
-  `/Applications/Parley.app/Contents/MacOS/parley --version`).
+- `parley --version` and `parley-sql --version` print the release version in a **new** terminal (on Windows a
+  new one after installing, for the PATH; on macOS after the links of `.github/release-install.md`; for the
+  AppImage through its links, and `Parley….AppImage --sql --version`).
+- Parley SQL is in the Start menu (Windows) and the application menu (`.deb`), and starts from there.
 - Connect to an IBM i (PUB400.COM works without an account up to the sign-on screen), over telnet and over TLS.
 - Close and reopen the app: the connection form still holds the last settings.
-- Uninstall: the app is removed; its saved settings are left alone.
+- Uninstall: the app is removed, and on Windows its folder is gone from PATH; its saved settings are left alone.
 
 Record what was checked, and on which OS, in `docs/FEATURES.md`.
 

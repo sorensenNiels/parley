@@ -14,6 +14,12 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
+- **R-NF-2** (2026-11-15): both commands after installing. Built; **automated** (`make test`): `--sql` first and a
+  start by the name `parley-sql` hand over to Parley SQL, anything else is Parley. **Checked on Linux under WSL:**
+  the `.deb` holds `/usr/bin/parley`, `/usr/bin/parley-sql` and both menu entries; the AppImage answers
+  `--version`, `--sql --version` and, through a link named `parley-sql`, `--version` as Parley SQL. **Still to
+  check:** the `.msi` (PATH after installing and its removal on uninstall, the Start menu shortcut; the WiX fragment
+  has not been built yet) and the macOS links, from a release build (Actions → Release → Run workflow).
 - **R-KEY-5** (2026-11-12): editing a macro in Parley, built. **Automated** (`make test`): in kittest, Edit opens the
   file's text, a change is saved, text that does not read names its line and cannot be saved, Cancel leaves the file,
   New macro… saves a macro written by hand, the editor keeps its place; in parley-app the text is written and read
