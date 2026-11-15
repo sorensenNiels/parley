@@ -79,6 +79,8 @@ pub struct Around<'a> {
     pub results: layout::ResultsPlace,
     /// Brackets and quotes close themselves in the editor (R-SQL-55).
     pub close_pairs: bool,
+    /// How Format SQL writes (R-SQL-77).
+    pub format: parley_core::sql::text::Style,
     /// The window's shortcuts (R-SQL-60); `None` for the default keys, as in Parley.
     pub keys: Option<&'a keys::SqlKeys>,
 }
@@ -883,6 +885,7 @@ impl SqlWindow {
     /// The editor with its Run buttons, and the results below or beside it (R-SQL-49).
     fn work(&mut self, ui: &mut Ui, around: Around<'_>) {
         self.scripts.close_pairs = around.close_pairs;
+        self.scripts.format = around.format;
         let keys = around.keys.cloned().unwrap_or_default();
         if keys != self.scripts.keys {
             self.scripts.keys = keys;
@@ -962,7 +965,14 @@ impl SqlWindow {
         ui.add_space(6.0);
         self.run_buttons(ui);
         if let Some(error) = &self.error_line {
-            theme::error(ui, error);
+            let mut show = false;
+            ui.horizontal_wrapped(|ui| {
+                theme::error(ui, error);
+                show = self.scripts.error_place().is_some() && show_link(ui);
+            });
+            if show {
+                self.scripts.go_to_error();
+            }
         }
         shown
     }
@@ -1082,6 +1092,7 @@ impl SqlWindow {
     /// Runs `statement`, after asking for its markers' values when it has any (R-SQL-40).
     fn start(&mut self, statement: String) {
         self.error_line = None;
+        self.scripts.clear_error_mark();
         if text::cl_command(&statement).is_none()
             && let Some(markers) = params::markers(&statement)
         {
@@ -1347,6 +1358,8 @@ impl SqlWindow {
             }
             Err(e) => {
                 self.note_outcome(statement, gutter::Outcome::Failed(e.to_string()));
+                // R-SQL-75: where the host says it stopped, marked in the editor.
+                self.scripts.mark_error(statement, &e.to_string());
                 self.queue.clear();
                 self.fail(format!("{short}: {e}"));
                 return;
@@ -1463,6 +1476,13 @@ impl SqlWindow {
         }
         self.database.close();
     }
+}
+
+/// "Show in the editor" beside an error whose place is marked (R-SQL-75); true when clicked.
+fn show_link(ui: &mut Ui) -> bool {
+    ui.link(RichText::new("Show in the editor").small())
+        .on_hover_text("Puts the cursor where the host says the statement went wrong")
+        .clicked()
 }
 
 #[cfg(test)]

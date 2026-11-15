@@ -45,6 +45,11 @@ impl eframe::App for App {
         }
     }
 
+    /// Every few seconds, so a crash loses little of the scripts (R-SQL-74).
+    fn auto_save_interval(&self) -> std::time::Duration {
+        parley_ui_egui::SAVE_EVERY
+    }
+
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         // A screenshot run is for development: it must not replace the operator's settings.
         if self.screenshot.is_some() {

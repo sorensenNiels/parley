@@ -86,6 +86,7 @@ enum Token {
     Dot,
     Comma,
     Open,
+    Close,
     Other,
 }
 
@@ -117,6 +118,7 @@ fn tokens(statement: &str) -> Vec<Token> {
             '.' | '/' => out.push(Token::Dot),
             ',' => out.push(Token::Comma),
             '(' => out.push(Token::Open),
+            ')' => out.push(Token::Close),
             c if is_name_char(c) => {
                 let mut word = c.to_uppercase().to_string();
                 while let Some(&d) = chars.peek().filter(|&&d| is_name_char(d)) {
@@ -208,6 +210,130 @@ pub fn tables_in(statement: &str) -> Vec<TableRef> {
         }
     }
     found
+}
+
+/// A common table expression of a `WITH` (R-SQL-76): its name and its columns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cte {
+    pub name: String,
+    pub columns: Vec<String>,
+}
+
+/// The common table expressions `statement` starts with: each name, and its columns as listed
+/// (`x (a, b) AS (…)`), else the names of its select list (a column, or what `AS` or a trailing
+/// name calls it; an expression without one is left out). Names in capitals unless quoted.
+pub fn ctes(statement: &str) -> Vec<Cte> {
+    let tokens = tokens(statement);
+    let word = |i: usize| match tokens.get(i) {
+        Some(Token::Word(w)) => Some(w.as_str()),
+        _ => None,
+    };
+    let mut found = Vec::new();
+    if word(0) != Some("WITH") {
+        return found;
+    }
+    let mut at = 1 + usize::from(word(1) == Some("RECURSIVE"));
+    while let Some(name) = word(at) {
+        at += 1;
+        let mut columns = Vec::new();
+        if tokens.get(at) == Some(&Token::Open) {
+            at += 1;
+            while let Some(token) = tokens.get(at) {
+                at += 1;
+                match token {
+                    Token::Word(column) => columns.push(column.clone()),
+                    Token::Close => break,
+                    Token::Dot | Token::Comma | Token::Open | Token::Other => {}
+                }
+            }
+        }
+        if word(at) != Some("AS") || tokens.get(at + 1) != Some(&Token::Open) {
+            break;
+        }
+        let inner = at + 2;
+        let Some(close) = closing(&tokens, inner) else {
+            break;
+        };
+        if columns.is_empty() {
+            columns = select_names(tokens.get(inner..close).unwrap_or_default());
+        }
+        found.push(Cte {
+            name: name.to_owned(),
+            columns,
+        });
+        at = close + 1;
+        if tokens.get(at) != Some(&Token::Comma) {
+            break;
+        }
+        at += 1;
+    }
+    found
+}
+
+/// The index of the `)` that closes the bracket opened just before `from`.
+fn closing(tokens: &[Token], from: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (i, token) in tokens.iter().enumerate().skip(from) {
+        match token {
+            Token::Open => depth += 1,
+            Token::Close if depth == 0 => return Some(i),
+            Token::Close => depth -= 1,
+            Token::Word(_) | Token::Dot | Token::Comma | Token::Other => {}
+        }
+    }
+    None
+}
+
+/// The names a `SELECT …`'s list gives its columns, up to its `FROM`.
+fn select_names(tokens: &[Token]) -> Vec<String> {
+    let mut rest = match tokens.first() {
+        Some(Token::Word(w)) if w == "SELECT" => tokens.get(1..).unwrap_or_default(),
+        _ => return Vec::new(),
+    };
+    if let Some(Token::Word(w)) = rest.first()
+        && (w == "DISTINCT" || w == "ALL")
+    {
+        rest = rest.get(1..).unwrap_or_default();
+    }
+    let mut names = Vec::new();
+    let mut item: Vec<&Token> = Vec::new();
+    let mut depth = 0usize;
+    for token in rest {
+        match token {
+            Token::Open => depth += 1,
+            Token::Close => depth = depth.saturating_sub(1),
+            Token::Comma if depth == 0 => {
+                names.extend(item_name(&item));
+                item.clear();
+                continue;
+            }
+            Token::Word(w) if depth == 0 && w == "FROM" => break,
+            Token::Word(_) | Token::Dot | Token::Comma | Token::Other => {}
+        }
+        item.push(token);
+    }
+    names.extend(item_name(&item));
+    names
+}
+
+/// One select-list item's name: after `AS`, a trailing name after a column or a `)`, or the
+/// column itself (`COL`, `T.COL`). A number is no name.
+fn item_name(item: &[&Token]) -> Option<String> {
+    let last = match item.last()? {
+        Token::Word(w) if !w.starts_with(|c: char| c.is_ascii_digit()) => w.clone(),
+        Token::Word(_) | Token::Dot | Token::Comma | Token::Open | Token::Close | Token::Other => {
+            return None;
+        }
+    };
+    let named = match item.len() {
+        1 => true,
+        n => match item.get(n - 2)? {
+            Token::Word(_) | Token::Close => true,
+            Token::Dot => n == 3,
+            Token::Comma | Token::Open | Token::Other => false,
+        },
+    };
+    named.then_some(last)
 }
 
 /// A routine being called at the cursor (R-SQL-65): its name, the name before a `.` in front
@@ -431,5 +557,46 @@ mod tests {
         assert_eq!(quoted.qualifier.as_deref(), Some("Min lib"));
         assert_eq!(quoted.name, "Gør det");
         assert_eq!(call(""), None);
+    }
+
+    #[test]
+    fn a_withs_names_and_columns_are_read_from_the_statement_r_sql_76() {
+        let statement = "WITH totaler (kunde, sum) AS (SELECT K, SUM(B) FROM T GROUP BY K), \
+             store AS (SELECT DISTINCT t.navn, COUNT(*) AS antal, beløb b, 1 + 2, \"Æble\" FROM X) \
+             SELECT * FROM totaler JOIN store s ON s.navn = totaler.kunde";
+        assert_eq!(
+            ctes(statement),
+            vec![
+                Cte {
+                    name: "TOTALER".to_owned(),
+                    columns: vec!["KUNDE".to_owned(), "SUM".to_owned()],
+                },
+                Cte {
+                    name: "STORE".to_owned(),
+                    columns: vec![
+                        "NAVN".to_owned(),
+                        "ANTAL".to_owned(),
+                        "B".to_owned(),
+                        "Æble".to_owned()
+                    ],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn without_a_with_or_when_it_is_cut_short_there_are_none_or_some_r_sql_76() {
+        assert_eq!(ctes("SELECT * FROM T"), Vec::new());
+        assert_eq!(ctes(""), Vec::new());
+        assert_eq!(
+            ctes("WITH x AS (SELECT a FROM"),
+            Vec::new(),
+            "not closed yet"
+        );
+        let recursive = ctes("WITH RECURSIVE r (n) AS (VALUES 1) SELECT * FROM r");
+        assert_eq!(
+            recursive.first().map(|c| c.columns.clone()),
+            Some(vec!["N".to_owned()])
+        );
     }
 }

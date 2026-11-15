@@ -23,6 +23,10 @@ const CONNECTIONS: connect::Words = connect::Words {
     new: "New connection…",
 };
 
+/// How often the launcher saves the settings, the scripts in them (R-SQL-74): a crash loses at
+/// most this much typing. eframe writes only what changed.
+pub const SAVE_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Parley SQL's whole UI. The launcher keeps [`ParleySqlUi::connections`] and
 /// [`ParleySqlUi::settings`].
 #[derive(Debug)]
@@ -285,6 +289,7 @@ impl ParleySqlUi {
             // One connection at a time: no Run on… (D26).
             results: self.settings.sql_results,
             close_pairs: self.settings.sql_close_pairs,
+            format: self.settings.sql_format,
             keys: Some(&keys),
         };
         window.set_assistant(assistant, &self.settings.assistant, self.api_keys.as_ref());
@@ -433,6 +438,28 @@ mod tests {
     }
 
     #[test]
+    fn typing_reaches_the_settings_at_once_so_the_next_save_keeps_it_r_sql_74() {
+        let mut harness = with_window(vec![prod()], prod_window().signed_on_for_tests());
+        harness
+            .get_by_role(egui::accesskit::Role::MultilineTextInput)
+            .focus();
+        harness.run();
+        harness
+            .get_by_role(egui::accesskit::Role::MultilineTextInput)
+            .type_text("VALUES 'æøå'");
+        harness.run();
+        let kept = harness
+            .state()
+            .settings()
+            .sql_scripts
+            .get("Prod")
+            .and_then(|scripts| scripts.first())
+            .map(|s| s.text.clone());
+        assert_eq!(kept.as_deref(), Some("VALUES 'æøå'"));
+        assert!(SAVE_EVERY.as_secs() <= 5, "saved within seconds");
+    }
+
+    #[test]
     fn the_header_has_the_name_file_help_and_a_gear_at_the_right_end_r_sql_45() {
         let harness = app_with(Vec::new());
         harness.get_by_label("Parley SQL");
@@ -542,6 +569,31 @@ mod tests {
         harness.get_by_label("Save").click();
         harness.run();
         assert_eq!(harness.state().settings.sql_results, ResultsPlace::Beside);
+    }
+
+    #[test]
+    fn formatting_is_chosen_on_the_sql_page_r_sql_77() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("SQL").click();
+        harness.run();
+        // Below Java and the limits: scrolled to, as a user would.
+        harness.get_by_label("FORMATTING").scroll_to_me();
+        harness.run();
+        harness.get_by_label("Lower").click();
+        harness.run();
+        harness.get_by_label("At the start").click();
+        harness.run();
+        let before = harness.get_by_label("Save").rect();
+        harness.run_steps(5);
+        assert_eq!(harness.get_by_label("Save").rect(), before, "D12");
+        harness.get_by_label("Save").click();
+        harness.run();
+        let style = harness.state().settings.sql_format;
+        assert_eq!(style.case, parley_core::sql::text::KeywordCase::Lower);
+        assert!(style.commas_first);
+        assert_eq!(style.indent, 4, "left as it was");
     }
 
     #[test]

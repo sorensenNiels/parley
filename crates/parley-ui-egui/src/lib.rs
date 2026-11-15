@@ -38,7 +38,7 @@ pub use sql::SqlFiles;
 pub use sql::assistant::ApiKeys;
 pub use sql::editor::SavedScript;
 pub use sql::snippets::SnippetStore;
-pub use sql_app::{ParleySqlUi, SqlConnection};
+pub use sql_app::{ParleySqlUi, SAVE_EVERY, SqlConnection};
 pub use theme::Density;
 pub use updates::Checker;
 

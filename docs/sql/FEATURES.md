@@ -16,6 +16,16 @@ None.
 
 ## Implemented
 
+- **R-SQL-74..77** (2026-11-15): the editor, safer (Phase 16). **Automated** (`make test`): typing reaches the
+  kept settings in the same frame and Parley SQL saves every 5 seconds (R-SQL-74); the name an error stopped at read
+  from SQL0104, SQL0199, SQL0204..SQL0206 and none from `<END-OF-STATEMENT>` or other messages, its place as a whole
+  word outside strings and comments, a delimited name with its quotes, a symbol, `æøå`; the underline in the error
+  colour and none once stale, a failed run marking the token, the link selecting it and an edit dropping it (R-SQL-75);
+  a `WITH`'s names and columns from a column list, `AS`, a trailing name or the column, numbers and expressions left
+  out, an unclosed one, `RECURSIVE`, completion offering its names and columns and an alias found before an inner
+  table of the same name (R-SQL-76); Format SQL in each style with the default unchanged, and the SQL page's
+  Formatting group saved with Save in place (R-SQL-77). **Checked in the running app** by the owner, Linux under WSL (2026-11-15).
+
 - **R-SQL-71..73** (2026-11-15): data transfer (Phase 15, D31), built. **Automated** (`make test`, `make helper`): in
   `parley-core` CSV lines quoted as RFC 4180, a CSV download written batch by batch, a stopped download leaving no file,
   a folder that is not there named in the error, an Excel workbook (checked once by unzipping: a frozen bold header,

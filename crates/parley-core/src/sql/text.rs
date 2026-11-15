@@ -517,7 +517,46 @@ const SPACED_BEFORE_PAREN: [&str; 10] = [
     "IN", "VALUES", "AS", "ON", "AND", "OR", "NOT", "EXISTS", "THEN", "ELSE",
 ];
 
-const INDENT: &str = "    ";
+/// How Format SQL writes (R-SQL-77): the case of keywords, the indentation and where list
+/// commas go. The default is the format of R-SQL-22.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Style {
+    pub case: KeywordCase,
+    /// Spaces a level: 2 or 4.
+    pub indent: u8,
+    /// A list's commas at the start of the next line instead of the end of this one.
+    pub commas_first: bool,
+}
+
+impl Default for Style {
+    fn default() -> Self {
+        Self {
+            case: KeywordCase::Upper,
+            indent: 4,
+            commas_first: false,
+        }
+    }
+}
+
+/// The case Format SQL gives keywords.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum KeywordCase {
+    #[default]
+    Upper,
+    Lower,
+    AsWritten,
+}
+
+impl KeywordCase {
+    fn apply(self, written: &str) -> String {
+        match self {
+            Self::Upper => written.to_ascii_uppercase(),
+            Self::Lower => written.to_ascii_lowercase(),
+            Self::AsWritten => written.to_owned(),
+        }
+    }
+}
 
 /// Clause words that a second word completes (`GROUP BY`, `DELETE FROM`): the contents go under
 /// the second word, not the first. `UNION`'s query starts a clause of its own.
@@ -541,6 +580,11 @@ fn second_word(previous: Option<&Lexeme<'_>>, word: &str) -> bool {
 ///
 /// Text that holds a CL command (R-SQL-30) is left as it is: CL is not SQL.
 pub fn format(sql: &str) -> String {
+    format_with(sql, Style::default())
+}
+
+/// `sql` formatted as [`format`] does, written in `style` (R-SQL-77).
+pub fn format_with(sql: &str, style: Style) -> String {
     let has_cl = statements(sql)
         .into_iter()
         .any(|r| sql.get(r).and_then(cl_command).is_some());
@@ -548,7 +592,10 @@ pub fn format(sql: &str) -> String {
         return sql.trim().to_owned();
     }
     let lexemes = lexemes(sql);
-    let mut f = Formatter::default();
+    let mut f = Formatter {
+        style,
+        ..Formatter::default()
+    };
     for (i, lexeme) in lexemes.iter().enumerate() {
         f.lexeme(lexeme, lexemes.get(i + 1));
     }
@@ -571,6 +618,7 @@ struct Formatter<'a> {
     parens: Vec<Option<usize>>,
     previous: Option<Lexeme<'a>>,
     line_start: bool,
+    style: Style,
 }
 
 impl<'a> Formatter<'a> {
@@ -584,7 +632,7 @@ impl<'a> Formatter<'a> {
         let starts_clause = !inline && CLAUSES.contains(&upper.as_str()) && !second;
         self.break_before(&upper, inline, starts_clause);
         match lexeme {
-            Lexeme::Word(_, true) => self.word(&upper),
+            Lexeme::Word(w, true) => self.word(&self.style.case.apply(w)),
             Lexeme::Word(w, false) | Lexeme::Kept(w) | Lexeme::LineComment(w) => self.word(w),
             Lexeme::Punct(c) => {
                 if self.punct(*c, inline, next) {
@@ -657,6 +705,11 @@ impl<'a> Formatter<'a> {
                 }
                 self.out.push(')');
             }
+            ',' if !inline && self.style.commas_first => {
+                self.newline(self.level + 1);
+                self.out.push_str(", ");
+                return true;
+            }
             ',' => {
                 self.out.push(',');
                 if !inline {
@@ -689,7 +742,8 @@ impl<'a> Formatter<'a> {
         if !self.out.is_empty() && !self.out.ends_with('\n') {
             self.out.push('\n');
         }
-        self.out.push_str(&INDENT.repeat(indent));
+        let spaces = usize::from(self.style.indent.clamp(1, 8));
+        self.out.push_str(&" ".repeat(indent * spaces));
         self.line_start = true;
     }
 }
@@ -942,5 +996,29 @@ mod tests {
         ] {
             assert_eq!(system_name(name), None, "{name}");
         }
+    }
+
+    #[test]
+    fn format_follows_the_style_chosen_r_sql_77() {
+        let sql = "select navn, beløb from kunder where by = 'Århus'";
+        assert_eq!(
+            format_with(sql, Style::default()),
+            format(sql),
+            "the default is R-SQL-22's"
+        );
+        let lower = Style {
+            case: KeywordCase::Lower,
+            indent: 2,
+            commas_first: true,
+        };
+        assert_eq!(
+            format_with(sql, lower),
+            "select\n  navn\n  , beløb\nfrom\n  kunder\nwhere\n  by = 'Århus'"
+        );
+        let kept = Style {
+            case: KeywordCase::AsWritten,
+            ..Style::default()
+        };
+        assert!(format_with("Select A From T", kept).starts_with("Select\n    A\nFrom"));
     }
 }

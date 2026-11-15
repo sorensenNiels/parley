@@ -414,27 +414,58 @@ impl Browser {
         db: &mut Database,
     ) -> Vec<Item> {
         let tables = complete::tables_in(statement);
+        // R-SQL-76: a WITH's names are tables of the statement's own.
+        let ctes = complete::ctes(statement);
+        let cte_of = |t: &complete::TableRef| {
+            t.library
+                .is_none()
+                .then(|| ctes.iter().find(|c| c.name == t.table))
+                .flatten()
+        };
         let mut items = Vec::new();
         let prefix = typed.prefix.as_str();
         if let Some(qualifier) = &typed.qualifier {
-            let table = tables.iter().find(|t| {
-                t.alias.as_deref() == Some(qualifier)
-                    || (t.alias.is_none() && t.table == *qualifier)
-            });
-            match table {
-                Some(t) => {
-                    let library = t
-                        .library
-                        .as_deref()
-                        .or(schema)
-                        .unwrap_or_default()
-                        .to_owned();
-                    self.column_items(&library, &t.table, prefix, db, &mut items);
+            // An alias first: `FROM x` inside a WITH is not the `x` of `FROM t x` (R-SQL-76).
+            let table = tables
+                .iter()
+                .find(|t| t.alias.as_deref() == Some(qualifier))
+                .or_else(|| {
+                    tables
+                        .iter()
+                        .find(|t| t.alias.is_none() && t.table == *qualifier)
+                });
+            let cte = table
+                .and_then(cte_of)
+                .or_else(|| ctes.iter().find(|c| c.name == *qualifier));
+            if let Some(cte) = cte {
+                cte_columns(cte, prefix, &mut items);
+            } else {
+                match table {
+                    Some(t) => {
+                        let library = t
+                            .library
+                            .as_deref()
+                            .or(schema)
+                            .unwrap_or_default()
+                            .to_owned();
+                        self.column_items(&library, &t.table, prefix, db, &mut items);
+                    }
+                    None => self.object_items(qualifier, prefix, db, &mut items),
                 }
-                None => self.object_items(qualifier, prefix, db, &mut items),
             }
         } else {
-            for t in &tables {
+            for cte in tables.iter().filter_map(cte_of) {
+                cte_columns(cte, prefix, &mut items);
+            }
+            for cte in ctes.iter().filter(|c| starts(&c.name, prefix)) {
+                items.push(Item {
+                    label: cte.name.clone(),
+                    detail: "WITH".to_owned(),
+                    insert: catalog::identifier(&cte.name),
+                    snippet: None,
+                });
+            }
+            for t in tables.iter().filter(|t| cte_of(t).is_none()) {
                 let library = t
                     .library
                     .as_deref()
@@ -777,6 +808,20 @@ fn column_detail(c: &ColumnInfo) -> String {
 }
 
 /// Whether `name` starts with the typed `prefix` (in capitals) and is not all of it.
+/// The columns of a `WITH`'s table `cte` that start with `prefix` (R-SQL-76).
+fn cte_columns(cte: &complete::Cte, prefix: &str, items: &mut Vec<Item>) {
+    for column in cte.columns.iter().filter(|c| starts(c, prefix)) {
+        if !items.iter().any(|i| i.label == *column) {
+            items.push(Item {
+                label: column.clone(),
+                detail: format!("column of {}", cte.name),
+                insert: catalog::identifier(column),
+                snippet: None,
+            });
+        }
+    }
+}
+
 fn starts(name: &str, prefix: &str) -> bool {
     let name = name.to_uppercase();
     name.starts_with(prefix) && name != prefix
@@ -1042,6 +1087,32 @@ mod tests {
                 "{side} stays put: {before:?} then {after:?}"
             );
         }
+    }
+
+    #[test]
+    fn completion_offers_a_withs_names_and_their_columns_r_sql_76() {
+        let mut b = Browser::default();
+        let mut db = Database::default();
+        let labels = |items: Vec<Item>| items.into_iter().map(|i| i.label).collect::<Vec<_>>();
+        let statement = "WITH t (kunde, beløb) AS (SELECT K, B FROM X) SELECT x. FROM t x";
+        let typed = complete::typed_at("SELECT x.", 9).expect("typed");
+        let items = b.candidates(&typed, statement, None, &[], &mut db);
+        assert_eq!(labels(items), ["KUNDE", "BELØB"]);
+        let typed = complete::typed_at("SELECT k", 8).expect("typed");
+        let items = b.candidates(&typed, statement, None, &[], &mut db);
+        assert_eq!(
+            items.first().map(|i| i.detail.as_str()),
+            Some("column of T")
+        );
+        assert_eq!(labels(items).first().map(String::as_str), Some("KUNDE"));
+        let statement = "WITH totaler (k) AS (VALUES 1) SELECT * FROM TO";
+        let typed = complete::typed_at(statement, statement.len()).expect("typed");
+        let items = b.candidates(&typed, statement, None, &[], &mut db);
+        assert!(
+            items
+                .iter()
+                .any(|i| i.label == "TOTALER" && i.detail == "WITH")
+        );
     }
 
     #[test]

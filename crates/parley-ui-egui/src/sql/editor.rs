@@ -16,6 +16,7 @@ use crate::{dialog, icons, theme};
 mod colour;
 mod complete;
 mod editing;
+mod error_mark;
 mod find;
 pub mod gutter;
 mod signature;
@@ -90,6 +91,10 @@ pub struct Scripts {
     pointed: Option<(Name, usize)>,
     /// What the window said about a name, shown while the pointer is on it.
     described: Option<(Name, String)>,
+    /// The byte under the pointer last frame.
+    pointer: Option<usize>,
+    /// Where the last error stopped (R-SQL-75).
+    error_mark: Option<error_mark::ErrorMark>,
     /// The Go to line bar (R-SQL-57).
     go_to: Option<editing::GoTo>,
     /// The editor's text size in percent, while the window is open (R-SQL-59).
@@ -100,6 +105,8 @@ pub struct Scripts {
     reveal: bool,
     /// Brackets and quotes close themselves (R-SQL-55); from the settings.
     pub close_pairs: bool,
+    /// How Format SQL writes (R-SQL-77).
+    pub format: text::Style,
     /// The window's shortcuts (R-SQL-60); from the settings.
     pub keys: crate::sql::keys::SqlKeys,
     /// The shown script's text field's id last frame, to know whether it has the focus.
@@ -191,11 +198,14 @@ impl Scripts {
             popup: None,
             pointed: None,
             described: None,
+            pointer: None,
+            error_mark: None,
             go_to: None,
             zoom: 100,
             pinch: 1.0,
             reveal: false,
             close_pairs: true,
+            format: text::Style::default(),
             keys: crate::sql::keys::SqlKeys::default(),
             field: None,
             shown_number: None,
@@ -675,7 +685,7 @@ impl Scripts {
         let Some(original) = tab.text.get(range.clone()) else {
             return;
         };
-        let formatted = text::format(original);
+        let formatted = text::format_with(original, self.format);
         if formatted != original {
             tab.text.replace_range(range, &formatted);
             self.generation += 1;
@@ -725,6 +735,12 @@ impl Scripts {
             return 0.0;
         };
         self.field = Some(id);
+        // R-SQL-75: read before the tab is borrowed for the field.
+        let error = self.error_place();
+        let error_message = self
+            .pointer
+            .and_then(|at| self.error_at(at))
+            .map(str::to_owned);
         let Some(tab) = self.tabs.get_mut(self.shown) else {
             return 0.0;
         };
@@ -738,7 +754,8 @@ impl Scripts {
             state.store(ui.ctx(), id);
             ui.memory_mut(|m| m.request_focus(id));
         }
-        let marks = colour::Marks::at(&tab.text, self.selection);
+        let mut marks = colour::Marks::at(&tab.text, self.selection);
+        marks.error = error;
         let font = {
             let base = egui::TextStyle::Monospace.resolve(ui.style());
             egui::FontId::new(base.size * f32::from(self.zoom) / 100.0, base.family)
@@ -758,7 +775,8 @@ impl Scripts {
                     .as_ref()
                     .is_some_and(|(pointed, _)| pointed == name)
             })
-            .map(|(_, text)| text.as_str());
+            .map(|(_, text)| text.as_str())
+            .or(error_message.as_deref());
         let gutter = gutter::width(ui, &tab.text, &font);
         let mut out = FieldOut::default();
         let shown = ScrollArea::vertical()
@@ -807,6 +825,7 @@ impl Scripts {
             self.generation += 1;
         }
         self.follow_typing(changed, cursor_at);
+        self.pointer = pointer_at;
         self.pointed = pointer_at.and_then(|at| {
             let name = parley_core::sql::complete::name_at(self.text(), at)?;
             Some((name, at))
@@ -961,6 +980,19 @@ mod tests {
             scripts.text(),
             "values 1;\nSELECT\n    a\nFROM\n    t\nWHERE\n    b = 'x'"
         );
+    }
+
+    #[test]
+    fn format_writes_in_the_style_chosen_r_sql_77() {
+        let mut scripts = Scripts::restore(&[]);
+        scripts.tabs[0].text = "select a, 'æøå' from t".to_owned();
+        scripts.format = text::Style {
+            case: text::KeywordCase::Lower,
+            indent: 2,
+            commas_first: true,
+        };
+        scripts.format();
+        assert_eq!(scripts.text(), "select\n  a\n  , 'æøå'\nfrom\n  t");
     }
 
     #[test]

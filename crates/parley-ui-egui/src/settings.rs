@@ -61,6 +61,8 @@ pub struct Settings {
     pub sql_results: crate::sql::layout::ResultsPlace,
     /// Brackets and quotes close themselves in the SQL editor (R-SQL-55).
     pub sql_close_pairs: bool,
+    /// How Format SQL writes: keyword case, indentation, commas (R-SQL-77).
+    pub sql_format: parley_core::sql::text::Style,
     /// Parley SQL's shortcuts that differ from their own keys, by action (R-SQL-60).
     pub sql_keys: crate::sql::keys::Overrides,
     /// A folder of snippets shared with others, besides the operator's own; empty for none (R-SQL-24).
@@ -91,6 +93,7 @@ impl Default for Settings {
             sql_header: crate::sql::grid::HeaderMode::default(),
             sql_results: crate::sql::layout::ResultsPlace::default(),
             sql_close_pairs: true,
+            sql_format: parley_core::sql::text::Style::default(),
             sql_keys: crate::sql::keys::Overrides::new(),
             sql_snippets_shared: String::new(),
             sql_history: std::collections::BTreeMap::new(),
@@ -182,6 +185,7 @@ impl Page {
                 settings.sql_rows = defaults.sql_rows;
                 settings.sql_timeout = defaults.sql_timeout;
                 settings.sql_snippets_shared = defaults.sql_snippets_shared;
+                settings.sql_format = defaults.sql_format;
             }
             Self::Assistant => assistant::restore_defaults(settings),
             Self::About => settings.check_for_updates = defaults.check_for_updates,
@@ -487,6 +491,7 @@ impl Dialog {
                 ),
             });
         });
+        formatting_group(ui, &mut settings.sql_format);
     }
 
     /// What Java `path` finds, looked up only when it changed.
@@ -812,6 +817,42 @@ impl Rows<'_> {
             .painter()
             .hline(rect.x_range(), y, Stroke::new(1.0, p.border));
     }
+}
+
+/// How Format SQL writes (R-SQL-77): keyword case, indentation and where list commas go.
+fn formatting_group(ui: &mut Ui, style: &mut parley_core::sql::text::Style) {
+    use parley_core::sql::text::KeywordCase;
+    group(ui, "Formatting", None, |rows| {
+        rows.row(
+            "Keywords",
+            Some("The case Format SQL gives them."),
+            |ui, _| {
+                theme::segmented(
+                    ui,
+                    &mut style.case,
+                    &[
+                        (KeywordCase::Upper, "Upper"),
+                        (KeywordCase::Lower, "Lower"),
+                        (KeywordCase::AsWritten, "As written"),
+                    ],
+                );
+            },
+        );
+        rows.row("Indentation", None, |ui, _| {
+            theme::segmented(ui, &mut style.indent, &[(2, "2 spaces"), (4, "4 spaces")]);
+        });
+        rows.row(
+            "List commas",
+            Some("Where Format SQL puts them."),
+            |ui, _| {
+                theme::segmented(
+                    ui,
+                    &mut style.commas_first,
+                    &[(false, "At the end"), (true, "At the start")],
+                );
+            },
+        );
+    });
 }
 
 /// Theme, text size and density; with `sql`, where the SQL window's results go (R-SQL-49).

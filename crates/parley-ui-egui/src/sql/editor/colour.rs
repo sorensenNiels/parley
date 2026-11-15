@@ -21,6 +21,8 @@ pub struct Marks {
     pub bracket: Option<(usize, Option<usize>)>,
     /// Every place of the name under the cursor (R-SQL-66).
     pub words: Vec<Range<usize>>,
+    /// Where the last error stopped, underlined (R-SQL-75).
+    pub error: Option<Range<usize>>,
 }
 
 impl Marks {
@@ -39,6 +41,7 @@ impl Marks {
             current: text::statement_at(text, start),
             bracket: parley_core::sql::edit::matching_bracket(text, start),
             words,
+            error: None,
         }
     }
 }
@@ -72,6 +75,10 @@ pub fn coloured(ui: &Ui, text: &str, font: &FontId, wrap_width: f32, marks: &Mar
     for word in &words {
         cuts_at.extend([word.start, word.end]);
     }
+    let error = marks.error.clone().filter(|r| r.end <= text.len());
+    if let Some(e) = &error {
+        cuts_at.extend([e.start, e.end]);
+    }
     if let Some((at, partner)) = bracket {
         cuts_at.extend([at, at + 1]);
         if let Some(partner) = partner {
@@ -100,6 +107,9 @@ pub fn coloured(ui: &Ui, text: &str, font: &FontId, wrap_width: f32, marks: &Mar
             }
             if words.iter().any(|w| w.start <= a && b <= w.end) {
                 format.background = p.accent.gamma_multiply(0.15);
+            }
+            if error.as_ref().is_some_and(|e| e.start <= a && b <= e.end) {
+                format.underline = egui::Stroke::new(1.5, p.fail);
             }
             match bracket {
                 Some((at, Some(partner))) if a == at || a == partner => {
@@ -166,6 +176,33 @@ mod tests {
             assert_eq!(
                 picked(&plain, text, |f| f.background != Color32::TRANSPARENT),
                 ""
+            );
+        });
+        harness.run();
+    }
+
+    #[test]
+    fn the_place_of_an_error_is_underlined_in_the_error_colour_r_sql_75() {
+        let mut harness = egui_kittest::Harness::new_ui(|ui| {
+            crate::test_support::install_fonts(ui);
+            let text = "SELECT BELØB FORM T";
+            let at = text.find("FORM").expect("in the text");
+            let marks = Marks {
+                error: Some(at..at + 4),
+                ..Marks::default()
+            };
+            let job = coloured(ui, text, &monospace(ui), 400.0, &marks);
+            let fail = theme::palette(ui).fail;
+            assert_eq!(picked(&job, text, |f| f.underline.color == fail), "FORM");
+            let past_the_end = Marks {
+                error: Some(at..99),
+                ..Marks::default()
+            };
+            let job = coloured(ui, text, &monospace(ui), 400.0, &past_the_end);
+            assert_eq!(
+                picked(&job, text, |f| f.underline.color == fail),
+                "",
+                "stale"
             );
         });
         harness.run();

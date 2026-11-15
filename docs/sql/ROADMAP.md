@@ -36,6 +36,8 @@ as its recorded exception (D20).
 | Phase 13: the editor, handier | Done, verified (2026-11-14, Linux under WSL): asked by the owner: comment lines (R-SQL-52), indent and outdent (R-SQL-53), move and duplicate lines (R-SQL-54), brackets and quotes that close themselves (R-SQL-55), the matching bracket (R-SQL-56), go to a line (R-SQL-57), keyword case (R-SQL-58), zoom the editor (R-SQL-59); then Parley SQL's Shortcuts page (R-SQL-60). |
 | Phase 14: the editor, deeper | Done, verified (2026-11-14, Linux under WSL): from IDEA-34 (the owner): on egui's text field with a gutter of Parley's own (D28): line numbers (R-SQL-61), a ▶ and the last outcome per statement (R-SQL-62), completion on demand and with snippets (R-SQL-63, R-SQL-64), a routine's parameters while it is called (R-SQL-65), the word under the cursor marked (R-SQL-66), Ctrl+D (R-SQL-67), trailing blanks trimmed on save (R-SQL-68). |
 | Phase 15: data transfer | Done, verified (2026-11-15, Linux under WSL): every row to CSV or Excel (R-SQL-71, R-SQL-72), a CSV file into a table, all or nothing (R-SQL-73); D31. |
+| Phase 16: the editor, safer | Done, verified (2026-11-15, Linux under WSL): scripts kept within seconds (R-SQL-74), an error's place marked (R-SQL-75), completion of a `WITH`'s names (R-SQL-76), formatting choices (R-SQL-77). |
+| Phase 17: IBM i Services | Planned (2026-11-15): spooled files (R-SQL-78), messages (R-SQL-79), jobs and job logs (R-SQL-80), more starters (R-SQL-81); D32 to confirm. |
 
 ## 4. Phases
 
@@ -137,9 +139,21 @@ From IDEA-26 (the owner, 2026-11-14): every row of a result or a table to a CSV 
 and a CSV file into a table, all or nothing (R-SQL-73), as Access Client Solutions' Data Transfer does (D31).
 Download needs no change to the helper; upload adds one request to it.
 
+### Phase 16 — The editor, safer (done)
+
+From IDEA-34's leftovers that fit egui's text field (D28; the owner, 2026-11-15): scripts kept within seconds of a
+change (R-SQL-74), the place of an error marked (R-SQL-75), completion of a `WITH`'s names (R-SQL-76), and formatting
+choices (R-SQL-77). Folding and several cursors, which need an editor of Parley's own, stay in IDEA-34.
+
+### Phase 17 — IBM i Services (planned)
+
+From IDEA-25 (the owner, 2026-11-15), aimed at the signed-on user since Parley SQL has no 5250 session (R-SQL-70): a
+side-panel tab "IBM i" with the user's spooled files (R-SQL-78), messages (R-SQL-79) and jobs with their job logs
+(R-SQL-80), all read-only on the second connection (D32), and more IBM i Services starter snippets (R-SQL-81).
+
 ### Later (unordered, to be planned)
 
-IBM i Services views (IDEA-25); see [IDEAS.md](IDEAS.md).
+Nothing yet; see [IDEAS.md](IDEAS.md).
 
 ## 5. Requirements
 
@@ -147,7 +161,12 @@ Open requirements, in the order they are planned, as `| ID | Requirement | Phase
 ones come from [IDEAS.md](IDEAS.md). Areas: `SQL` the SQL window, its helper and its host-server client (D19); a few
 rows from Parley's areas belong here too: `ADD` (the assistant's add-on switch) and `NET` (the SQL probes).
 
-None open: every requirement so far is verified and in [REQUIREMENTS.md](REQUIREMENTS.md) (the owner, 2026-11-15).
+| ID | Requirement | Phase |
+|---|---|---|
+| R-SQL-78 | **Spooled files** (2026-11-15, draft; IDEA-25, D32). In the side panel's "IBM i" tab, "Spooled files" lists the signed-on user's spooled files (`QSYS2.OUTPUT_QUEUE_ENTRIES`), newest first: name, user data, job, pages, status, created; a filter field narrows them. Opening one (double-click or Open) reads its text (`SYSTOOLS.SPOOLED_FILE_DATA`) into a viewer window: monospace, with a find field, Copy and "Save as…" to a `.txt` file through the file window. Refresh reads the list again. Nothing changes on the host. | 17 |
+| R-SQL-79 | **Messages** (2026-11-15, draft; IDEA-25, D32). "Messages" in the "IBM i" tab lists the messages in the signed-on user's message queue (`QSYS2.MESSAGE_QUEUE_INFO`, queue `QUSRSYS/user`), newest first: time, message ID, type, first-level text and who sent it; a click shows the second-level text. The tab's label counts the messages newer than the newest seen in this window. No reply or removal. | 17 |
+| R-SQL-80 | **Your jobs and their job logs** (2026-11-15, draft; IDEA-25, D32). "Jobs" in the "IBM i" tab lists the signed-on user's active jobs (`QSYS2.ACTIVE_JOB_INFO`): job name, subsystem, type, status, CPU used and function; the SQL window's own jobs are marked. Opening one shows its job log (`QSYS2.JOBLOG_INFO`) in the viewer window of R-SQL-78, a message a line with its time, ID and text. Refresh reads the list again. | 17 |
+| R-SQL-81 | **More IBM i Services starters** (2026-11-15, draft; IDEA-25, adds to R-SQL-27). About ten more read-only "did you know" snippets: disk use (`QSYS2.SYSDISKSTAT`), system values, job queues, output queues, the largest IFS files, an object's authorities, user profiles whose password expires soon, journals, data areas and subsystems. Each names the IBM i release it needs, and each was run on the owner's IBM i (7.3, read-only as NODEJT400, D22) or is marked as needing a later release. | 17 |
 
 
 ## 6. Decisions
@@ -170,6 +189,7 @@ Decisions D1–D18 (language, crates, TLS, the look, add-ons, no saved passwords
 | D29 | R-SQL-69: where do the settings of the SQL window Parley opens come from, once Parley's Settings has none of Parley SQL's? | **The owner, 2026-11-14: from Parley SQL's saved settings,** read (never written) by Parley from Parley SQL's eframe storage each time it opens the window, so they are set once, in Parley SQL. *Changes D26's "settings kept apart" for these settings only;* sessions, connections, history, scripts and pinned libraries stay apart. | Built-in defaults in Parley's window (no Java path, no assistant in Parley); Tools ▸ SQL… starting the Parley SQL program instead of a window in Parley; keeping both sets of settings. |
 | D30 | R-SQL-70: what does Parley's SQL add-on open? | **The owner, 2026-11-14: Parley SQL itself, as a program of its own,** started by Parley from beside it on the session's host, exactly as when started on its own, with its own menus, settings and saved connections. Parley's SQL window, with Run on… (R-SQL-43) and the history Parley kept per session, is removed, not moved. *Changes D26* (Parley SQL is no longer also drawn inside Parley) *and D29* (Parley no longer reads Parley SQL's settings). | Parley's own window reading Parley SQL's settings (D29); Parley SQL opening on its start screen without a host; moving Parley's per-session history to Parley SQL. |
 | D31 | Phase 15 (IDEA-26): how are rows downloaded and uploaded, and in which formats? | **The owner, 2026-11-14:** download writes CSV and Excel `.xlsx`; Excel is written in Rust with `rust_xlsxwriter` (MIT or Apache-2.0). Download fetches the result's open cursor to its end through the helper as it is (no new request) and writes each batch to the file as it arrives. Upload is all or nothing: one new helper request prepares an `INSERT` and runs the rows as JDBC batches in one transaction under commitment control, committing only when every row went in; it needs a journaled table, and says so when there is none. Upload reads CSV only. | Keep the good rows on upload (each row on its own, failures to a CSV file); a choice per upload; CSV only for download; Excel written by the helper (Apache POI, a large Java dependency); upload from Excel files. |
+| D32 | Phase 17 (IDEA-25): where do the IBM i Services views live, and on which connection? | **Proposed 2026-11-15, to confirm before Phase 17:** a side-panel tab "IBM i" beside History, Snippets and Database, with Spooled files, Messages and Jobs; read on the second connection (D21), so the SQL job stays free for the operator's statements and Cancel; read-only, read when the tab is opened and on Refresh, nothing kept in the settings; a spooled file's text and a job log open in a viewer window of their own, not in the editor. | A menu of views opening result tabs (the user's own SQL in the grid); the main connection; spooled files as PDF (needs a converter on the host or in Parley). |
 
 ## 7. How to change this roadmap
 
@@ -181,4 +201,4 @@ Decisions D1–D18 (language, crates, TLS, the look, add-ons, no saved passwords
 - A choice that future work must respect becomes a decision in §6.
 - An idea is not a plan: it goes in [IDEAS.md](IDEAS.md) until it is picked, then becomes requirements here.
 
-Next free ID: `R-SQL-74` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).
+Next free ID: `R-SQL-82` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).

@@ -14,6 +14,71 @@ pub fn message_id(text: &str) -> Option<&str> {
     valid.then_some(id)
 }
 
+/// What the host's message says it stopped at, as `JTOpen` writes it (R-SQL-75): the token of
+/// SQL0104, the keyword of SQL0199, the column of SQL0206 and SQL0205, the object of SQL0204.
+/// `None` for anything else, and for a token like `<END-OF-STATEMENT>`, which has no place.
+pub fn named_in(message: &str) -> Option<&str> {
+    let text = message.split_once("] ").map_or(message, |(_, rest)| rest);
+    let before = |end: &str| text.split_once(end).map(|(name, _)| name);
+    let after = |start: &str, end: &str| {
+        text.split_once(start)
+            .and_then(|(_, rest)| rest.split_once(end))
+            .map(|(name, _)| name)
+    };
+    let name = match message_id(message)? {
+        "SQL0104" => after("Token ", " was not valid"),
+        "SQL0199" => after("Keyword ", " not expected"),
+        "SQL0206" => after("Column or global variable ", " not found"),
+        "SQL0205" => after("Column ", " not in table"),
+        "SQL0204" => before(" in "),
+        _ => None,
+    }?
+    .trim();
+    (!name.is_empty() && !name.starts_with('<')).then_some(name)
+}
+
+/// Where in `statement` the error `message` names is (R-SQL-75): the first place of what
+/// [`named_in`] reads, as a whole word (or the symbol itself), ignoring case, outside strings
+/// and comments; a delimited name matches its quotes too. A byte range of `statement`.
+pub fn error_place(statement: &str, message: &str) -> Option<std::ops::Range<usize>> {
+    let name = named_in(message)?;
+    let skipped: Vec<std::ops::Range<usize>> = super::text::highlight(statement)
+        .into_iter()
+        .filter(|(_, kind)| matches!(kind, super::text::Kind::String | super::text::Kind::Comment))
+        .map(|(range, _)| range)
+        .collect();
+    let word = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'#' | b'$' | b'@');
+    let is_word = name.bytes().all(word);
+    let lower = statement.to_lowercase();
+    let wanted = name.to_lowercase();
+    // `to_lowercase` keeps byte offsets only where case changes keep lengths: check it does.
+    if lower.len() != statement.len() {
+        return None;
+    }
+    let bytes = statement.as_bytes();
+    let mut from = 0;
+    while let Some(found) = lower.get(from..)?.find(&wanted) {
+        let start = from + found;
+        let end = start + wanted.len();
+        from = end;
+        if skipped.iter().any(|r| r.start <= start && start < r.end) {
+            continue;
+        }
+        let quoted =
+            start > 0 && bytes.get(start - 1) == Some(&b'"') && bytes.get(end) == Some(&b'"');
+        if quoted {
+            return Some(start - 1..end + 1);
+        }
+        let alone = !is_word
+            || (bytes.get(start.wrapping_sub(1)).is_none_or(|&b| !word(b))
+                && bytes.get(end).is_none_or(|&b| !word(b)));
+        if alone {
+            return Some(start..end);
+        }
+    }
+    None
+}
+
 /// The SQL job's newest message `id` from its own job log, where the message's values are
 /// filled in. `id` must have come through [`message_id`]: it is put in the text as it is.
 pub fn from_job_log(id: &str) -> String {
@@ -119,5 +184,66 @@ mod tests {
         );
         assert_eq!(second_level(""), "");
         assert_eq!(second_level("ends with &N"), "ends with");
+    }
+
+    #[test]
+    fn the_name_an_error_stopped_at_is_read_from_its_message_r_sql_75() {
+        assert_eq!(
+            named_in("[SQL0104] Token FORM was not valid. Valid tokens: FROM INTO."),
+            Some("FORM")
+        );
+        assert_eq!(
+            named_in("[SQL0206] Column or global variable NAVNX not found."),
+            Some("NAVNX")
+        );
+        assert_eq!(
+            named_in("[SQL0204] KUNDER in LIB type *FILE not found."),
+            Some("KUNDER")
+        );
+        assert_eq!(
+            named_in("[SQL0199] Keyword WHERE not expected. Valid tokens: ;."),
+            Some("WHERE")
+        );
+        assert_eq!(
+            named_in("[SQL0104] Token <END-OF-STATEMENT> was not valid. Valid tokens: ,."),
+            None
+        );
+        assert_eq!(
+            named_in("[SQL0551] Not authorized to object T in L type *FILE."),
+            None
+        );
+        assert_eq!(named_in("connection lost"), None);
+    }
+
+    #[test]
+    fn the_place_is_a_whole_word_outside_strings_and_comments_r_sql_75() {
+        let statement = "SELECT 'form' -- form\n, formx, FORM FORM T";
+        let place = error_place(statement, "[SQL0104] Token FORM was not valid.").expect("found");
+        assert_eq!(statement.get(place), Some("FORM"));
+        let quoted = "SELECT \"navn\" FROM T";
+        let place = error_place(
+            quoted,
+            "[SQL0206] Column or global variable navn not found.",
+        )
+        .expect("found");
+        assert_eq!(quoted.get(place), Some("\"navn\""));
+        let symbol = "SELECT A,, B FROM T";
+        let place = error_place(symbol, "[SQL0104] Token , was not valid.").expect("found");
+        assert_eq!(place, 8..9);
+        assert_eq!(
+            error_place("SELECT 1", "[SQL0204] KUNDER in LIB type *FILE not found."),
+            None
+        );
+    }
+
+    #[test]
+    fn names_with_aeoeaa_are_found_in_their_byte_range_r_sql_75() {
+        let statement = "SELECT 'æ', BELØB FROM T";
+        let place = error_place(
+            statement,
+            "[SQL0206] Column or global variable BELØB not found.",
+        )
+        .expect("found");
+        assert_eq!(statement.get(place), Some("BELØB"));
     }
 }

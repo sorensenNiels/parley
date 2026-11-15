@@ -33,6 +33,7 @@ impl SqlWindow {
         let idle = self.waiting.is_none() && self.queue.is_empty();
         let mut explain = None;
         let mut job_log = false;
+        let mut show_error = false;
         ui.horizontal(|ui| {
             theme::button_row(ui, |ui| {
                 let button = icons::button(icons::LIST, "Job log");
@@ -59,8 +60,13 @@ impl SqlWindow {
                         .rfind(": [")
                         .and_then(|at| text.get(at + 2..))
                         .and_then(message::message_id);
+                    let marked = self.error_line.as_deref() == Some(text.as_str())
+                        && self.scripts.error_place().is_some();
                     ui.horizontal_wrapped(|ui| {
                         theme::error(ui, text);
+                        if marked && super::show_link(ui) {
+                            show_error = true;
+                        }
                         if let Some(id) = id
                             && !self.helps.contains_key(&i)
                         {
@@ -83,6 +89,9 @@ impl SqlWindow {
                     }
                 }
             });
+        if show_error {
+            self.scripts.go_to_error();
+        }
         if let Some((index, id)) = explain {
             let sql = message::from_job_log(&id);
             self.ask(
