@@ -45,7 +45,9 @@ pub struct SessionConfig {
     pub device_name: String,
     /// Send a telnet No Operation after a minute without traffic (R-NET-5).
     pub keep_alive: bool,
-    /// Claim IBM i's GUI-like 5250 and draw its windows (R-DS-10, D38): "GUI elements (beta)".
+    /// Claim IBM i's GUI-like 5250 and draw its windows (R-DS-10, D38). Never stored: with
+    /// Phase 22 paused nothing turns it on, and sessions saved with it on read as off.
+    #[serde(skip)]
     pub gui: bool,
 }
 

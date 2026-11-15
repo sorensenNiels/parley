@@ -28,6 +28,8 @@ pub struct View {
     pub palette: Palette,
     /// Blinking text blinks; else it shows steady in reverse image (R-UI-24).
     pub blinking: bool,
+    /// Windows are drawn with frames (R-UI-26).
+    pub frames: bool,
     /// The screen's border flashes until this time (egui's clock, seconds) for the alarm
     /// (R-UI-25).
     flash_until: f64,
@@ -194,7 +196,15 @@ pub fn show(
         &cells,
         &Marks::of(view, session, blink),
     );
-    windows::draw(&painter, &grid, session.screen(), &view.palette);
+    if view.frames {
+        windows::draw(
+            &painter,
+            &grid,
+            session.screen(),
+            session.code_page(),
+            &view.palette,
+        );
+    }
     flash_border(ui, &painter, response.rect, view, now);
     if let Some(spot) = hovered {
         underline_hotspot(&painter, &grid, &cells, spot, palette);

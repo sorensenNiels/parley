@@ -14,6 +14,7 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
+
 - **R-DS-10** (2026-11-15): GUI windows behind the session switch "GUI elements (beta)" (D38). **Automated** (`make
   test`): a window is written as the 5494 writes it (border attribute and characters, centred title `Æble`, cleared
   inside) and kept; removing it puts back what it covered and frees the cursor; Remove All and Clear Unit take every
@@ -25,7 +26,8 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
   no WDSF at all with byte 4 = X'0E' in a 58-byte reply. The reply now claims what tn5250j's enhanced mode claims
   (byte 4 X'07', byte 5 X'08' level 3, 64 bytes); two more tries, the second on a device created fresh by that
   reply (PARLYGUI, 3477 FC), and the host still sent no WDSF. **Not seen live**: Phase 22 is paused until IBM i's
-  rules for the enhanced interface are known (ROADMAP §4).
+  rules for the enhanced interface are known (ROADMAP §4). The switch was then taken out of the session dialog
+  and is no longer stored (D38); window frames come from R-UI-26 instead.
 
 ## Implemented
 
@@ -269,3 +271,9 @@ Checked by the owner in the running app (2026-11-15); `make verify` on Linux und
   **Against DKSOFT00** (the owner ran a read-only tour macro with `PARLEY_TRACE`: help, a prompt and
   its list, WRKSPLF, WRKACTJOB, DSPLIB, GO CMDLIB): the host sent no extended attributes on those screens. Marked
   done by the owner (2026-11-15).
+
+- **R-UI-26** (2026-11-15): frames for the windows IBM i draws with characters. **Automated** (`make test`): a window
+  of `.` and `:` with a title (`Hjælp`) and `æøå` inside is found, dotted leaders ("User . . . . :") and a bottom
+  row without a top are not; a GUI window's border is found as the same frame and drawn once; the frame leaves the
+  title alone; Window frames is on by default and the Terminal page turns it off. **Checked in the running app** by the
+  owner on DKSOFT00 (help and F4 list windows), Linux under WSL (2026-11-15).

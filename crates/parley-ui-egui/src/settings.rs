@@ -30,6 +30,10 @@ use crate::updates::UpdateStatus;
 /// ignored when read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent settings, each a switch in the dialog"
+)]
 pub struct Settings {
     pub theme: Theme,
     /// Everything's size, in percent.
@@ -48,6 +52,8 @@ pub struct Settings {
     pub blinking_text: bool,
     /// Keys typed while the host works are kept and carried out after (R-KEY-11).
     pub type_ahead: bool,
+    /// The host's windows are drawn with frames (R-UI-26).
+    pub window_frames: bool,
     /// Look for a new version when Parley starts (R-UI-11).
     pub check_for_updates: bool,
     /// Which add-ons are on (R-ADD-1).
@@ -68,6 +74,7 @@ impl Default for Settings {
             alarm: Alarm::default(),
             blinking_text: true,
             type_ahead: false,
+            window_frames: true,
             check_for_updates: true,
             addons: AddOnSettings::default(),
             keyboard_maps: Vec::new(),
@@ -135,6 +142,7 @@ impl Page {
                 settings.alarm = defaults.alarm;
                 settings.blinking_text = defaults.blinking_text;
                 settings.type_ahead = defaults.type_ahead;
+                settings.window_frames = defaults.window_frames;
             }
             // The map shown gets the Default map's keys: see `keyboard::Page::restore`.
             Self::Keyboard => {}
@@ -334,6 +342,11 @@ impl Dialog {
                 "Blinking text",
                 Some("Off: blinking text shows steady in reverse image."),
                 &mut settings.blinking_text,
+            );
+            rows.switch(
+                "Window frames",
+                Some("Draw the IBM i's pop-up windows with a frame instead of dots and colons."),
+                &mut settings.window_frames,
             );
             rows.switch(
                 "Type-ahead",

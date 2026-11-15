@@ -1181,6 +1181,16 @@ fn a_window_that_does_not_fit_is_a_bad_record_r_ds_10() {
 }
 
 #[test]
+fn a_session_saved_with_the_gui_switch_on_reads_as_off_d38() {
+    let saved: SessionConfig =
+        serde_json::from_str(r#"{"host": "dksoft00", "port": 23, "gui": true}"#).expect("reads");
+    assert!(!saved.gui);
+    assert_eq!(saved.port, 23, "the rest is kept");
+    let stored = serde_json::to_string(gui_session(true).config()).expect("writes");
+    assert!(!stored.contains("gui"), "{stored}");
+}
+
+#[test]
 fn the_query_reply_claims_the_gui_only_with_the_switch_on_r_ds_10() {
     let query = host(&[ESC, 0xF3, 0x00, 0x05, 0xD9, 0x70, 0x00]);
     let mut on = gui_session(true);

@@ -217,6 +217,72 @@ impl Screen {
     }
 }
 
+impl Screen {
+    /// Windows the host drew with characters on a plain 5250 (R-UI-26; §15.6.13.1, figures
+    /// 22-24): each as the rectangle of its frame lines, the top and bottom rows and the `:`
+    /// columns. Found only where both side columns hold `:` on every row between a top row and
+    /// a bottom row that are all `.` but for one title or footer.
+    pub fn character_windows(&self, code_page: crate::CodePage) -> Vec<Rectangle> {
+        let columns = usize::from(self.size.columns());
+        let cells = self.cells(code_page);
+        let rows: Vec<Vec<char>> = cells
+            .chunks(columns)
+            .map(|row| row.iter().map(|c| c.ch).collect())
+            .collect();
+        let at = |r: usize, c: usize| rows.get(r).and_then(|row| row.get(c)).copied();
+        let mut found = Vec::new();
+        for (bottom, row) in rows.iter().enumerate() {
+            for left in 0..row.len() {
+                if row[left] != ':' || at(bottom, left + 1) != Some('.') {
+                    continue;
+                }
+                let Some(right) = (left + 2..row.len()).find(|&c| row[c] == ':') else {
+                    continue;
+                };
+                if at(bottom, right - 1) != Some('.')
+                    || !dots_with_one_caption(&row[left + 1..right])
+                {
+                    continue;
+                }
+                // Up the sides while both columns hold `:`; at least one row inside.
+                let mut first_inside = bottom;
+                while first_inside > 0
+                    && at(first_inside - 1, left) == Some(':')
+                    && at(first_inside - 1, right) == Some(':')
+                {
+                    first_inside -= 1;
+                }
+                let (true, Some(top)) = (first_inside < bottom, first_inside.checked_sub(1)) else {
+                    continue;
+                };
+                let top_row = &rows[top];
+                if top_row.get(left) != Some(&'.')
+                    || top_row.get(right) != Some(&'.')
+                    || !dots_with_one_caption(&top_row[left + 1..right])
+                {
+                    continue;
+                }
+                found.push(Rectangle {
+                    top,
+                    left,
+                    bottom,
+                    right,
+                });
+            }
+        }
+        found
+    }
+}
+
+/// All `.`, but for one run of other characters (a title or footer) away from the ends.
+fn dots_with_one_caption(between: &[char]) -> bool {
+    let runs = between
+        .split(|&c| c == '.')
+        .filter(|run| !run.is_empty())
+        .count();
+    between.first() == Some(&'.') && between.last() == Some(&'.') && runs <= 1
+}
+
 /// At most this many windows on a screen (§15.6.13.1).
 pub const MAX_WINDOWS: usize = 128;
 
@@ -352,6 +418,50 @@ mod tests {
         screen.create_window(spec(1, 1, 2, 6));
         screen.create_window(spec(1, 1, 2, 6));
         assert_eq!(screen.windows().len(), 1);
+    }
+
+    #[test]
+    fn a_window_drawn_with_characters_is_found_r_ui_26() {
+        let mut screen = Screen::new(ScreenSize::Standard);
+        for (r, line) in [
+            (3, "   ......Hjælp.......  "),
+            (4, "   :                :  "),
+            (5, "   :  Text æøå      :  "),
+            (6, "   :................:  "),
+            (9, " User . . . . . . :   QSECOFR"),
+            (10, " Name . . . . . . :   Ole"),
+        ] {
+            screen.set_row_bytes(r, &ebcdic(line));
+        }
+        assert_eq!(
+            screen.character_windows(PAGE),
+            [Rectangle {
+                top: 3,
+                left: 3,
+                bottom: 6,
+                right: 20
+            }]
+        );
+    }
+
+    #[test]
+    fn a_gui_window_s_border_is_found_too_and_dotted_leaders_are_not_r_ui_26() {
+        let mut screen = Screen::new(ScreenSize::Standard);
+        screen.create_window(spec(2, 4, 2, 6));
+        let outer = screen.windows()[0].outer();
+        assert_eq!(
+            screen.character_windows(PAGE),
+            [Rectangle {
+                top: 2,
+                left: outer.left + 1,
+                bottom: 5,
+                right: outer.right - 1
+            }]
+        );
+        let mut leaders = Screen::new(ScreenSize::Standard);
+        leaders.set_row_bytes(0, &ebcdic(" . . . :  : . . "));
+        leaders.set_row_bytes(1, &ebcdic(" :.....:"));
+        assert_eq!(leaders.character_windows(PAGE), [], "no top row");
     }
 
     #[test]

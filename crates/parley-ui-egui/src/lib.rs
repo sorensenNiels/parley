@@ -414,6 +414,7 @@ impl ParleyUi {
         }
         self.view.palette = self.palette();
         self.view.blinking = self.settings.blinking_text;
+        self.view.frames = self.settings.window_frames;
         if let Some(session) = session.as_deref_mut() {
             session.set_type_ahead(self.settings.type_ahead);
         }
@@ -1821,11 +1822,30 @@ mod tests {
     }
 
     #[test]
+    fn window_frames_are_on_by_default_and_the_terminal_page_turns_them_off_r_ui_26() {
+        assert!(Settings::default().window_frames);
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("Terminal").click();
+        harness.run();
+        harness.get_by_label("Window frames").scroll_to_me();
+        harness.run();
+        harness.get_by_label("Window frames").click();
+        harness.run();
+        harness.get_by_label("Save").click();
+        harness.run();
+        assert!(!harness.state().settings().window_frames);
+    }
+
+    #[test]
     fn the_terminal_page_turns_type_ahead_on_r_key_11() {
         let mut harness = app_with(Vec::new());
         harness.get_by_label("Settings").click();
         harness.run();
         harness.get_by_label("Terminal").click();
+        harness.run();
+        harness.get_by_label("Type-ahead").scroll_to_me();
         harness.run();
         harness.get_by_label("Type-ahead").click();
         harness.run();
@@ -2572,20 +2592,6 @@ mod tests {
         assert_eq!(harness.state().reconnect, None);
         let note = harness.state().closed.clone().unwrap_or_default();
         assert!(note.starts_with("The connection dropped"), "{note}");
-    }
-
-    #[test]
-    fn the_session_dialog_turns_gui_elements_on_r_ds_10() {
-        let mut harness = app_with(Vec::new());
-        harness.get_by_label("New session…").click();
-        harness.run();
-        type_into(&mut harness, "Name", "Prod");
-        type_into(&mut harness, "Host", "prod");
-        harness.get_by_label("GUI elements (beta)").click();
-        harness.run();
-        harness.get_by_label("Apply").click();
-        harness.run();
-        assert!(harness.state().profiles()[0].config.gui);
     }
 
     #[test]
