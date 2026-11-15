@@ -2713,7 +2713,7 @@ checksum = "73072a9470554c8e794778acece2312661218aaabb635600957d952cf01c716e"
 
 [[package]]
 name = "parley-app"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "eframe",
  "keyring",
@@ -2725,7 +2725,7 @@ dependencies = [
 
 [[package]]
 name = "parley-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "des",
@@ -2743,7 +2743,7 @@ dependencies = [
 
 [[package]]
 name = "parley-ui-egui"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "egui",
  "egui_kittest",
