@@ -312,26 +312,29 @@ impl Scripts {
 
     /// The Case menu beside Format (R-SQL-58).
     pub(super) fn case_menu(&mut self, ui: &mut Ui) {
-        ui.menu_button("Case", |ui| {
-            if ui
-                .button("Upper case")
-                .on_hover_text(self.keys.hint("Keywords in capitals", SqlAction::UpperCase))
-                .clicked()
-            {
-                self.change_case(Case::Upper);
-            }
-            if ui
-                .button("Lower case")
-                .on_hover_text(
-                    self.keys
-                        .hint("Keywords in small letters", SqlAction::LowerCase),
-                )
-                .clicked()
-            {
-                self.change_case(Case::Lower);
-            }
-        })
-        .response
-        .on_hover_text("The case of SQL's keywords in the selection or statement");
+        // Small, as the buttons beside it.
+        let button = egui::Button::new("Case").small();
+        egui::containers::menu::MenuButton::from_button(button)
+            .ui(ui, |ui| {
+                if ui
+                    .button("Upper case")
+                    .on_hover_text(self.keys.hint("Keywords in capitals", SqlAction::UpperCase))
+                    .clicked()
+                {
+                    self.change_case(Case::Upper);
+                }
+                if ui
+                    .button("Lower case")
+                    .on_hover_text(
+                        self.keys
+                            .hint("Keywords in small letters", SqlAction::LowerCase),
+                    )
+                    .clicked()
+                {
+                    self.change_case(Case::Lower);
+                }
+            })
+            .0
+            .on_hover_text("The case of SQL's keywords in the selection or statement");
     }
 }

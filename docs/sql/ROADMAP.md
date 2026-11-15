@@ -37,7 +37,7 @@ as its recorded exception (D20).
 | Phase 14: the editor, deeper | Done, verified (2026-11-14, Linux under WSL): from IDEA-34 (the owner): on egui's text field with a gutter of Parley's own (D28): line numbers (R-SQL-61), a ▶ and the last outcome per statement (R-SQL-62), completion on demand and with snippets (R-SQL-63, R-SQL-64), a routine's parameters while it is called (R-SQL-65), the word under the cursor marked (R-SQL-66), Ctrl+D (R-SQL-67), trailing blanks trimmed on save (R-SQL-68). |
 | Phase 15: data transfer | Done, verified (2026-11-15, Linux under WSL): every row to CSV or Excel (R-SQL-71, R-SQL-72), a CSV file into a table, all or nothing (R-SQL-73); D31. |
 | Phase 16: the editor, safer | Done, verified (2026-11-15, Linux under WSL): scripts kept within seconds (R-SQL-74), an error's place marked (R-SQL-75), completion of a `WITH`'s names (R-SQL-76), formatting choices (R-SQL-77). |
-| Phase 17: IBM i Services | Built (2026-11-15), to verify on the owner's IBM i and in the app: a System node under the IBM i in the side panel's tree (D32): spooled files (R-SQL-78), the message queue (R-SQL-79), jobs and job logs (R-SQL-80); more starters (R-SQL-81). |
+| Phase 17: IBM i Services | Done, verified (2026-11-15, Linux under WSL; the probe on the owner's IBM i 7.3): a System node under the IBM i in the side panel's tree (D32): spooled files (R-SQL-78), the message queue (R-SQL-79), jobs and job logs (R-SQL-80); more starters (R-SQL-81). |
 | Phase 18: the work area, rearranged | Done, verified (2026-11-15, Linux under WSL), built before Phase 17 at the owner's wish: the Libraries panel on the left (R-SQL-82), library groups (R-SQL-83), Snippets under Libraries (R-SQL-84), History beside Results and Messages (R-SQL-85); D33. |
 
 ## 4. Phases
@@ -146,7 +146,7 @@ From IDEA-34's leftovers that fit egui's text field (D28; the owner, 2026-11-15)
 change (R-SQL-74), the place of an error marked (R-SQL-75), completion of a `WITH`'s names (R-SQL-76), and formatting
 choices (R-SQL-77). Folding and several cursors, which need an editor of Parley's own, stay in IDEA-34.
 
-### Phase 17 — IBM i Services (built, to verify)
+### Phase 17 — IBM i Services (done)
 
 From IDEA-25 (the owner, 2026-11-15), aimed at the signed-on user since Parley SQL has no 5250 session (R-SQL-70): a
 "System" node under the IBM i at the root of the side panel's tree (R-SQL-83), with the user's spooled files
@@ -173,11 +173,8 @@ rows from Parley's areas belong here too: `ADD` (the assistant's add-on switch) 
 
 | ID | Requirement | Phase |
 |---|---|---|
-| R-SQL-78 | **Spooled files** (2026-11-15, draft; IDEA-25, D32). Under the IBM i at the root of the side panel's tree (R-SQL-83), a node "System" (closed until opened; whether it is open is kept like a group's) holds "Spooled files (n)", "Message queue" and "Jobs (n)"; their counts are read when System is opened and on Refresh (System's right-click menu, which also lists the three views; so does the IBM i's). Clicking "Spooled files" opens a tab "Spooled files" under the editor, after Results, Messages and History, with a close button: the signed-on user's spooled files (`QSYS2.OUTPUT_QUEUE_ENTRIES`), newest first, in the result grid with its filter and Copy: name, user data, job, pages, status, created. Clicking the node again shows the tab; the tab's Refresh reads the list again. Opening one (double-click or Open) reads its text (`SYSTOOLS.SPOOLED_FILE_DATA`) into a viewer window of its own (an egui viewport, as R-SQL-6's window was): monospace, with a find field, Copy and "Save as…" to a `.txt` file through the file window; several can be open. Nothing changes on the host. | 17 |
-| R-SQL-79 | **The message queue** (2026-11-15, draft; IDEA-25, D32). "Message queue" under System opens a tab "Message queue" (named so as not to be taken for the statements' Messages tab) as R-SQL-78 does: the messages in the signed-on user's message queue (`QSYS2.MESSAGE_QUEUE_INFO`, queue `QUSRSYS/user`), newest first: time, message ID, type, first-level text and who sent it; selecting one shows its second-level text under the grid. The node and the tab say how many messages are newer than the newest seen in this window ("Message queue (3 new)"). No reply or removal. | 17 |
-| R-SQL-80 | **Your jobs and their job logs** (2026-11-15, draft; IDEA-25, D32). "Jobs" under System opens a tab "Jobs" as R-SQL-78 does: the signed-on user's active jobs (`QSYS2.ACTIVE_JOB_INFO`): job name, subsystem, type, status, CPU used and function; the SQL window's own two jobs are marked. Opening one shows its job log (`QSYS2.JOBLOG_INFO`) in the viewer window of R-SQL-78, a message a line with its time, ID and text. | 17 |
-| R-SQL-81 | **More IBM i Services starters** (2026-11-15, draft; IDEA-25, adds to R-SQL-27). About ten more read-only "did you know" snippets: disk use (`QSYS2.SYSDISKSTAT`), system values, job queues, output queues, the largest IFS files, an object's authorities, user profiles whose password expires soon, journals, data areas and subsystems. Each names the IBM i release it needs, and each was run on the owner's IBM i (7.3, read-only as NODEJT400, D22) or is marked as needing a later release. | 17 |
 
+None open: every planned SQL requirement is done (2026-11-15).
 
 ## 6. Decisions
 

@@ -528,53 +528,49 @@ impl Scripts {
             .enumerate()
             .map(|(i, t)| (i, t.title.clone(), t.changed().then(|| "·".to_owned())))
             .collect();
-        ui.horizontal(|ui| {
-            let width = (ui.available_width() - 380.0).max(120.0);
-            ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
-                ScrollArea::horizontal()
-                    .id_salt("sql-script-tabs")
-                    .show(ui, |ui| {
-                        theme::tabs(ui, &mut self.shown, &items);
-                    });
-            });
-            let new = icons::button(icons::PLUS, "").small();
-            if icons::add_named(ui, true, new, "New script")
-                .on_hover_text(self.keys.hint("New script", SqlAction::NewScript))
-                .clicked()
-            {
-                self.new_tab();
-            }
-            if ui
-                .add(theme::icon_button(ui, "🗙"))
-                .on_hover_text(self.keys.hint("Close this script", SqlAction::CloseScript))
-                .clicked()
-            {
-                self.close_tab(self.shown);
-            }
-            theme::button_row(ui, |ui| {
-                if let Some(files) = files {
-                    if ui.small_button("Save as…").clicked() {
-                        self.save(files, true);
-                    }
-                    let save = self.keys.hint("Save", SqlAction::Save);
-                    if ui.small_button("Save").on_hover_text(save).clicked() {
-                        self.save(files, false);
-                    }
-                    let open = self.keys.hint("Open a file", SqlAction::Open);
-                    if ui.small_button("Open…").on_hover_text(open).clicked() {
-                        self.open(files);
-                    }
-                }
-                self.case_menu(ui);
-                if ui
-                    .small_button("Format")
-                    .on_hover_text(self.keys.hint("Format", SqlAction::Format))
+        let (chosen, ()) =
+            theme::tab_strip(ui, "sql-script-tabs", (self.shown, &items), 380.0, |ui| {
+                let new = icons::button(icons::PLUS, "").small();
+                if icons::add_named(ui, true, new, "New script")
+                    .on_hover_text(self.keys.hint("New script", SqlAction::NewScript))
                     .clicked()
                 {
-                    self.format();
+                    self.new_tab();
                 }
+                if ui
+                    .add(theme::icon_button(ui, "🗙"))
+                    .on_hover_text(self.keys.hint("Close this script", SqlAction::CloseScript))
+                    .clicked()
+                {
+                    self.close_tab(self.shown);
+                }
+                theme::button_row(ui, |ui| {
+                    if let Some(files) = files {
+                        if ui.small_button("Save as…").clicked() {
+                            self.save(files, true);
+                        }
+                        let save = self.keys.hint("Save", SqlAction::Save);
+                        if ui.small_button("Save").on_hover_text(save).clicked() {
+                            self.save(files, false);
+                        }
+                        let open = self.keys.hint("Open a file", SqlAction::Open);
+                        if ui.small_button("Open…").on_hover_text(open).clicked() {
+                            self.open(files);
+                        }
+                    }
+                    self.case_menu(ui);
+                    if ui
+                        .small_button("Format")
+                        .on_hover_text(self.keys.hint("Format", SqlAction::Format))
+                        .clicked()
+                    {
+                        self.format();
+                    }
+                });
             });
-        });
+        if let Some(chosen) = chosen {
+            self.shown = chosen;
+        }
     }
 
     /// Closes tab `index`, asking first when its changes are not saved; the last tab leaves an
@@ -1341,5 +1337,31 @@ mod tests {
         harness.key_press(Key::Enter);
         harness.run_steps(2);
         assert_eq!(harness.state().text(), "SELECT NAVN2");
+    }
+
+    /// R-SQL-20 (a fix): the script tabs and the buttons beside them sit on one line, and the
+    /// shown tab's underline stays above the text field.
+    #[test]
+    fn the_script_tabs_line_up_with_their_buttons_above_the_text_r_sql_20() {
+        use egui_kittest::kittest::Queryable;
+
+        let harness = focused("SELECT 'æøå' FROM SYSIBM.SYSDUMMY1", (0, 0));
+        let tab = harness.get_by_role(egui::accesskit::Role::Tab).rect();
+        let format = harness.get_by_label("Format").rect();
+        let new = harness.get_by_label("New script").rect();
+        let text = harness
+            .get_by_role(egui::accesskit::Role::MultilineTextInput)
+            .rect();
+        for (name, rect) in [("Format", format), ("New script", new)] {
+            assert!(
+                (rect.center().y - tab.center().y).abs() < 1.0,
+                "{name} {rect:?} on the tab's line {tab:?}"
+            );
+        }
+        // The underline is drawn 6 points under the row.
+        assert!(
+            tab.bottom() + 6.0 < text.top(),
+            "the underline above the text: {tab:?}, {text:?}"
+        );
     }
 }

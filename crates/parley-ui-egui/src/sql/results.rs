@@ -190,20 +190,16 @@ impl Results {
             })
             .collect();
         let mut close = false;
-        ui.horizontal(|ui| {
-            // Room for "Compare with…" and the close button.
-            let width = (ui.available_width() - 150.0).max(120.0);
-            ui.allocate_ui(egui::vec2(width, 0.0), |ui| {
-                ScrollArea::horizontal()
-                    .id_salt("sql-result-tabs")
-                    .show(ui, |ui| {
-                        theme::tabs(ui, &mut self.shown, &items);
-                    });
+        // Room for "Compare with…" and the close button.
+        let (chosen, ()) =
+            theme::tab_strip(ui, "sql-result-tabs", (self.shown, &items), 150.0, |ui| {
+                self.compare_menu(ui);
+                let button = theme::icon_button(ui, "🗙");
+                close = ui.add(button).on_hover_text("Close this result").clicked();
             });
-            self.compare_menu(ui);
-            let button = theme::icon_button(ui, "🗙");
-            close = ui.add(button).on_hover_text("Close this result").clicked();
-        });
+        if let Some(chosen) = chosen {
+            self.shown = chosen;
+        }
         if close {
             self.close(self.shown);
         }

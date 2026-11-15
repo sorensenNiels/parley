@@ -62,7 +62,7 @@ library list, `LABEL ON` headings) in a fast desktop window.
 | From Parley | Parley's Tools ▸ SQL… starts Parley SQL on the session's host | R-SQL-70 | Verified |
 | Data transfer | Every row to CSV or Excel; a CSV file into a table, all or nothing | R-SQL-71..73 | Verified |
 | Editor, safer | Scripts kept within seconds, an error's place marked, a `WITH`'s names completed, formatting choices | R-SQL-74..77 | Verified |
-| IBM i Services | Under System in the tree: the user's spooled files, message queue and jobs, listed under the editor; a spooled file or job log in a viewer window; more starters | R-SQL-78..81 | Planned |
+| IBM i Services | Under System in the tree: the user's spooled files, message queue and jobs, listed under the editor; a spooled file or job log in a viewer window; more starters | R-SQL-78..81 | Verified |
 | Layout | Results below or beside the editor, the editor's height, the side panel folded | R-SQL-49..51 | Verified |
 | Work area | A side panel on the left with the IBM i as the tree's root, library groups per connection (Development, Testing, …) and Snippets below; History as a tab beside Results and Messages (D33) | R-SQL-82..85 | Verified |
 | Editing | Comment, indent, move and duplicate lines, pairs, matching bracket, go to line, keyword case, zoom | R-SQL-52..59 | Verified |

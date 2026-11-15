@@ -400,53 +400,97 @@ pub fn key_parts(keys: &str) -> Vec<&str> {
     }
 }
 
-/// Underlined tabs on a full-width rule, as Tortuga's (D12). `items` are (value, label,
-/// optional badge such as a count).
-pub fn tabs<T: PartialEq + Copy, S: AsRef<str>>(
+/// A tab: its value, label and an optional badge such as a count.
+pub type Tab<T, S> = (T, S, Option<String>);
+
+/// Underlined tabs on a full-width rule, as Tortuga's (D12), that scroll sideways, then
+/// `rest` (small buttons) on the same row, all centred on one line, with the rule under the
+/// whole row so a tab's underline never reaches what comes below. `rest_width` is the room kept for `rest`. Returns the tab clicked, if another than
+/// `current`, and what `rest` returned.
+pub fn tab_strip<T: PartialEq + Copy, S: AsRef<str>, R>(
     ui: &mut Ui,
-    current: &mut T,
-    items: &[(T, S, Option<String>)],
-) {
-    let p = palette(ui);
+    id_salt: &str,
+    (current, items): (T, &[Tab<T, S>]),
+    rest_width: f32,
+    rest: impl FnOnce(&mut Ui) -> R,
+) -> (Option<T>, R) {
+    let mut chosen = current;
     let mut underlines = Vec::new();
     let row = ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 20.0;
-        for (value, label, badge) in items {
-            let selected = *current == *value;
-            let color = if selected { p.text } else { p.muted };
-            // One real button per tab, so clicks work everywhere (also inside dialogs).
-            let label = label.as_ref();
-            let mut atoms = vec![egui::Atom::from(semibold(label).color(color))];
-            if let Some(b) = badge {
-                let c = if selected { p.accent } else { p.muted };
-                atoms.push(egui::Atom::from(semibold(b).size(10.5).color(c)));
-            }
-            let atoms: egui::Atoms<'_> = atoms.into_iter().collect();
-            let response = ui.add(egui::Button::new(atoms).frame(false).gap(5.0));
-            let name = match badge {
-                Some(b) => format!("{label} ({b})"),
-                None => label.to_owned(),
-            };
-            response.widget_info(|| WidgetInfo::selected(Role::Tab, true, selected, &name));
-            if selected {
-                underlines.push((response.rect.x_range(), p.accent));
-            } else if response.hovered() {
-                underlines.push((response.rect.x_range(), p.muted.gamma_multiply(0.5)));
-            }
-            if response.clicked() {
-                *current = *value;
-            }
-            if response.hovered() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            }
-        }
+        let width = (ui.available_width() - rest_width).max(120.0);
+        // The row's height, not 0: a centred row would put a 0-high block at its middle and the
+        // tabs would hang below the buttons.
+        let height = ui.spacing().interact_size.y;
+        ui.allocate_ui(egui::vec2(width, height), |ui| {
+            egui::ScrollArea::horizontal()
+                .id_salt(id_salt)
+                .show(ui, |ui| {
+                    // Only what shows of a tab scrolled partly out of view is underlined.
+                    let shown = ui.clip_rect().x_range();
+                    underlines = ui
+                        .horizontal(|ui| tab_buttons(ui, &mut chosen, items))
+                        .inner
+                        .into_iter()
+                        .map(|(x, color)| (x.intersection(shown), color))
+                        .filter(|(x, _)| x.span() > 0.0)
+                        .collect();
+                });
+        });
+        rest(ui)
     });
-    let y = row.response.rect.bottom() + 6.0;
+    tab_rule(ui, row.response.rect.bottom(), &underlines);
+    ((chosen != current).then_some(chosen), row.inner)
+}
+
+/// One frameless button per tab, in a row; the underlines to draw (selected or hovered).
+fn tab_buttons<T: PartialEq + Copy, S: AsRef<str>>(
+    ui: &mut Ui,
+    current: &mut T,
+    items: &[Tab<T, S>],
+) -> Vec<(egui::Rangef, Color32)> {
+    let p = palette(ui);
+    let mut underlines = Vec::new();
+    ui.spacing_mut().item_spacing.x = 20.0;
+    for (value, label, badge) in items {
+        let selected = *current == *value;
+        let color = if selected { p.text } else { p.muted };
+        // One real button per tab, so clicks work everywhere (also inside dialogs).
+        let label = label.as_ref();
+        let mut atoms = vec![egui::Atom::from(semibold(label).color(color))];
+        if let Some(b) = badge {
+            let c = if selected { p.accent } else { p.muted };
+            atoms.push(egui::Atom::from(semibold(b).size(10.5).color(c)));
+        }
+        let atoms: egui::Atoms<'_> = atoms.into_iter().collect();
+        let response = ui.add(egui::Button::new(atoms).frame(false).gap(5.0));
+        let name = match badge {
+            Some(b) => format!("{label} ({b})"),
+            None => label.to_owned(),
+        };
+        response.widget_info(|| WidgetInfo::selected(Role::Tab, true, selected, &name));
+        if selected {
+            underlines.push((response.rect.x_range(), p.accent));
+        } else if response.hovered() {
+            underlines.push((response.rect.x_range(), p.muted.gamma_multiply(0.5)));
+        }
+        if response.clicked() {
+            *current = *value;
+        }
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+    }
+    underlines
+}
+
+/// The full-width rule a little under `bottom`, the tabs' underlines on it, and room below.
+fn tab_rule(ui: &mut Ui, bottom: f32, underlines: &[(egui::Rangef, Color32)]) {
+    let p = palette(ui);
+    let y = bottom + 6.0;
     let painter = ui.painter();
-    let full = ui.max_rect().x_range();
-    painter.hline(full, y, Stroke::new(1.0, p.border));
+    painter.hline(ui.max_rect().x_range(), y, Stroke::new(1.0, p.border));
     for (x, color) in underlines {
-        painter.hline(x, y - 0.5, Stroke::new(2.0, color));
+        painter.hline(*x, y - 0.5, Stroke::new(2.0, *color));
     }
     ui.add_space(12.0);
 }
