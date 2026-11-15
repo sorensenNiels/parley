@@ -260,11 +260,16 @@ fn tools_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     action
 }
 
+/// How much larger than the menus' text the gear is drawn.
+const GEAR_SCALE: f32 = 1.45;
+
 /// The gear at the right end of the header, for Settings (R-UI-18; Parley SQL's, R-SQL-45);
-/// true when clicked.
+/// true when clicked. Larger than the menus' text (R-UI-19), and growing with the text size.
 pub(crate) fn gear(ui: &mut Ui) -> bool {
     let muted = theme::palette(ui).muted;
-    let button = Button::new(icons::icon(icons::GEAR).color(muted)).frame_when_inactive(false);
+    let size = egui::TextStyle::Button.resolve(ui.style()).size * GEAR_SCALE;
+    let icon = icons::icon(icons::GEAR).size(size).color(muted);
+    let button = Button::new(icon).frame_when_inactive(false);
     icons::add_named(ui, true, button, "Settings")
         .on_hover_text("Settings")
         .clicked()

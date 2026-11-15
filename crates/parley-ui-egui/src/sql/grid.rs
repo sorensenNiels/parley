@@ -258,6 +258,15 @@ impl ResultView {
             .count()
     }
 
+    /// The one row selected among those shown, if exactly one is.
+    pub fn selected_row(&self) -> Option<&Row> {
+        let mut selected = self.shown().filter(|(i, _)| self.selected.contains(i));
+        match (selected.next(), selected.next()) {
+            (Some((_, row)), None) => Some(row),
+            _ => None,
+        }
+    }
+
     /// The row of the detail panel and its place among the rows shown (1-based).
     pub fn detail_row(&self) -> Option<(&Row, usize)> {
         let index = self.detail?;

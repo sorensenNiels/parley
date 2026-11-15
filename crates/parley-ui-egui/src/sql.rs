@@ -17,6 +17,7 @@ mod parameters;
 pub mod results;
 pub mod side;
 pub mod snippets;
+mod system;
 mod tools;
 mod upload;
 
@@ -62,6 +63,9 @@ pub trait SqlFiles: std::fmt::Debug {
         suggested: &str,
         text: &str,
     ) -> Result<Option<String>, String>;
+    /// Saves `text` as a `.txt` file where the operator chooses, offered as `suggested`; the
+    /// path (R-SQL-78).
+    fn save_text(&self, suggested: &str, text: &str) -> Result<Option<String>, String>;
 }
 
 /// What the SQL window is given by Parley each frame.
@@ -165,12 +169,14 @@ enum Waiting {
     UploadEnd(bool),
 }
 
-/// Results, messages or the history under the editor (R-SQL-85).
+/// Results, messages or the history under the editor (R-SQL-85), or a System view
+/// (R-SQL-78..80).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Results,
     Messages,
     History,
+    View(parley_core::sql::services::View),
 }
 
 /// The answer to the question asked on closing with uncommitted changes.
@@ -230,6 +236,8 @@ pub struct SqlWindow {
     param_values: std::collections::BTreeMap<String, Vec<parameters::Value>>,
     /// The second connection, for the catalog (R-SQL-33, D21).
     database: database::Database,
+    /// The System node's views and viewer windows (R-SQL-78..80).
+    system: system::System,
     /// Download every row: the dialog and the download under way (R-SQL-71).
     transfer: download::Transfer,
     /// Upload a CSV file: the dialog and the upload under way (R-SQL-73).
@@ -297,6 +305,7 @@ impl SqlWindow {
             ran: Vec::new(),
             pending_connect: None,
             database: database::Database::default(),
+            system: system::System::default(),
             transfer: download::Transfer::default(),
             upload: upload::Upload::default(),
             pending_catalog: None,
@@ -355,7 +364,8 @@ impl SqlWindow {
     /// The side panel laid out as `side` and the library groups `groups` of this connection
     /// (R-SQL-82, R-SQL-83).
     pub fn with_side(mut self, side: side::SideLayout, groups: Vec<browser::LibraryGroup>) -> Self {
-        self.browser = browser::Browser::with_groups(groups, side.library_list_open);
+        self.browser =
+            browser::Browser::with_groups(groups, side.library_list_open, side.system_open);
         self.side = side;
         self.side_width = Some(side.width);
         self
@@ -462,6 +472,7 @@ impl SqlWindow {
             self.use_snippet(used);
         }
         self.browser.dialogs(ui.ctx());
+        self.system.viewers(ui.ctx(), around.files);
         self.confirm_dialog(ui.ctx());
         self.download_dialog(ui.ctx(), around.files);
         self.upload_dialog(ui.ctx(), around.files);
@@ -745,6 +756,16 @@ impl SqlWindow {
                 self.transfer.ask(download::Source::Table { library, name });
             }
             browser::Pick::Upload { library, name } => self.upload.ask(&library, &name),
+            browser::Pick::System(system::SystemPick::Show(view)) => {
+                self.system.open_tab(view);
+                self.tab = Tab::View(view);
+                if !self.system.is_read() {
+                    self.system.read(&mut self.database);
+                }
+            }
+            browser::Pick::System(system::SystemPick::Refresh) => {
+                self.system.read(&mut self.database);
+            }
             browser::Pick::Script { title, text, run } => {
                 self.scripts.open_new(&title, &text);
                 if run {
@@ -899,22 +920,40 @@ impl SqlWindow {
         shown
     }
 
-    /// The Results, Messages and History tabs (R-SQL-85).
+    /// The Results, Messages and History tabs (R-SQL-85), and the System views open
+    /// (R-SQL-78..80), which close.
     fn results_and_messages(&mut self, ui: &mut Ui, around: Around<'_>) {
-        theme::segmented(
-            ui,
-            &mut self.tab,
-            &[
-                (Tab::Results, "Results"),
-                (Tab::Messages, "Messages"),
-                (Tab::History, "History"),
-            ],
-        );
+        if let Tab::View(view) = self.tab
+            && !self.system.tabs.contains(&view)
+        {
+            self.tab = Tab::Results;
+        }
+        let mut tabs = vec![
+            (Tab::Results, "Results"),
+            (Tab::Messages, "Messages"),
+            (Tab::History, "History"),
+        ];
+        tabs.extend(self.system.tabs.iter().map(|v| (Tab::View(*v), v.title())));
+        ui.horizontal(|ui| {
+            theme::segmented(ui, &mut self.tab, &tabs);
+            if let Tab::View(view) = self.tab {
+                let name = format!("Close {}", view.title());
+                let close = ui.add(theme::icon_button(ui, "🗙")).on_hover_text(&name);
+                close.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::accesskit::Role::Button, true, &name)
+                });
+                if close.clicked() {
+                    self.system.close_tab(view);
+                    self.tab = Tab::Results;
+                }
+            }
+        });
         ui.add_space(4.0);
         match self.tab {
             Tab::Results => self.results(ui, around.files),
             Tab::Messages => self.messages(ui),
             Tab::History => self.history(ui, around.history),
+            Tab::View(view) => self.system.tab(ui, view, &mut self.database),
         }
     }
 
@@ -1119,7 +1158,13 @@ impl SqlWindow {
             self.handle(event);
         }
         self.database.read_events();
-        for pick in self.browser.receive(self.database.take_answers()) {
+        let answers = self.database.take_answers();
+        let own = [
+            self.connected.as_ref().map(|c| c.job.as_str()),
+            self.database.job(),
+        ];
+        let rest = self.system.receive(answers, own);
+        for pick in self.browser.receive(rest) {
             self.use_pick(pick);
         }
     }
@@ -1946,9 +1991,9 @@ mod tests {
         use egui_kittest::kittest::Queryable;
         let mut w = window();
         running(&mut w, "VALUES 1");
+        // Searched for, so it is in view among the starters (R-SQL-25).
+        w.snippets.query = "system status".to_owned();
         let mut harness = drawn(w, Vec::new());
-        // Snippets gets the panel's height, so the starter is in view (R-SQL-84).
-        harness.get_by_label("Fold Libraries").click();
         // The spinner keeps repainting while a statement runs.
         harness.run_steps(3);
         harness.get_by_label("Run System status").click();

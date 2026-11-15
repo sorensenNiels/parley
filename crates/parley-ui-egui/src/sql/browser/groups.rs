@@ -93,10 +93,11 @@ pub(super) enum Direction {
 
 impl Browser {
     /// Starts with the groups kept for this connection (R-SQL-83).
-    pub fn with_groups(groups: Vec<LibraryGroup>, list_open: bool) -> Self {
+    pub fn with_groups(groups: Vec<LibraryGroup>, list_open: bool, system_open: bool) -> Self {
         Self {
             groups,
             list_open,
+            system_open,
             ..Self::default()
         }
     }
@@ -339,7 +340,7 @@ mod tests {
                 ..LibraryGroup::default()
             })
             .collect();
-        Browser::with_groups(groups, true)
+        Browser::with_groups(groups, true, false)
     }
 
     /// R-SQL-83: the libraries pinned before become one group, "Pinned"; none, no group.

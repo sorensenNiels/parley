@@ -85,7 +85,7 @@ pub struct SnippetPanel {
     /// Why a folder could not be read.
     errors: Vec<String>,
     loaded: bool,
-    query: String,
+    pub(super) query: String,
     editing: Option<Editing>,
     asking: Option<Asking>,
     /// The entry asked about before deleting.

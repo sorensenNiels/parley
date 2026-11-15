@@ -7,7 +7,7 @@
 //! cargo run -p parley-core --example sqlprobe -- HOST --sign-on USER [--tls] [--ccsid 277]
 //! ```
 //!
-//! `--tools USER` signs on once and runs the SQL window's own queries (R-SQL-30..32): a CL
+//! `--tools USER` signs on once and runs the SQL window's own queries (R-SQL-30..32, R-SQL-78..80): a CL
 //! command that fails harmlessly, Explain for its message and an SQL one, the job log and the
 //! library list; it prints counts, message texts and the current schema, never rows of data.
 //!
@@ -984,6 +984,46 @@ fn snippets(host: &str, user: &str, tls: bool) -> i32 {
     i32::from(failed > 0)
 }
 
+/// The System node's views (R-SQL-78..80): the signed-on user's spooled files, message queue
+/// and jobs, this job's job log, and the newest spooled file's text. Read-only; counts only.
+fn services(
+    run: &mut impl FnMut(&str, String) -> Result<parley_core::sql::protocol::Outcome, String>,
+) -> bool {
+    use parley_core::sql::protocol::Outcome;
+    use parley_core::sql::services::{self, View};
+
+    let mut good = true;
+    let mut newest = None;
+    for view in View::ALL {
+        match run(view.title(), view.sql()) {
+            Ok(Outcome::Rows { rows, columns, .. }) => {
+                good &= columns.len() == view.columns().len();
+                if view == View::SpooledFiles {
+                    newest = rows.first().cloned();
+                }
+            }
+            Ok(Outcome::Count { .. }) => {}
+            Err(_) => good = false,
+        }
+    }
+    good &= run("Job log of this job", services::job_log("*")).is_ok();
+    if let Some(row) = newest {
+        let cell = |n: usize| row.get(n).cloned().flatten().unwrap_or_default();
+        match services::spooled_file_text(
+            &cell(services::spooled::JOB),
+            &cell(services::spooled::NAME),
+            &cell(services::spooled::NUMBER),
+        ) {
+            Ok(sql) => good &= run("The newest spooled file's text", sql).is_ok(),
+            Err(why) => {
+                println!("FAILED  the newest spooled file: {why}");
+                good = false;
+            }
+        }
+    }
+    good
+}
+
 /// `--tools`: the SQL window's IBM i tools against a real host (R-SQL-30..32).
 fn tools(host: &str, user: &str, tls: bool) -> i32 {
     use parley_core::sql::protocol::{Outcome, Request};
@@ -1069,6 +1109,7 @@ fn tools(host: &str, user: &str, tls: bool) -> i32 {
         _ => good = false,
     }
     good &= browser(&mut run, user);
+    good &= services(&mut run);
     good &= parameters(&mut helper);
     helper.close();
     i32::from(!good)

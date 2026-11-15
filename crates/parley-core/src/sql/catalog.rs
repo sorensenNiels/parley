@@ -13,7 +13,7 @@ pub const JOB: &str = "SELECT CURRENT SCHEMA, SYSTEM_SCHEMA_NAME, TYPE, CURRENT 
 pub const MAX_OBJECTS: u32 = 5000;
 
 /// `value` as an SQL string literal, its quotes doubled: names from the catalog are host data.
-fn literal(value: &str) -> String {
+pub(super) fn literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 

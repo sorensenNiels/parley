@@ -18,6 +18,7 @@ mod complete;
 mod editing;
 mod error_mark;
 mod find;
+pub(super) use find::find_next;
 pub mod gutter;
 mod signature;
 pub use complete::{Item, arrange};
@@ -1161,6 +1162,9 @@ mod tests {
     struct KeptFile(std::sync::Mutex<String>);
 
     impl SqlFiles for KeptFile {
+        fn save_text(&self, _: &str, _: &str) -> Result<Option<String>, String> {
+            Ok(None)
+        }
         fn export_csv(&self, _: &str, _: &[u8]) -> Result<Option<String>, String> {
             Ok(None)
         }

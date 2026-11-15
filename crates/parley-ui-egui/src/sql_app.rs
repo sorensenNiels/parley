@@ -345,11 +345,7 @@ impl ParleySqlUi {
                 }
             }
             bars::Action::Exit => ctx.send_viewport_cmd(ViewportCommand::Close),
-            bars::Action::Settings => self.open_settings(ctx, false),
-            bars::Action::CheckForUpdates => {
-                self.open_settings(ctx, true);
-                self.updates.start(ctx, updates::Check::Now);
-            }
+            bars::Action::Settings => self.open_settings(ctx),
         }
     }
 
@@ -375,7 +371,7 @@ impl ParleySqlUi {
         }
     }
 
-    fn open_settings(&mut self, ctx: &egui::Context, about: bool) {
+    fn open_settings(&mut self, ctx: &egui::Context) {
         if self.settings_dialog.is_some() {
             return;
         }
@@ -383,11 +379,7 @@ impl ParleySqlUi {
             .for_program(Program::ParleySql)
             .with_sql_helpers(self.helpers.clone())
             .with_api_keys(self.api_keys.clone());
-        self.settings_dialog = Some(if about {
-            dialog.on_about_page()
-        } else {
-            dialog
-        });
+        self.settings_dialog = Some(dialog);
     }
 
     fn show_settings(&mut self, ctx: &egui::Context) {
@@ -460,13 +452,11 @@ mod tests {
     }
 
     #[test]
-    fn the_header_has_the_name_file_help_and_a_gear_at_the_right_end_r_sql_45() {
+    fn the_header_has_the_name_file_and_a_gear_at_the_right_end_r_sql_45_r_sql_86() {
         let harness = app_with(Vec::new());
         harness.get_by_label("Parley SQL");
         let file = harness.get_by_label("File").rect();
-        let help = harness.get_by_label("Help").rect();
         let gear = harness.get_by_label("Settings").rect();
-        assert!(file.left() < help.left(), "File, then Help");
         assert!(
             gear.left() > 900.0,
             "the gear is at the right end: {gear:?}"
@@ -475,6 +465,8 @@ mod tests {
             (gear.center().y - file.center().y).abs() < 2.0,
             "in the header"
         );
+        // R-SQL-86: no Help menu; the version and updates are on Settings ▸ About.
+        assert!(harness.query_by_label("Help").is_none(), "no Help menu");
         assert!(
             harness.query_by_label("Tools").is_none(),
             "no terminal menus"

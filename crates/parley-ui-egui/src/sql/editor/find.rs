@@ -168,7 +168,7 @@ pub(super) fn matches_at(text: &str, at: usize, query: &str, match_case: bool) -
 }
 
 /// The first match of `query` at or after byte `from`.
-pub(super) fn find_next(
+pub(in crate::sql) fn find_next(
     text: &str,
     query: &str,
     from: usize,

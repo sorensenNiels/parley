@@ -1,0 +1,8 @@
+-- title: Journals
+-- tags: did you know, journals
+-- about: Journals with their attached receiver, how many receivers and their size, the largest first (QSYS2.JOURNAL_INFO).
+-- needs: IBM i 7.3
+SELECT JOURNAL_LIBRARY, JOURNAL_NAME, JOURNAL_STATE, ATTACHED_JOURNAL_RECEIVER_LIBRARY,
+       ATTACHED_JOURNAL_RECEIVER_NAME, NUMBER_JOURNAL_RECEIVERS, TOTAL_SIZE_JOURNAL_RECEIVERS
+  FROM QSYS2.JOURNAL_INFO
+  ORDER BY TOTAL_SIZE_JOURNAL_RECEIVERS DESC

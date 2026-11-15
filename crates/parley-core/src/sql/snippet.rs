@@ -168,9 +168,9 @@ fn placeholder_spans(sql: &str) -> Vec<(std::ops::Range<usize>, &str)> {
     spans
 }
 
-/// The snippets Parley comes with (R-SQL-27): what IBM i Services can answer, tagged "did you
-/// know"; read-only. Each is (file name, text).
-pub const STARTERS: [(&str, &str); 13] = [
+/// The snippets Parley comes with (R-SQL-27, R-SQL-81): what IBM i Services can answer, tagged
+/// "did you know"; read-only. Each is (file name, text).
+pub const STARTERS: [(&str, &str); 22] = [
     (
         "busiest-jobs",
         include_str!("../../assets/snippets/busiest-jobs.sql"),
@@ -222,6 +222,43 @@ pub const STARTERS: [(&str, &str); 13] = [
     (
         "library-list",
         include_str!("../../assets/snippets/library-list.sql"),
+    ),
+    // R-SQL-81
+    (
+        "disk-use",
+        include_str!("../../assets/snippets/disk-use.sql"),
+    ),
+    (
+        "job-queues",
+        include_str!("../../assets/snippets/job-queues.sql"),
+    ),
+    (
+        "output-queues",
+        include_str!("../../assets/snippets/output-queues.sql"),
+    ),
+    (
+        "largest-ifs-files",
+        include_str!("../../assets/snippets/largest-ifs-files.sql"),
+    ),
+    (
+        "object-authorities",
+        include_str!("../../assets/snippets/object-authorities.sql"),
+    ),
+    (
+        "passwords-expiring",
+        include_str!("../../assets/snippets/passwords-expiring.sql"),
+    ),
+    (
+        "journals",
+        include_str!("../../assets/snippets/journals.sql"),
+    ),
+    (
+        "data-areas",
+        include_str!("../../assets/snippets/data-areas.sql"),
+    ),
+    (
+        "subsystems",
+        include_str!("../../assets/snippets/subsystems.sql"),
     ),
 ];
 

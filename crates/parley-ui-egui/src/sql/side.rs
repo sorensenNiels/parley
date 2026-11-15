@@ -5,6 +5,9 @@
 use egui::{Panel, PointerButton, Rect, Ui, UiBuilder};
 use serde::{Deserialize, Serialize};
 
+use parley_core::sql::services;
+
+use super::browser;
 use super::layout::{self, Axis, Drag};
 use super::{Around, SqlWindow};
 use crate::{icons, theme};
@@ -41,6 +44,8 @@ pub struct SideLayout {
     pub libraries_share: u8,
     /// Whether the group "Library list" is open (R-SQL-83).
     pub library_list_open: bool,
+    /// Whether the System node is open (R-SQL-78).
+    pub system_open: bool,
 }
 
 impl Default for SideLayout {
@@ -52,6 +57,7 @@ impl Default for SideLayout {
             snippets_open: true,
             libraries_share: DEFAULT_SHARE,
             library_list_open: true,
+            system_open: false,
         }
     }
 }
@@ -305,11 +311,21 @@ impl SqlWindow {
             Some(c) => format!("{} · IBM i {}", self.config.host, c.release),
             None => self.config.host.clone(),
         };
-        if let Some(pick) = self
-            .browser
-            .show(ui, &system, &about, &list, &mut self.database)
-        {
+        let views: Vec<_> = services::View::ALL
+            .into_iter()
+            .map(|v| (v, self.system.label(v)))
+            .collect();
+        let root = browser::Root {
+            name: &system,
+            about: &about,
+            views: &views,
+        };
+        if let Some(pick) = self.browser.show(ui, &root, &list, &mut self.database) {
             self.use_pick(pick);
+        }
+        // R-SQL-78: the System node's lists are read the first time it is open.
+        if self.browser.system_open() && !self.system.is_read() {
+            self.system.read(&mut self.database);
         }
     }
 
@@ -317,6 +333,7 @@ impl SqlWindow {
     pub fn side_layout(&self) -> SideLayout {
         SideLayout {
             library_list_open: self.browser.list_open(),
+            system_open: self.browser.system_open(),
             ..self.side
         }
     }

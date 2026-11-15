@@ -37,7 +37,7 @@ as its recorded exception (D20).
 | Phase 14: the editor, deeper | Done, verified (2026-11-14, Linux under WSL): from IDEA-34 (the owner): on egui's text field with a gutter of Parley's own (D28): line numbers (R-SQL-61), a ▶ and the last outcome per statement (R-SQL-62), completion on demand and with snippets (R-SQL-63, R-SQL-64), a routine's parameters while it is called (R-SQL-65), the word under the cursor marked (R-SQL-66), Ctrl+D (R-SQL-67), trailing blanks trimmed on save (R-SQL-68). |
 | Phase 15: data transfer | Done, verified (2026-11-15, Linux under WSL): every row to CSV or Excel (R-SQL-71, R-SQL-72), a CSV file into a table, all or nothing (R-SQL-73); D31. |
 | Phase 16: the editor, safer | Done, verified (2026-11-15, Linux under WSL): scripts kept within seconds (R-SQL-74), an error's place marked (R-SQL-75), completion of a `WITH`'s names (R-SQL-76), formatting choices (R-SQL-77). |
-| Phase 17: IBM i Services | Planned (2026-11-15): a System node under the IBM i in the side panel's tree (D32): spooled files (R-SQL-78), the message queue (R-SQL-79), jobs and job logs (R-SQL-80); more starters (R-SQL-81). |
+| Phase 17: IBM i Services | Built (2026-11-15), to verify on the owner's IBM i and in the app: a System node under the IBM i in the side panel's tree (D32): spooled files (R-SQL-78), the message queue (R-SQL-79), jobs and job logs (R-SQL-80); more starters (R-SQL-81). |
 | Phase 18: the work area, rearranged | Done, verified (2026-11-15, Linux under WSL), built before Phase 17 at the owner's wish: the Libraries panel on the left (R-SQL-82), library groups (R-SQL-83), Snippets under Libraries (R-SQL-84), History beside Results and Messages (R-SQL-85); D33. |
 
 ## 4. Phases
@@ -146,7 +146,7 @@ From IDEA-34's leftovers that fit egui's text field (D28; the owner, 2026-11-15)
 change (R-SQL-74), the place of an error marked (R-SQL-75), completion of a `WITH`'s names (R-SQL-76), and formatting
 choices (R-SQL-77). Folding and several cursors, which need an editor of Parley's own, stay in IDEA-34.
 
-### Phase 17 — IBM i Services (planned)
+### Phase 17 — IBM i Services (built, to verify)
 
 From IDEA-25 (the owner, 2026-11-15), aimed at the signed-on user since Parley SQL has no 5250 session (R-SQL-70): a
 "System" node under the IBM i at the root of the side panel's tree (R-SQL-83), with the user's spooled files
@@ -212,4 +212,4 @@ Decisions D1–D18 (language, crates, TLS, the look, add-ons, no saved passwords
 - A choice that future work must respect becomes a decision in §6.
 - An idea is not a plan: it goes in [IDEAS.md](IDEAS.md) until it is picked, then becomes requirements here.
 
-Next free ID: `R-SQL-86` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).
+Next free ID: `R-SQL-87` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).

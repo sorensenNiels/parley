@@ -324,6 +324,9 @@ mod tests {
         fn save_script(&self, _: Option<&str>, _: &str, _: &str) -> Result<Option<String>, String> {
             Ok(None)
         }
+        fn save_text(&self, _: &str, _: &str) -> Result<Option<String>, String> {
+            Ok(None)
+        }
     }
 
     /// A file in a folder of its own, removed when the test ends.

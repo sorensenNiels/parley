@@ -116,6 +116,19 @@ impl parley_ui_egui::SqlFiles for SqlFileWindow {
         Ok(Some((path.display().to_string(), text)))
     }
 
+    fn save_text(&self, suggested: &str, text: &str) -> Result<Option<String>, String> {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Save as text")
+            .add_filter("Text", &["txt"])
+            .set_file_name(suggested)
+            .save_file()
+        else {
+            return Ok(None);
+        };
+        std::fs::write(&path, text).map_err(|e| e.to_string())?;
+        Ok(Some(path.display().to_string()))
+    }
+
     fn open_script(&self) -> Result<Option<(String, String)>, String> {
         let Some(path) = rfd::FileDialog::new()
             .set_title("Open SQL script")

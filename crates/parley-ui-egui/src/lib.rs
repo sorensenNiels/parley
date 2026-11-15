@@ -1231,6 +1231,8 @@ mod tests {
             "the gear on the right: {gear:?}"
         );
         assert!(gear.right() > 950.0, "at the edge: {gear:?}");
+        // R-UI-19: the gear is drawn larger than the menus' text (at their size it was 17.5 wide).
+        assert!(gear.width() > 21.0, "a larger gear: {gear:?}");
         assert!(
             harness
                 .query_all_by_label("Help")

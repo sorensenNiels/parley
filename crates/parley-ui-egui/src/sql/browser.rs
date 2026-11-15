@@ -18,7 +18,9 @@ use parley_core::sql::complete::{self, Typed};
 use super::database::{Answered, Ask, Database, State};
 use super::editor::Item;
 use super::snippets::field_row;
+use super::system::SystemPick;
 use crate::{icons, theme};
+use parley_core::sql::services::View;
 
 pub use groups::{LibraryGroup, from_pinned};
 
@@ -45,6 +47,18 @@ pub enum Pick {
     Download { library: String, name: String },
     /// Upload a CSV file into a table (R-SQL-73).
     Upload { library: String, name: String },
+    /// Something from the System node (R-SQL-78..80).
+    System(SystemPick),
+}
+
+/// The root of the tree, the IBM i (R-SQL-83), and the System node's views with their labels
+/// (R-SQL-78..80).
+#[derive(Debug, Clone, Copy)]
+pub struct Root<'a> {
+    pub name: &'a str,
+    /// Said on hover: the host and release.
+    pub about: &'a str,
+    pub views: &'a [(View, String)],
 }
 
 /// The browser's state.
@@ -54,6 +68,8 @@ pub struct Browser {
     groups: Vec<LibraryGroup>,
     /// Whether the "Library list" group is open.
     list_open: bool,
+    /// Whether the System node is open (R-SQL-78).
+    system_open: bool,
     /// The name dialog open: a new group, a new name, or a library to add.
     asking: Option<groups::Asking>,
     /// The group asked about before deleting.
@@ -75,6 +91,7 @@ impl Default for Browser {
         Self {
             groups: Vec::new(),
             list_open: true,
+            system_open: false,
             asking: None,
             deleting: None,
             just_added: None,
@@ -133,6 +150,8 @@ impl Browser {
                         .map_or_else(Load::Failed, |r| Load::Ready(catalog::signatures_from(&r)));
                     self.parameters.insert((library, name), load);
                 }
+                // The System node's, taken by `system` before the browser sees them.
+                Ask::Service(_) | Ask::Text { .. } => {}
                 Ask::Ddl { title, .. } => match rows {
                     Ok(rows) => {
                         self.error = None;
@@ -149,13 +168,12 @@ impl Browser {
         picks
     }
 
-    /// The tree, under a root named `system`, the IBM i, described by `about` on hover
-    /// (R-SQL-83). `list` is the SQL job's library list: system name and kind.
+    /// The tree, under `root`, the IBM i (R-SQL-83). `list` is the SQL job's library list:
+    /// system name and kind.
     pub fn show(
         &mut self,
         ui: &mut Ui,
-        system: &str,
-        about: &str,
+        root: &Root<'_>,
         list: &[(String, String)],
         db: &mut Database,
     ) -> Option<Pick> {
@@ -181,13 +199,13 @@ impl Browser {
             .show(ui, |ui| {
                 // A long name is cut, not let widen the panel.
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                let (_, root, _) = group_header(ui, "sql-system", true, |ui| {
+                let (_, header, _) = group_header(ui, "sql-system", true, |ui| {
                     ui.add(
-                        egui::Label::new(theme::semibold(system))
+                        egui::Label::new(theme::semibold(root.name))
                             .truncate()
                             .sense(egui::Sense::click()),
                     )
-                    .on_hover_text(about)
+                    .on_hover_text(root.about)
                 })
                 .body(|ui| {
                     picked = self.library_list(ui, list, db);
@@ -201,14 +219,18 @@ impl Browser {
                             "Make a group, such as Development or Testing, with New group, to keep libraries at hand.",
                         );
                     }
+                    picked = self.system_node(ui, root.views).or(picked.take());
                 });
-                root.inner.context_menu(|ui| self.system_menu(ui));
+                header
+                    .inner
+                    .context_menu(|ui| picked = self.root_menu(ui, root.views).or(picked.take()));
             });
         picked
     }
 
-    /// The IBM i's menu, on the root of the tree (R-SQL-83).
-    fn system_menu(&mut self, ui: &mut Ui) {
+    /// The IBM i's menu, on the root of the tree (R-SQL-83): the System views too (R-SQL-78).
+    fn root_menu(&mut self, ui: &mut Ui, views: &[(View, String)]) -> Option<Pick> {
+        let mut picked = None;
         if ui.button("New group…").clicked() {
             self.new_group();
             ui.close();
@@ -218,6 +240,59 @@ impl Browser {
             self.columns.clear();
             ui.close();
         }
+        ui.separator();
+        for (view, _) in views {
+            if ui.button(view.title()).clicked() {
+                picked = Some(Pick::System(SystemPick::Show(*view)));
+                ui.close();
+            }
+        }
+        picked
+    }
+
+    /// The System node: the user's spooled files, message queue and jobs (R-SQL-78..80).
+    fn system_node(&mut self, ui: &mut Ui, views: &[(View, String)]) -> Option<Pick> {
+        let mut picked = None;
+        let (_, header, _) = group_header(ui, "sql-system-node", self.system_open, |ui| {
+            ui.add(
+                egui::Label::new(theme::semibold("System"))
+                    .truncate()
+                    .sense(egui::Sense::click()),
+            )
+            .on_hover_text("Your spooled files, message queue and jobs on this IBM i")
+        })
+        .body(|ui| {
+            for (view, label) in views {
+                if ui.selectable_label(false, label.as_str()).clicked() {
+                    picked = Some(Pick::System(SystemPick::Show(*view)));
+                }
+            }
+        });
+        let label = header.inner;
+        let mut open = open_now(ui, "sql-system-node", self.system_open);
+        if label.clicked() {
+            open = !open;
+        }
+        label.context_menu(|ui| {
+            if ui.button("Refresh").clicked() {
+                picked = Some(Pick::System(SystemPick::Refresh));
+                ui.close();
+            }
+            ui.separator();
+            for (view, _) in views {
+                if ui.button(view.title()).clicked() {
+                    picked = Some(Pick::System(SystemPick::Show(*view)));
+                    ui.close();
+                }
+            }
+        });
+        self.system_open = open;
+        picked
+    }
+
+    /// Whether the System node is open, to keep in the settings and to read its lists.
+    pub const fn system_open(&self) -> bool {
+        self.system_open
     }
 
     /// The group "Library list": the SQL job's, which cannot be changed (R-SQL-83).
@@ -1220,7 +1295,7 @@ mod tests {
 
     #[test]
     fn completion_offers_columns_tables_libraries_and_keywords_r_sql_36() {
-        let mut b = Browser::with_groups(from_pinned(vec!["KUNDELIB".to_owned()]), true);
+        let mut b = Browser::with_groups(from_pinned(vec!["KUNDELIB".to_owned()]), true, false);
         let cell = |t: &str| Some(t.to_owned());
         b.receive(vec![
             (

@@ -1,6 +1,6 @@
 //! Parley SQL's header and status bar (R-SQL-45), in Parley's look (R-UI-15): the icon and
-//! name, File and Help; on the right a gear for Settings, the connection in use and a newer
-//! version. They only report what the operator chose, as an [`Action`].
+//! name and File (no Help menu: the version and updates are on Settings ▸ About, R-SQL-86);
+//! on the right a gear for Settings, the connection in use and a newer version. They only report what the operator chose, as an [`Action`].
 
 use egui::{MenuBar, RichText, Sense, Ui};
 
@@ -20,8 +20,6 @@ pub enum Action {
     Disconnect,
     Exit,
     Settings,
-    /// Help ▸ Check for updates…: Settings on the About page, checking.
-    CheckForUpdates,
 }
 
 /// What the header shows.
@@ -41,16 +39,14 @@ impl std::fmt::Debug for Header<'_> {
     }
 }
 
-/// The header: brand, File and Help; the gear, the connection pill and a newer version on
+/// The header: brand and File; the gear, the connection pill and a newer version on
 /// the right.
 pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     let mut action = None;
     MenuBar::new().ui(ui, |ui| {
         menu::brand(ui, header.logo, Program::ParleySql);
-        for menu in [file_menu, help_menu] {
-            if let Some(chosen) = menu(ui, header) {
-                action = Some(chosen);
-            }
+        if let Some(chosen) = file_menu(ui, header) {
+            action = Some(chosen);
         }
         theme::button_row(ui, |ui| {
             if menu::gear(ui) {
@@ -100,23 +96,6 @@ fn file_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
         if item(ui, true, icons::SIGN_OUT, "Exit") {
             action = Some(Action::Exit);
         }
-    });
-    action
-}
-
-fn help_menu(ui: &mut Ui, _header: &Header<'_>) -> Option<Action> {
-    let mut action = None;
-    ui.menu_button("Help", |ui| {
-        if item(ui, true, icons::ARROWS_CLOCKWISE, "Check for updates…") {
-            action = Some(Action::CheckForUpdates);
-        }
-        ui.separator();
-        let version = format!(
-            "{} {}",
-            Program::ParleySql.name(),
-            env!("CARGO_PKG_VERSION")
-        );
-        ui.add_enabled(false, icons::button(icons::INFO, &version));
     });
     action
 }

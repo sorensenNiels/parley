@@ -14,6 +14,7 @@ pub mod message;
 pub mod params;
 pub mod protocol;
 pub mod runner;
+pub mod services;
 pub mod snippet;
 pub mod text;
 pub mod transfer;

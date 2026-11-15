@@ -6,10 +6,10 @@
 use std::collections::VecDeque;
 use std::path::Path;
 
-use parley_core::sql::catalog;
 use parley_core::sql::helper::HelperFiles;
 use parley_core::sql::protocol::{Answer, Connected, Outcome, Request, Row};
 use parley_core::sql::runner::{Event, Runner};
+use parley_core::sql::{catalog, services};
 
 /// Seconds a catalog question may take.
 const TIMEOUT: u32 = 60;
@@ -35,6 +35,13 @@ pub enum Ask {
         kind: catalog::Kind,
         title: String,
     },
+    /// A list under the System node (R-SQL-78..80).
+    Service(services::View),
+    /// A spooled file's text or a job log, for viewer window `viewer` (R-SQL-78, R-SQL-80).
+    Text {
+        sql: String,
+        viewer: u64,
+    },
 }
 
 impl Ask {
@@ -49,6 +56,8 @@ impl Ask {
                 kind,
                 ..
             } => catalog::ddl(library, name, *kind),
+            Ask::Service(view) => view.sql(),
+            Ask::Text { sql, .. } => sql.clone(),
         }
     }
 }
@@ -215,6 +224,14 @@ impl Database {
             runner.send(Request::Close);
         }
         self.state = State::Off;
+    }
+
+    /// Its job's name, once signed on (R-SQL-80: marked among the user's jobs).
+    pub fn job(&self) -> Option<&str> {
+        match &self.state {
+            State::Ready { job } => Some(job),
+            State::Off | State::Started | State::Connecting | State::Failed(_) => None,
+        }
     }
 
     /// What the top bar says about it: the text, and whether it is a problem.

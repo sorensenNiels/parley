@@ -12,9 +12,21 @@
 
 ## In progress
 
-None.
+- **R-SQL-78..81** (2026-11-15): IBM i Services (Phase 17). Built; **automated** (`make test`): each view's SQL reads
+  the signed-on user's own within 1000 entries with a heading per column, names from the host quoted and a spooled file
+  number that is not one refused, rows becoming a viewer's text, new messages counted after the newest seen (core);
+  the window's own jobs marked, a failed list saying why, a spooled file opening in a viewer with its text, Find going
+  round, and from the tree: System's labels with counts, a click opening the list as a tab, Open showing the viewer, the
+  tab closing (UI); the 22 starters read and fill. **Still to do:** `make probe-sql HOST=… ARGS="--tools NODEJT400"`
+  on the owner's IBM i (7.3) runs the three lists, a job log, the newest spooled file's text and every starter, which
+  then get their release marks (R-SQL-81: job queues, journals, data areas and object authorities are marked 7.3, the
+  largest IFS files and subsystems 7.4, from IBM's documentation, not yet run); and a check in the running app.
 
 ## Implemented
+
+- **R-SQL-86** (2026-11-15): no Help menu in Parley SQL. **Automated** (`make test`): the header test finds the
+  name, File and the gear and no Help; the gear opens Settings with About. **Checked in the running app** by a
+  screenshot, Linux under WSL (2026-11-15).
 
 - **R-SQL-82..85** (2026-11-15): the work area, rearranged (Phase 18). **Automated** (`make test`): the panel
   on the left folds and opens by its buttons and Ctrl+B and keeps its edge with a long name open (R-SQL-82); groups

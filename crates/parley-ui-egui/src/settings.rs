@@ -317,12 +317,6 @@ impl Dialog {
         self.keyboard.take_renames()
     }
 
-    /// Opens on the About page (Parley SQL's Help ▸ Check for updates…).
-    pub fn on_about_page(mut self) -> Self {
-        self.page = Page::About;
-        self
-    }
-
     /// The same dialog on the Keyboard page ("Change keys…" in the shortcut sheet, R-UI-17).
     pub fn on_keyboard_page(mut self) -> Self {
         self.page = Page::Keyboard;
