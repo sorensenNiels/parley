@@ -1,9 +1,10 @@
 //! What both of Parley's programs need from the desktop: `parley`, the terminal, and
 //! `parley-sql`, Parley SQL, the SQL window on its own (R-SQL-45). The window icon, the SQL
-//! helper's jars, the assistant's API keys in the keychain, the file window, the snippet and macro folders, the update check and the
-//! development screenshot. UI code belongs in `parley-ui-egui`; the engine in `parley-core`.
+//! helper's jars, the assistant's API keys in the keychain, the file window, the snippet and macro folders, the update check, the
+//! alarm's beep and the development screenshot. UI code belongs in `parley-ui-egui`; the engine in `parley-core`.
 
 pub mod api_keys;
+pub mod beep;
 pub mod helpers;
 pub mod macros;
 #[expect(

@@ -26,6 +26,8 @@ parley-core.workspace = true
 parley-sql-core.workspace = true
 parley-sql-ui.workspace = true
 keyring = "4.2"
+# The 5250 alarm's beep (R-UI-25, D37): playback only, no decoders. ALSA on Linux.
+rodio = { version = "0.23", default-features = false, features = ["playback"] }
 
 # File windows for importing and exporting macros (R-KEY-7). GTK on Linux, as Tortuga: the
 # xdg-desktop-portal backend fails silently where no portal runs (WSL).
@@ -74,7 +76,7 @@ resources = [
 [package.metadata.packager.deb]
 # X11 keyboard and OpenGL/EGL are loaded at run time by the window library; fontconfig by
 # the settings, to list the installed fonts; GTK 3 by the macro file windows (R-KEY-7).
-depends = ["libgtk-3-0", "libxkbcommon-x11-0", "libegl1", "libgl1", "libfontconfig1"]
+depends = ["libgtk-3-0", "libasound2", "libxkbcommon-x11-0", "libegl1", "libgl1", "libfontconfig1"]
 section = "net"
 # R-NF-2: Parley SQL in the application menu beside Parley; the generated entry is Parley's only.
 files = { "linux/parley-sql.desktop" = "usr/share/applications/parley-sql.desktop" }

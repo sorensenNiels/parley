@@ -25,8 +25,27 @@ pub struct View {
     pub find: Option<FindBar>,
     /// The colours to draw in (R-UI-23): the session's scheme, or the settings'.
     pub palette: Palette,
+    /// Blinking text blinks; else it shows steady in reverse image (R-UI-24).
+    pub blinking: bool,
+    /// The screen's border flashes until this time (egui's clock, seconds) for the alarm
+    /// (R-UI-25).
+    flash_until: f64,
     selection: Option<Selection>,
 }
+
+/// How a position with the blink attribute shows in this frame (R-UI-24).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Blink {
+    Shown,
+    Hidden,
+    /// Blinking is turned off: reverse image instead.
+    Steady,
+}
+
+/// How long the alarm's flash lasts, in seconds (R-UI-25).
+const FLASH: f64 = 0.3;
+/// Half a blink: shown this long, then hidden as long (R-UI-24).
+const HALF_BLINK: f64 = 0.5;
 
 /// A rectangle dragged over the screen (R-UI-22), with the screen it was made on: it goes
 /// when the host changes the screen.
@@ -38,6 +57,17 @@ struct Selection {
 }
 
 impl View {
+    /// The host sounded the alarm at `now` (egui's clock): flash the border (R-UI-25).
+    pub fn flash(&mut self, now: f64) {
+        self.flash_until = now + FLASH;
+    }
+
+    /// The alarm has flashed since the view was made, or `otherwise` (tests).
+    #[cfg(test)]
+    pub(crate) fn flashing_or(&self, otherwise: bool) -> bool {
+        self.flash_until > 0.0 || otherwise
+    }
+
     /// Opens the find bar, or gives it the keyboard when it is open (R-UI-21).
     pub fn open_find(&mut self) {
         match &mut self.find {
@@ -154,13 +184,16 @@ pub fn show(
 
     let cells = session.screen().cells(session.code_page());
     let palette = &view.palette;
+    let now = ui.input(|i| i.time);
+    let blink = blink_now(ui, view, &cells, now);
     draw_cells(
         &painter,
         response.rect,
         &grid,
         &cells,
-        &Marks::of(view, session),
+        &Marks::of(view, session, blink),
     );
+    flash_border(ui, &painter, response.rect, view, now);
     if let Some(spot) = hovered {
         underline_hotspot(&painter, &grid, &cells, spot, palette);
     }
@@ -176,6 +209,44 @@ pub fn show(
     let text = session.screen().text(session.code_page());
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Terminal, true, &text));
     asked
+}
+
+/// How blinking text shows now, and a frame asked for when it changes, only while there is
+/// blinking text on the screen (R-UI-24).
+fn blink_now(ui: &Ui, view: &View, cells: &[parley_core::screen::Cell], now: f64) -> Blink {
+    if !view.blinking {
+        return Blink::Steady;
+    }
+    if cells.iter().any(|c| c.style.blink) {
+        let left = HALF_BLINK - now.rem_euclid(HALF_BLINK);
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(left));
+    }
+    blink_phase(now)
+}
+
+/// Shown for the first half of each second, hidden for the second (R-UI-24).
+fn blink_phase(now: f64) -> Blink {
+    if now.rem_euclid(2.0 * HALF_BLINK) < HALF_BLINK {
+        Blink::Shown
+    } else {
+        Blink::Hidden
+    }
+}
+
+/// The alarm's flash: a thick border in the scheme's yellow until it is over (R-UI-25).
+fn flash_border(ui: &Ui, painter: &egui::Painter, area: Rect, view: &View, now: f64) {
+    if now >= view.flash_until {
+        return;
+    }
+    painter.rect_stroke(
+        area,
+        CornerRadius::ZERO,
+        Stroke::new(4.0, view.palette.color(Color::Yellow)),
+        egui::StrokeKind::Inside,
+    );
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_secs_f64(view.flash_until - now));
 }
 
 /// The positions with their characters and attributes, over the marks (R-UI-1).
@@ -196,13 +267,18 @@ fn draw_cells(
         }
         let style = cell.style;
         let fg = palette.color(style.color);
-        let text_color = if style.reverse {
+        let blink = if style.blink {
+            marks.blink
+        } else {
+            Blink::Shown
+        };
+        let text_color = if style.reverse || blink == Blink::Steady {
             painter.rect_filled(rect, CornerRadius::ZERO, fg);
             palette.background
         } else {
             fg
         };
-        if cell.ch != ' ' {
+        if cell.ch != ' ' && blink != Blink::Hidden {
             painter.text(
                 rect.left_top(),
                 Align2::LEFT_TOP,
@@ -249,13 +325,14 @@ fn select(ui: &Ui, response: &egui::Response, grid: &Grid, session: &Session, vi
 /// the palette's colours.
 struct Marks {
     palette: Palette,
+    blink: Blink,
     matches: Vec<Span>,
     current: Option<Span>,
     selection: Option<Rectangle>,
 }
 
 impl Marks {
-    fn of(view: &View, session: &Session) -> Self {
+    fn of(view: &View, session: &Session, blink: Blink) -> Self {
         let matches = view
             .find
             .as_ref()
@@ -268,6 +345,7 @@ impl Marks {
             .and_then(|i| matches.get(i).copied());
         Self {
             palette: view.palette,
+            blink,
             matches,
             current,
             selection: view.selection.as_ref().map(|s| s.area),
@@ -712,5 +790,37 @@ mod tests {
         let bar = view.find.as_mut().expect("the find bar opened");
         bar.text = "HELLO".into();
         assert_eq!(bar.matches(session).len(), 2);
+    }
+
+    #[test]
+    fn blinking_text_shows_half_a_second_and_hides_half_a_second_r_ui_24() {
+        assert_eq!(blink_phase(0.0), Blink::Shown);
+        assert_eq!(blink_phase(0.49), Blink::Shown);
+        assert_eq!(blink_phase(0.5), Blink::Hidden);
+        assert_eq!(blink_phase(0.99), Blink::Hidden);
+        assert_eq!(blink_phase(1.2), Blink::Shown);
+    }
+
+    #[test]
+    fn with_blinking_off_blinking_text_shows_steady_r_ui_24() {
+        let mut harness = harness();
+        harness.state_mut().2.blinking = false;
+        harness.run();
+        let ctx = harness.ctx.clone();
+        let cells = harness.state().0.screen().cells(CodePage::Ccsid37);
+        let blink = ctx.run_ui(egui::RawInput::default(), |ui| {
+            assert_eq!(
+                blink_now(ui, &harness.state().2, &cells, 0.7),
+                Blink::Steady
+            );
+        });
+        drop(blink);
+    }
+
+    #[test]
+    fn the_alarm_flash_lasts_a_moment_r_ui_25() {
+        let mut view = View::default();
+        view.flash(10.0);
+        assert!(view.flash_until > 10.0 && view.flash_until <= 10.0 + FLASH);
     }
 }

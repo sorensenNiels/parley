@@ -40,6 +40,18 @@ pub use updates::Checker;
 /// (R-SQL-70); `Err` says why it could not. Parley knows no user and passes no password (D16).
 pub type StartSql = Box<dyn Fn(&str, &parley_core::SessionConfig) -> Result<(), String>>;
 
+/// Plays the alarm's beep (R-UI-25, D37): given by the launcher, since the UI has no platform
+/// code. Never fails: without a sound output it does nothing.
+pub type Beep = Box<dyn Fn()>;
+
+struct AlarmSound(Beep);
+
+impl std::fmt::Debug for AlarmSound {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AlarmSound")
+    }
+}
+
 /// Starts Parley SQL on a host (R-SQL-70): given by the launcher, which knows where it is.
 struct SqlStarter(StartSql);
 
@@ -101,6 +113,8 @@ pub struct ParleyUi {
     sql_notice: Option<String>,
     /// Starts Parley SQL on a host (R-SQL-70); without one (tests), Tools ▸ SQL… says so.
     sql_starter: Option<SqlStarter>,
+    /// Plays the alarm's beep (R-UI-25); without one (tests), the alarm only flashes.
+    beep: Option<AlarmSound>,
 }
 
 impl Default for ParleyUi {
@@ -140,6 +154,7 @@ impl ParleyUi {
             macro_manager: None,
             sql_notice: None,
             sql_starter: None,
+            beep: None,
         }
     }
 
@@ -161,6 +176,27 @@ impl ParleyUi {
     /// How to start Parley SQL on a host, the program `parley-sql` beside Parley (R-SQL-70).
     pub fn set_sql_starter(&mut self, start: StartSql) {
         self.sql_starter = Some(SqlStarter(start));
+    }
+
+    /// How to play the alarm's beep (R-UI-25, D37).
+    pub fn set_beep(&mut self, beep: Beep) {
+        self.beep = Some(AlarmSound(beep));
+    }
+
+    /// The host sounded the alarm: flash, and beep, as the settings say (R-UI-25).
+    fn sound_alarm(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|i| i.time);
+        match self.settings.alarm {
+            settings::Alarm::Off => {}
+            settings::Alarm::FlashOnly => self.view.flash(now),
+            settings::Alarm::SoundAndFlash => {
+                self.view.flash(now);
+                if let Some(beep) = &self.beep {
+                    (beep.0)();
+                }
+            }
+        }
+        ctx.request_repaint();
     }
 
     /// How to ask for the latest release (R-UI-11). Without one, Parley doesn't look for
@@ -377,6 +413,13 @@ impl ParleyUi {
             self.find_panel(ui, session);
         }
         self.view.palette = self.palette();
+        self.view.blinking = self.settings.blinking_text;
+        if session
+            .as_deref_mut()
+            .is_some_and(parley_core::Session::take_alarm)
+        {
+            self.sound_alarm(ui.ctx());
+        }
         let asked = self.central_panel(ui, session.as_deref_mut(), &mut actions);
 
         let next = self.carry_out(ui.ctx(), actions, session.as_deref_mut());
@@ -2350,6 +2393,89 @@ mod tests {
         drop(socket);
         run_until(harness, |app| app.connection.is_none());
         listener
+    }
+
+    /// Connects "Local" to a host on a local port that sends one screen with the alarm bit set
+    /// (Write To Display, CC2 X'04'); returns the beeps counted.
+    fn alarm_from_host(
+        alarm: settings::Alarm,
+    ) -> (
+        Harness<'static, ParleyUi>,
+        std::rc::Rc<std::cell::Cell<u32>>,
+    ) {
+        use std::io::Write as _;
+        let mut harness = app_with(Vec::new());
+        let beeps = std::rc::Rc::new(std::cell::Cell::new(0));
+        let counted = std::rc::Rc::clone(&beeps);
+        harness
+            .state_mut()
+            .set_beep(Box::new(move || counted.set(counted.get() + 1)));
+        harness.state_mut().set_settings(Settings {
+            alarm,
+            ..Settings::default()
+        });
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a local port");
+        let mut local = profile("Local", "127.0.0.1");
+        local.config.port = listener.local_addr().expect("its address").port();
+        local.config.tls = false;
+        let ctx = harness.ctx.clone();
+        harness.state_mut().connect(&ctx, local);
+        let (mut socket, _) = listener.accept().expect("Parley connects");
+        let record = parley_core::record::build(
+            0,
+            parley_core::record::Opcode::PutGet,
+            &[0x04, 0x11, 0x00, 0x04, 0x11, 1, 1, 0xC1], // ... SBA 1,1 "A"
+        );
+        socket
+            .write_all(&parley_core::telnet::Telnet::frame(&record))
+            .expect("send");
+        run_until(&mut harness, |app| {
+            app.connection.as_ref().is_some_and(|c| {
+                c.session()
+                    .screen()
+                    .text(parley_core::CodePage::Ccsid37)
+                    .starts_with('A')
+            })
+        });
+        harness.run();
+        drop(socket);
+        (harness, beeps)
+    }
+
+    #[test]
+    fn the_host_s_alarm_beeps_and_flashes_once_r_ui_25() {
+        let (harness, beeps) = alarm_from_host(settings::Alarm::SoundAndFlash);
+        assert_eq!(beeps.get(), 1);
+        assert!(harness.state().view.flashing_or(false));
+    }
+
+    #[test]
+    fn flash_only_does_not_beep_r_ui_25() {
+        let (_harness, beeps) = alarm_from_host(settings::Alarm::FlashOnly);
+        assert_eq!(beeps.get(), 0);
+    }
+
+    #[test]
+    fn the_alarm_set_off_neither_beeps_nor_flashes_r_ui_25() {
+        let (harness, beeps) = alarm_from_host(settings::Alarm::Off);
+        assert_eq!(beeps.get(), 0);
+        assert!(!harness.state().view.flashing_or(false));
+    }
+
+    #[test]
+    fn the_terminal_page_chooses_the_alarm_and_turns_blinking_off_r_ui_24_r_ui_25() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("Terminal").click();
+        harness.run();
+        harness.get_by_label("Flash").click();
+        harness.get_by_label("Blinking text").click();
+        harness.run();
+        harness.get_by_label("Save").click();
+        harness.run();
+        assert_eq!(harness.state().settings().alarm, settings::Alarm::FlashOnly);
+        assert!(!harness.state().settings().blinking_text);
     }
 
     #[test]

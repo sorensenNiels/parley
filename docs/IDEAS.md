@@ -20,7 +20,6 @@
 | IDEA-2 | Operator error codes (0005 and so on) next to the messages, as IBM's emulators show them, once the codes are checked against the manual. |
 | IDEA-3 | Mandatory enter, mandatory fill and self-check (modulo 10/11) fields: not enforced yet; the host checks them. |
 | IDEA-5 | Extended attributes (Write Extended Attribute) and the GUI structured fields (windows, menus, scroll bars, WDSF): ignored now; Parley's query reply does not ask for them. |
-| IDEA-6 | Sound the alarm (CC2 bit) and blink (blink attributes): both are ignored now. |
 | IDEA-8 | Insert mode accepts trailing blanks as room, not only nulls as on a real 5250: kinder, but check it does not surprise people. |
 | IDEA-12 | *Dropped with auto sign-on (R-NET-7, D16): there is no bypass sign-on left to explain.* Startup Response Record (RFC 4777 section 10, `IBMSENDCONFREC`): show why a bypass sign-on failed (user unknown, password expired, and so on) instead of only the sign-on screen. *(Was → R-NET-6, dropped.)* |
 | IDEA-14 | Type-ahead: keys pressed while the keyboard is locked (X SYSTEM) are kept and replayed when the host unlocks it, as IBM's emulators can; Reset clears the buffer. Off by default, a setting to turn on. |

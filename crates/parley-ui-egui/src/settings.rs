@@ -42,6 +42,10 @@ pub struct Settings {
     pub screen_colors: terminal::Scheme,
     /// The colours of the Custom scheme (R-UI-23).
     pub custom_colors: terminal::CustomColors,
+    /// What the host's alarm does (R-UI-25).
+    pub alarm: Alarm,
+    /// Blinking text blinks; off, it shows steady in reverse image (R-UI-24).
+    pub blinking_text: bool,
     /// Look for a new version when Parley starts (R-UI-11).
     pub check_for_updates: bool,
     /// Which add-ons are on (R-ADD-1).
@@ -59,6 +63,8 @@ impl Default for Settings {
             terminal_font: fonts::DEFAULT_TERMINAL_FONT.to_owned(),
             screen_colors: terminal::Scheme::default(),
             custom_colors: terminal::CustomColors::default(),
+            alarm: Alarm::default(),
+            blinking_text: true,
             check_for_updates: true,
             addons: AddOnSettings::default(),
             keyboard_maps: Vec::new(),
@@ -76,6 +82,15 @@ impl Settings {
             terminal_font: self.terminal_font.clone(),
         }
     }
+}
+
+/// What the host's alarm does (R-UI-25).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Alarm {
+    #[default]
+    SoundAndFlash,
+    FlashOnly,
+    Off,
 }
 
 /// A group of settings: one entry in the dialog's list on the left.
@@ -114,6 +129,8 @@ impl Page {
                 settings.terminal_font = defaults.terminal_font;
                 settings.screen_colors = defaults.screen_colors;
                 settings.custom_colors = defaults.custom_colors;
+                settings.alarm = defaults.alarm;
+                settings.blinking_text = defaults.blinking_text;
             }
             // The map shown gets the Default map's keys: see `keyboard::Page::restore`.
             Self::Keyboard => {}
@@ -294,6 +311,26 @@ impl Dialog {
                     |ui, _| custom_colors(ui, &mut settings.custom_colors),
                 );
             }
+            rows.row(
+                "Alarm",
+                Some("When the IBM i sounds the alarm, usually with an error."),
+                |ui, _| {
+                    theme::segmented(
+                        ui,
+                        &mut settings.alarm,
+                        &[
+                            (Alarm::SoundAndFlash, "Sound and flash"),
+                            (Alarm::FlashOnly, "Flash"),
+                            (Alarm::Off, "Off"),
+                        ],
+                    );
+                },
+            );
+            rows.switch(
+                "Blinking text",
+                Some("Off: blinking text shows steady in reverse image."),
+                &mut settings.blinking_text,
+            );
             rows.full_row(|ui| {
                 let palette =
                     terminal::Palette::of(settings.screen_colors, &settings.custom_colors);

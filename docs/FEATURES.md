@@ -223,3 +223,9 @@ Checked by the owner in the running app (2026-11-15); `make verify` on Linux und
   (DKSOFT00, the owner signed on in Parley with `PARLEY_TRACE`, inbound only): the DSPLIB prompt's Start of Header
   switches off F5 (`00 00 10`); replaying the recorded screen with a changed field, F5 sends 3 bytes (cursor, AID)
   and F4 and F12 send the field. Marked done by the owner (2026-11-15).
+
+- **R-UI-24, R-UI-25** (2026-11-15): blinking text and the alarm (IDEA-6, D37). **Automated** (`make test`): the blink phase (shown the first half of each second, hidden the second); with Blinking text off
+  it is steady; the flash lasts a moment; a local host sending Write To Display with the CC2 alarm bit beeps and
+  flashes once with Sound and flash, flashes without a beep with Flash, does neither with Off; the Terminal page
+  saves the alarm and the switch. The beep builds with ALSA (`libasound2-dev`) and `make verify` passes; the beep, the flash and blinking text were not
+  seen or heard in the running app. Marked done by the owner (2026-11-15).
