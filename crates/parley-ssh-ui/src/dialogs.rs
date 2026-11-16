@@ -276,15 +276,14 @@ pub fn confirm_paste(ctx: &Context, text: &str) -> Option<bool> {
 }
 
 /// Asks before closing the window while connected (R-SSH-10): `Some(true)` to close.
-pub fn confirm_close(ctx: &Context, target: &Target) -> Option<bool> {
-    let (close, (cancel, go)) =
-        dialog::dialog(ctx, "ssh-close", "Close the session?", 420.0, |ui| {
-            ui.label(format!(
-                "You are signed on to {}. Closing ends the session.",
-                target.label()
-            ));
-            dialog::actions(ui, theme::danger_button(ui, "End session"), true)
-        });
+/// `signed_on` names what is connected: "me@box" or "3 sessions".
+pub fn confirm_close(ctx: &Context, signed_on: &str) -> Option<bool> {
+    let (close, (cancel, go)) = dialog::dialog(ctx, "ssh-close", "Close?", 420.0, |ui| {
+        ui.label(format!(
+            "You are signed on to {signed_on}. Closing ends the connection."
+        ));
+        dialog::actions(ui, theme::danger_button(ui, "End session"), true)
+    });
     if close || cancel {
         Some(false)
     } else {
@@ -347,8 +346,25 @@ pub fn shortcut_sheet(ctx: &Context, mac: bool) -> bool {
         ("Copy", format!("{command}+C")),
         ("Paste", format!("{command}+V")),
         ("Paste", "Shift+Insert".to_owned()),
-        ("New session", format!("{command}+N")),
+        ("New tab", format!("{command}+T")),
+        ("Close pane or tab", format!("{command}+W")),
+        (
+            "Next and previous tab",
+            "Ctrl+Tab, Ctrl+Shift+Tab".to_owned(),
+        ),
+        (
+            "Tab 1 to 9",
+            if mac {
+                "Cmd+1…9".to_owned()
+            } else {
+                "Ctrl+Alt+1…9".to_owned()
+            },
+        ),
+        ("Split right", "Alt+Shift+=".to_owned()),
+        ("Split down", "Alt+Shift+-".to_owned()),
+        ("Move between panes", "Alt+arrows".to_owned()),
         ("Duplicate session", format!("{command}+D")),
+        ("New window", format!("{command}+Alt+N")),
         ("Restart session", format!("{command}+R")),
         ("Scroll back a page", "Shift+Page Up".to_owned()),
         ("Scroll forward a page", "Shift+Page Down".to_owned()),
@@ -556,7 +572,7 @@ mod tests {
             user: "me".into(),
         };
         let mut h = harness(None::<bool>, move |ui, answer: &mut Option<bool>| {
-            if let Some(a) = confirm_close(ui.ctx(), &target) {
+            if let Some(a) = confirm_close(ui.ctx(), &target.label()) {
                 *answer = Some(a);
             }
         });

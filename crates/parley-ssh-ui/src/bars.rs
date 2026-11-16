@@ -1,4 +1,4 @@
-//! Parley SSH's header and status bar (R-SSH-10), in the look of Parley 5250 and Parley SQL: the icon and name,
+//! Parley SSH's header and status bar (R-SSH-10; the session in front, R-SSH-39), in the look of Parley 5250 and Parley SQL: the icon and name,
 //! the Session, Edit, View and Help menus; on the right the gear, the session pill and a newer version. Below,
 //! where the session stands, its size, and on hover the algorithms in use and the host key. They only report what
 //! the user chose, as an [`Action`].
@@ -12,14 +12,19 @@ use crate::session::{self, Session, State};
 /// Something the user chose from the header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
-    /// Another window (R-SSH-15).
-    NewSession,
-    /// Another window on this session.
+    /// A new tab with the start screen (R-SSH-39, R-SSH-41).
+    NewTab,
+    /// Another `parley-ssh` window (R-SSH-41, was R-SSH-15).
+    NewWindow,
+    /// The session in front again, in a new tab.
     Duplicate,
+    /// A new pane beside or below the one in front (R-SSH-40).
+    SplitRight,
+    SplitDown,
     Restart,
     Disconnect,
-    /// Back to the start screen.
-    CloseSession,
+    /// Close the pane in front, or its tab when it is the only pane.
+    Close,
     /// The event log (R-SSH-16).
     EventLog,
     Exit,
@@ -57,6 +62,11 @@ pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
         let open = header.session.is_some();
         let connected = header.session.is_some_and(Session::is_connected);
         let session = [
+            Item(true, icons::PLUS, "New tab", Action::NewTab),
+            Item(true, icons::SQUARES_FOUR, "New window", Action::NewWindow),
+            Item(open, icons::COPY, "Duplicate session", Action::Duplicate),
+            Item(true, icons::SQUARES_FOUR, "Split right", Action::SplitRight),
+            Item(true, icons::SQUARES_FOUR, "Split down", Action::SplitDown),
             Item(
                 open,
                 icons::ARROWS_CLOCKWISE,
@@ -64,12 +74,7 @@ pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
                 Action::Restart,
             ),
             Item(connected, icons::POWER, "Disconnect", Action::Disconnect),
-            Item(
-                open,
-                icons::SQUARES_FOUR,
-                "Close session",
-                Action::CloseSession,
-            ),
+            Item(true, icons::SIGN_OUT, "Close", Action::Close),
             Item(open, icons::LIST, "Event log", Action::EventLog),
             Item(true, icons::SIGN_OUT, "Exit", Action::Exit),
         ];

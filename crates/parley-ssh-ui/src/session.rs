@@ -10,7 +10,7 @@ use parley_ssh_core::net::{self, Algorithms, Command, Connection, Ending, Event,
 use parley_ssh_core::term::Terminal;
 
 use crate::dialogs;
-use crate::screen::{self, Out, Shortcut};
+use crate::screen::{self, Out};
 use crate::sessions::SavedSession;
 
 /// One line of the event log: when, and what (R-SSH-16).
@@ -209,17 +209,18 @@ impl Session {
         }
     }
 
-    /// Draws the screen and the session's dialogs; returns the shortcuts the window carries out.
+    /// Draws the screen; while `active` (the pane in front) also its questions, else a note that one waits.
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         palette: &screen::Palette,
         confirm_paste: bool,
-    ) -> Vec<Shortcut> {
+        active: bool,
+    ) {
         self.poll();
-        let mut shortcuts = Vec::new();
-        let dialog_open = self.host_key.is_some() || self.prompt.is_some() || self.paste.is_some();
-        let grab = std::mem::take(&mut self.grab_focus) && !dialog_open;
+        let asking = self.host_key.is_some() || self.prompt.is_some() || self.paste.is_some();
+        let grab = active && !asking && std::mem::take(&mut self.grab_focus);
+        let area = ui.max_rect();
         for out in screen::show(ui, &self.terminal, &mut self.view, palette, grab) {
             match out {
                 Out::Send(bytes) => self.send(bytes),
@@ -227,11 +228,21 @@ impl Session {
                     self.connection.send(Command::Resize { columns, rows });
                 }
                 Out::Paste(text) => self.paste(&text, confirm_paste),
-                Out::Shortcut(shortcut) => shortcuts.push(shortcut),
             }
         }
-        self.show_dialogs(ui.ctx());
-        shortcuts
+        if active {
+            self.show_dialogs(ui.ctx());
+        } else if asking {
+            // One question at a time, in the pane in front: this one waits until it is clicked.
+            let note = "Waiting for your answer: click here";
+            ui.painter().text(
+                area.center(),
+                egui::Align2::CENTER_CENTER,
+                note,
+                egui::FontId::proportional(14.0),
+                theme_text(ui),
+            );
+        }
     }
 
     /// Pastes `text` as the Edit menu does (R-SSH-9), asking first when needed.
@@ -297,6 +308,10 @@ impl Session {
             self.grab_focus = true;
         }
     }
+}
+
+fn theme_text(ui: &egui::Ui) -> egui::Color32 {
+    parley_ui_egui::theme::palette(ui).text
 }
 
 /// How a session ended, in words for the status bar and the log (R-SSH-5).

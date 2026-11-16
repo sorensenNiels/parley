@@ -15,7 +15,6 @@ use parley_ssh_core::net::lock;
 use parley_ssh_core::term::{CursorShape, Point, Terminal, Underline, Weight, Width};
 
 pub use colors::Palette;
-pub use input::Shortcut;
 use input::Typed;
 
 /// The text size of the screen at 100 % (R-SSH-8).
@@ -34,7 +33,6 @@ pub enum Out {
     },
     /// Text to paste: the session asks first when it is several lines (R-SSH-9).
     Paste(String),
-    Shortcut(Shortcut),
 }
 
 /// A selection, from where the drag began to where it is (R-SSH-9).
@@ -206,7 +204,6 @@ pub fn show(
                     let page = isize::try_from(t.rows().saturating_sub(1).max(1)).unwrap_or(1);
                     t.scroll_display(direction * page);
                 }
-                Typed::Shortcut(shortcut) => out.push(Out::Shortcut(shortcut)),
             }
         }
     } else if view.awaiting_paste {

@@ -75,7 +75,7 @@ fn quick_connect_keeps_the_last_host_and_says_what_is_missing_r_ssh_2() {
         h.query_by_label("Fill in the user name to sign on as.")
             .is_some()
     );
-    assert!(h.state().session.is_none(), "nothing is opened");
+    assert!(h.state().active_session().is_none(), "nothing is opened");
     assert_eq!(h.state().title(), "Parley SSH");
 }
 
@@ -216,39 +216,161 @@ fn the_command_line_names_a_saved_session_or_a_host_r_ssh_14() {
     assert_eq!(app.source_for(StartRequest::default()), Ok(None));
 }
 
+/// A session that stays connecting for the test: an address that does not answer.
+fn waiting() -> SavedSession {
+    SavedSession {
+        name: "Wait".into(),
+        host: "10.255.255.1".into(),
+        user: "me".into(),
+        ..SavedSession::default()
+    }
+}
+
+fn press(h: &mut Harness<'static, ParleySshUi>, key: egui::Key, modifiers: egui::Modifiers) {
+    h.event(egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    });
+    h.run_steps(2);
+}
+
+const CTRL_SHIFT: egui::Modifiers = egui::Modifiers {
+    ctrl: true,
+    shift: true,
+    command: true,
+    ..egui::Modifiers::NONE
+};
+const ALT_SHIFT: egui::Modifiers = egui::Modifiers {
+    alt: true,
+    shift: true,
+    ..egui::Modifiers::NONE
+};
+const ALT: egui::Modifiers = egui::Modifiers {
+    alt: true,
+    ..egui::Modifiers::NONE
+};
+
 #[test]
-fn new_and_duplicate_open_other_windows_with_the_session_r_ssh_15() {
-    let asked: Arc<Mutex<Vec<Vec<String>>>> = Arc::default();
-    let mut app = ParleySshUi::new(
-        Settings {
-            sessions: vec![prod()],
-            ..Settings::default()
-        },
-        known(),
+fn new_tabs_show_the_start_screen_and_the_bar_shows_from_two_r_ssh_39() {
+    let mut h = app(Settings::default());
+    h.run_steps(2);
+    assert!(
+        h.query_by_label("New tab").is_none(),
+        "no tab bar for one tab"
     );
+    press(&mut h, egui::Key::T, CTRL_SHIFT);
+    assert_eq!((h.state().tabs.len(), h.state().current), (2, 1));
+    assert_eq!(
+        h.get_all_by_label("Close tab").count(),
+        2,
+        "the bar, a close button per tab"
+    );
+    press(
+        &mut h,
+        egui::Key::Tab,
+        egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..egui::Modifiers::NONE
+        },
+    );
+    assert_eq!(h.state().current, 0, "Ctrl+Tab wraps to the first");
+    press(
+        &mut h,
+        egui::Key::Num2,
+        egui::Modifiers {
+            ctrl: true,
+            alt: true,
+            command: true,
+            ..egui::Modifiers::NONE
+        },
+    );
+    assert_eq!(h.state().current, 1);
+    press(&mut h, egui::Key::W, CTRL_SHIFT);
+    assert_eq!(
+        h.state().tabs.len(),
+        1,
+        "a start screen closes without asking"
+    );
+    press(&mut h, egui::Key::W, CTRL_SHIFT);
+    assert_eq!(
+        h.state().tabs.len(),
+        1,
+        "closing the last tab leaves a start screen"
+    );
+}
+
+#[test]
+fn panes_split_move_and_close_with_the_keys_r_ssh_40() {
+    let mut h = app(Settings::default());
+    h.run_steps(2);
+    press(&mut h, egui::Key::Equals, ALT_SHIFT);
+    press(&mut h, egui::Key::Minus, ALT_SHIFT);
+    let tab = &h.state().tabs[0];
+    assert_eq!(tab.panes.len(), 3);
+    let newest = tab.active;
+    press(&mut h, egui::Key::ArrowLeft, ALT);
+    assert_ne!(
+        h.state().tabs[0].active,
+        newest,
+        "Alt+Left moved to the pane on the left"
+    );
+    press(&mut h, egui::Key::W, CTRL_SHIFT);
+    assert_eq!(
+        h.state().tabs[0].panes.len(),
+        2,
+        "Close takes the pane in front of a split tab"
+    );
+}
+
+#[test]
+fn closing_a_connected_tab_asks_first_r_ssh_39() {
+    let mut h = app(Settings::default());
+    h.run_steps(1);
+    let ctx = h.ctx.clone();
+    let pane = h.state().tabs[0].active;
+    h.state_mut().connect_pane(&ctx, pane, waiting(), true);
+    h.run_steps(2);
+    press(&mut h, egui::Key::W, CTRL_SHIFT);
+    assert_eq!(h.state().closing, Some(Closing::Tab(0)));
+    h.get_by_label("Cancel").click();
+    h.run_steps(2);
+    assert_eq!(
+        (h.state().closing, h.state().tabs[0].panes.len()),
+        (None, 1),
+        "kept"
+    );
+    assert!(h.state().active_session().is_some());
+}
+
+#[test]
+fn duplicate_opens_the_session_again_in_a_tab_and_new_window_asks_the_launcher_r_ssh_41() {
+    let asked: Arc<Mutex<Vec<Vec<String>>>> = Arc::default();
+    let mut app = ParleySshUi::new(Settings::default(), known());
     let record = Arc::clone(&asked);
     app.set_spawner(Arc::new(move |args: &[String]| {
         record.lock().expect("not poisoned").push(args.to_vec());
         Ok(())
     }));
     let ctx = egui::Context::default();
-    app.carry_out(&ctx, Action::NewSession);
-    app.open(&ctx, prod(), true);
+    app.carry_out(&ctx, Action::NewWindow);
+    assert_eq!(*asked.lock().expect("not poisoned"), [Vec::<String>::new()]);
+    let pane = app.tabs[0].active;
+    app.connect_pane(&ctx, pane, waiting(), true);
     app.carry_out(&ctx, Action::Duplicate);
-    app.session = None;
-    let asked = asked.lock().expect("not poisoned").clone();
+    assert_eq!((app.tabs.len(), app.current), (2, 1));
     assert_eq!(
-        asked,
-        [
-            Vec::<String>::new(),
-            vec!["-load".to_owned(), "Prod æøå".to_owned()]
-        ]
+        app.active_session().map(|s| s.source.name.as_str()),
+        Some("Wait")
     );
 }
 
 #[test]
-fn without_a_spawner_new_session_says_why_not() {
+fn without_a_spawner_a_new_window_says_why_not() {
     let mut app = ParleySshUi::new(Settings::default(), known());
-    app.carry_out(&egui::Context::default(), Action::NewSession);
+    app.carry_out(&egui::Context::default(), Action::NewWindow);
     assert!(app.note.is_some());
 }

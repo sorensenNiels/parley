@@ -1,17 +1,10 @@
-//! egui's keyboard events as what the terminal does with them (R-SSH-7, R-SSH-9): bytes for the host, or one of
-//! Parley SSH's own shortcuts, which use Ctrl+Shift (Cmd on macOS) so Ctrl+letter stays the host's.
+//! egui's keyboard events as what the terminal does with them (R-SSH-7, R-SSH-9): bytes for the host, or copy and
+//! paste, which use Ctrl+Shift (Cmd on macOS) so Ctrl+letter stays the host's. The window's own shortcuts are
+//! taken before this sees the keys (`window_keys`).
 
 use egui::{Event, Key as EguiKey, Modifiers};
 use parley_ssh_core::keys::{self, Key, Mods};
 use parley_ssh_core::term::Modes;
-
-/// A shortcut of Parley SSH's own.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Shortcut {
-    NewSession,
-    Duplicate,
-    Restart,
-}
 
 /// What a key or clipboard event asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,7 +16,6 @@ pub enum Typed {
     Paste(String),
     /// Shift+Page Up (1) or Page Down (-1): the scrollback by a page, nothing sent (R-SSH-8).
     ScrollPage(isize),
-    Shortcut(Shortcut),
 }
 
 /// Reads one frame's events. `awaiting_paste` is set by [`Typed::RequestPaste`] and cleared by the paste that
@@ -86,9 +78,6 @@ fn shortcut(key: EguiKey, m: Modifiers, mac: bool) -> Option<Typed> {
     Some(match key {
         EguiKey::C => Typed::Copy,
         EguiKey::V => Typed::RequestPaste,
-        EguiKey::N => Typed::Shortcut(Shortcut::NewSession),
-        EguiKey::D => Typed::Shortcut(Shortcut::Duplicate),
-        EguiKey::R => Typed::Shortcut(Shortcut::Restart),
         _ => return None,
     })
 }
@@ -258,10 +247,6 @@ mod tests {
     fn ctrl_shift_letters_are_parley_sshs_own_r_ssh_7() {
         assert_eq!(read_one(&[key(EguiKey::C, CTRL_SHIFT)]), [Typed::Copy]);
         assert_eq!(
-            read_one(&[key(EguiKey::R, CTRL_SHIFT)]),
-            [Typed::Shortcut(Shortcut::Restart)]
-        );
-        assert_eq!(
             read_one(&[key(EguiKey::X, CTRL_SHIFT)]),
             [Typed::Send(vec![0x18])]
         );
@@ -338,11 +323,6 @@ mod tests {
 
     #[test]
     fn on_macos_cmd_copies_and_pastes_and_ctrl_stays_the_hosts() {
-        let cmd = Modifiers {
-            mac_cmd: true,
-            command: true,
-            ..Modifiers::NONE
-        };
         let mac_ctrl = Modifiers {
             ctrl: true,
             ..Modifiers::NONE
@@ -355,10 +335,6 @@ mod tests {
         assert_eq!(
             read(&[Event::Paste("x".into())], &modes, true, &mut false),
             [Typed::Paste("x".into())]
-        );
-        assert_eq!(
-            read(&[key(EguiKey::R, cmd)], &modes, true, &mut false),
-            [Typed::Shortcut(Shortcut::Restart)]
         );
         assert_eq!(
             read(&[key(EguiKey::C, mac_ctrl)], &modes, true, &mut false),

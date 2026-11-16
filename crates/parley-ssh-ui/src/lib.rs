@@ -1,33 +1,38 @@
-//! Parley SSH's UI (D41): the start screen with the saved sessions (R-SSH-11), the SSH session in the main window
-//! (one per window, D45), under a header and over a status bar, in the look Parley 5250 and Parley SQL share (D12).
-//! The engine is `parley-ssh-core`; the launcher (`parley-ssh` in `parley-app`) keeps the settings, reads the
-//! command line (R-SSH-14) and opens other windows (R-SSH-15).
+//! Parley SSH's UI (D41): tabs of panes (R-SSH-39, R-SSH-40, D47), each a start screen with the saved sessions
+//! (R-SSH-11) or an SSH session, under a header and over a status bar, in the look Parley 5250 and Parley SQL share
+//! (D12). The engine is `parley-ssh-core`; the launcher (`parley-ssh` in `parley-app`) keeps the settings, reads
+//! the command line (R-SSH-14) and opens other windows (R-SSH-41).
 
 mod bars;
 mod dialogs;
+mod panes;
 pub mod screen;
 mod session;
 pub mod sessions;
 pub mod settings;
 mod start;
+mod tabs;
+mod window;
+mod window_keys;
 
 use std::sync::Arc;
 
-use egui::{CentralPanel, Margin, Panel, Ui, ViewportCommand};
+use egui::{Margin, Panel, Ui, ViewportCommand};
 use parley_ssh_core::known_hosts::KnownHosts;
-use parley_ssh_core::net::Target;
 use parley_ui_egui::menu::{Logo, Program};
 use parley_ui_egui::{theme, updates};
 
 use bars::Action;
+use panes::PaneId;
 use session::Session;
 use sessions::{Edited, Editor, SavedSession};
 pub use settings::Settings;
+use tabs::{Pane, Tab};
 
 /// The smallest and largest text size View offers, in percent, and its step.
 const TEXT_SIZES: (u16, u16, u16) = (60, 250, 10);
 
-/// Starts another Parley SSH window with these arguments (R-SSH-15); the launcher's, as the UI keeps no platform
+/// Starts another Parley SSH window with these arguments (R-SSH-41); the launcher's, as the UI keeps no platform
 /// code.
 pub type Spawner = Arc<dyn Fn(&[String]) -> Result<(), String> + Send + Sync>;
 
@@ -48,6 +53,14 @@ pub struct StartRequest {
     pub agent_forwarding: Option<bool>,
 }
 
+/// What is about to close, waiting for the user's yes (R-SSH-10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Closing {
+    Window,
+    Tab(usize),
+    Pane(usize, PaneId),
+}
+
 /// Parley SSH's whole UI.
 pub struct ParleySshUi {
     settings: Settings,
@@ -56,24 +69,29 @@ pub struct ParleySshUi {
     logo: Logo,
     updates: updates::Updates,
     known_hosts: KnownHosts,
-    form: start::Form,
-    session: Option<Session>,
+    /// Always at least one.
+    tabs: Vec<Tab>,
+    /// The tab in front.
+    current: usize,
+    next_pane: PaneId,
+    /// Where the panes were drawn last frame, for Alt+arrows.
+    area: egui::Rect,
     editor: Option<Editor>,
     /// The event log is open, with its scroll area's last height (R-SSH-16).
     event_log: Option<f32>,
     spawner: Option<Spawner>,
-    /// Why the last session closed, or what the command line could not open, for the status bar.
+    /// What could not be done, or why a session closed, for the status bar.
     note: Option<String>,
     shortcuts_open: bool,
-    /// The window's close button was pressed while connected: ask (R-SSH-10).
-    asking_close: bool,
+    closing: Option<Closing>,
     close_confirmed: bool,
 }
 
 impl std::fmt::Debug for ParleySshUi {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ParleySshUi")
-            .field("session", &self.session.as_ref().map(|s| s.target.label()))
+            .field("tabs", &self.tabs)
+            .field("current", &self.current)
             .field("sessions", &self.settings.sessions.len())
             .finish_non_exhaustive()
     }
@@ -82,21 +100,24 @@ impl std::fmt::Debug for ParleySshUi {
 impl ParleySshUi {
     /// The UI with `settings`, keeping host keys in `known_hosts` (R-SSH-3).
     pub fn new(settings: Settings, known_hosts: KnownHosts) -> Self {
+        let first = Tab::new(0, Pane::Start(start::Form::from_settings(&settings)));
         Self {
-            form: start::Form::from_settings(&settings),
             settings,
             applied: None,
             settings_dialog: None,
             logo: Logo::default(),
             updates: updates::Updates::default(),
             known_hosts,
-            session: None,
+            tabs: vec![first],
+            current: 0,
+            next_pane: 1,
+            area: egui::Rect::NOTHING,
             editor: None,
             event_log: None,
             spawner: None,
             note: None,
             shortcuts_open: false,
-            asking_close: false,
+            closing: None,
             close_confirmed: false,
         }
     }
@@ -117,25 +138,35 @@ impl ParleySshUi {
         self.spawner = Some(spawner);
     }
 
-    /// The title bar: what the host set, or the session, then the program.
+    /// The title bar: the tab in front's title, then the program.
     pub fn title(&self) -> String {
         let name = Program::ParleySsh.name();
-        let Some(session) = &self.session else {
-            return name.to_owned();
-        };
-        let host_title = session.host_title();
-        let shown = if host_title.is_empty() {
-            session.target.label()
-        } else {
-            host_title
-        };
-        format!("{shown} – {name}")
+        match self.active_session() {
+            Some(_) => format!("{} – {name}", self.tabs[self.current].title()),
+            None => name.to_owned(),
+        }
     }
 
-    /// Opens what the command line asked for (R-SSH-14); what cannot be opened is said in the status bar.
+    /// The session in the pane in front, if that pane has one.
+    fn active_session(&self) -> Option<&Session> {
+        self.tabs.get(self.current)?.active_pane()?.session()
+    }
+
+    fn active_session_mut(&mut self) -> Option<&mut Session> {
+        self.tabs
+            .get_mut(self.current)?
+            .active_pane_mut()?
+            .session_mut()
+    }
+
+    /// Opens what the command line asked for (R-SSH-14) in the first tab; what cannot be opened is said in the
+    /// status bar.
     pub fn start(&mut self, ctx: &egui::Context, request: StartRequest) {
         match self.source_for(request) {
-            Ok(Some((source, saved))) => self.open(ctx, source, saved),
+            Ok(Some((source, saved))) => {
+                let active = self.tabs[self.current].active;
+                self.connect_pane(ctx, active, source, saved);
+            }
             Ok(None) => {}
             Err(e) => self.note = Some(e),
         }
@@ -180,6 +211,16 @@ impl ParleySshUi {
     pub fn ui(&mut self, ui: &mut Ui) {
         self.apply_settings(ui.ctx());
         self.guard_close(ui.ctx());
+        if !self.dialog_open() {
+            let mac = ui.ctx().os() == egui::os::OperatingSystem::Mac;
+            let split = self.tabs[self.current].is_split();
+            let keys = ui
+                .ctx()
+                .input_mut(|i| window_keys::take(&mut i.events, mac, split));
+            for key in keys {
+                self.window_key(ui.ctx(), key);
+            }
+        }
         let menu_frame = theme::bar(ui, Margin::symmetric(8, 3));
         let status_frame = theme::bar(ui, Margin::symmetric(8, 5));
         let logo = self.logo.texture(ui.ctx()).cloned();
@@ -189,7 +230,7 @@ impl ParleySshUi {
             .map(|r| (r.version.clone(), r.page.clone()));
         let header = bars::Header {
             logo: logo.as_ref(),
-            session: self.session.as_ref(),
+            session: self.active_session(),
             newer: newer.as_ref().map(|(v, p)| (v.as_str(), p.as_str())),
         };
         let action = Panel::top("ssh-menu")
@@ -199,24 +240,26 @@ impl ParleySshUi {
         Panel::bottom("ssh-status")
             .frame(status_frame)
             .show(ui, |ui| {
-                bars::status_bar(ui, self.session.as_ref(), self.note.as_deref());
+                bars::status_bar(ui, self.active_session(), self.note.as_deref());
             });
-        for shortcut in self.central(ui) {
-            let action = match shortcut {
-                screen::Shortcut::NewSession => Action::NewSession,
-                screen::Shortcut::Duplicate => Action::Duplicate,
-                screen::Shortcut::Restart => Action::Restart,
-            };
-            self.carry_out(ui.ctx(), action);
-        }
+        self.tab_bar(ui);
+        self.central(ui);
         if let Some(action) = action {
             self.carry_out(ui.ctx(), action);
             // A menu's click took the keyboard from the screen: give it back.
-            if let Some(session) = &mut self.session {
+            if let Some(session) = self.active_session_mut() {
                 session.focus_screen();
             }
         }
         self.show_dialogs(ui.ctx());
+    }
+
+    /// A dialog of the window's own is open: the window's shortcuts wait.
+    fn dialog_open(&self) -> bool {
+        self.editor.is_some()
+            || self.settings_dialog.is_some()
+            || self.closing.is_some()
+            || self.shortcuts_open
     }
 
     fn apply_settings(&mut self, ctx: &egui::Context) {
@@ -232,35 +275,12 @@ impl ParleySshUi {
         }
     }
 
-    /// The start screen, or the session's screen.
-    fn central(&mut self, ui: &mut Ui) -> Vec<screen::Shortcut> {
-        let palette = screen::Palette::for_theme(ui.visuals().dark_mode);
-        let confirm_paste = self.settings.confirm_paste;
-        let zoom = self.settings.text_size;
-        let frame = egui::Frame::NONE.fill(palette.background);
-        let mut shortcuts = Vec::new();
-        let mut choice = None;
-        if let Some(session) = &mut self.session {
-            session.view.zoom = zoom;
-            CentralPanel::default().frame(frame).show(ui, |ui| {
-                shortcuts = session.show(ui, &palette, confirm_paste);
-            });
-        } else {
-            let sessions = &self.settings.sessions;
-            CentralPanel::default().show(ui, |ui| choice = self.form.show(ui, sessions));
-        }
-        if let Some(choice) = choice {
-            self.chosen(ui.ctx(), choice);
-        }
-        shortcuts
-    }
-
-    /// What was chosen on the start screen.
-    fn chosen(&mut self, ctx: &egui::Context, choice: start::Choice) {
+    /// What was chosen on the start screen of pane `pane`.
+    fn chosen(&mut self, ctx: &egui::Context, pane: PaneId, choice: start::Choice) {
         match choice {
             start::Choice::Connect(i) => {
                 if let Some(source) = self.settings.sessions.get(i).cloned() {
-                    self.open(ctx, source, true);
+                    self.connect_pane(ctx, pane, source, true);
                 }
             }
             start::Choice::Edit(i) => {
@@ -269,7 +289,7 @@ impl ParleySshUi {
                 }
             }
             start::Choice::New => {
-                let blank = Target {
+                let blank = parley_ssh_core::net::Target {
                     host: String::new(),
                     port: self.settings.defaults.port,
                     user: String::new(),
@@ -288,23 +308,12 @@ impl ParleySshUi {
                 self.settings.last_port = target.port;
                 self.settings.last_user.clone_from(&target.user);
                 let source = SavedSession::from_defaults(&self.settings.defaults, "", &target);
-                self.open(ctx, source, false);
+                self.connect_pane(ctx, pane, source, false);
             }
         }
     }
 
-    fn open(&mut self, ctx: &egui::Context, source: SavedSession, saved: bool) {
-        let ctx = ctx.clone();
-        self.session = Some(Session::open(
-            source,
-            saved,
-            self.known_hosts.clone(),
-            move || ctx.request_repaint(),
-        ));
-        self.note = None;
-    }
-
-    /// Starts another window with `args` (R-SSH-15).
+    /// Starts another window with `args` (R-SSH-41).
     fn spawn(&mut self, args: &[String]) {
         let result = match &self.spawner {
             Some(spawner) => spawner(args),
@@ -317,63 +326,48 @@ impl ParleySshUi {
 
     fn carry_out(&mut self, ctx: &egui::Context, action: Action) {
         match action {
-            Action::NewSession => self.spawn(&[]),
-            Action::Duplicate => {
-                if let Some(args) = self
-                    .session
-                    .as_ref()
-                    .map(|s| s.source.command_line(s.saved))
-                {
-                    self.spawn(&args);
-                }
-            }
+            Action::NewTab => self.new_tab(ctx, None),
+            Action::NewWindow => self.spawn(&[]),
+            Action::Duplicate => self.duplicate(ctx),
+            Action::SplitRight => self.split(ctx, panes::Axis::Row),
+            Action::SplitDown => self.split(ctx, panes::Axis::Column),
+            Action::Close => self.close_active(),
             Action::Restart => {
-                if let Some(session) = &mut self.session {
+                if let Some(session) = self.active_session_mut() {
                     session.disconnect();
                     let ctx = ctx.clone();
                     session.restart(move || ctx.request_repaint());
                 }
             }
             Action::Disconnect => {
-                if let Some(session) = &self.session {
+                if let Some(session) = self.active_session() {
                     session.disconnect();
                 }
-            }
-            Action::CloseSession => {
-                if let Some(session) = self.session.take() {
-                    session.disconnect();
-                    self.note = Some(format!(
-                        "Closed the session with {}.",
-                        session.target.label()
-                    ));
-                }
-                self.event_log = None;
-                self.form = start::Form::from_settings(&self.settings);
             }
             Action::EventLog => self.event_log = Some(0.0),
             Action::Exit => ctx.send_viewport_cmd(ViewportCommand::Close),
             Action::Copy => {
-                if let Some(text) = self.session.as_ref().and_then(Session::copy_selection) {
+                if let Some(text) = self.active_session().and_then(Session::copy_selection) {
                     ctx.copy_text(text);
                 }
             }
             Action::Paste => {
-                if let Some(session) = &mut self.session {
+                if let Some(session) = self.active_session_mut() {
                     session.view.request_paste(ctx);
                 }
             }
             Action::CopyAll => {
-                if let Some(session) = &self.session {
+                if let Some(session) = self.active_session() {
                     ctx.copy_text(session.copy_all());
                 }
             }
             Action::ClearScrollback => {
-                if let Some(session) = &self.session {
+                if let Some(session) = self.active_session() {
                     session.clear_scrollback();
                 }
             }
             Action::ResetTerminal => {
-                if let Some(session) = &mut self.session {
+                if let Some(session) = self.active_session_mut() {
                     session.reset_terminal();
                 }
             }
@@ -394,49 +388,36 @@ impl ParleySshUi {
         }
     }
 
-    /// Closing the window while connected asks first, when the settings say so (R-SSH-10).
-    fn guard_close(&mut self, ctx: &egui::Context) {
-        if !ctx.input(|i| i.viewport().close_requested()) || self.close_confirmed {
-            return;
-        }
-        let connected = self.session.as_ref().is_some_and(Session::is_connected);
-        if connected && self.settings.confirm_close {
-            ctx.send_viewport_cmd(ViewportCommand::CancelClose);
-            self.asking_close = true;
-        }
-    }
-
     fn show_dialogs(&mut self, ctx: &egui::Context) {
         if self.shortcuts_open
             && dialogs::shortcut_sheet(ctx, ctx.os() == egui::os::OperatingSystem::Mac)
         {
             self.shortcuts_open = false;
         }
-        if self.asking_close
-            && let Some(session) = &self.session
-            && let Some(close) = dialogs::confirm_close(ctx, &session.target)
-        {
-            self.asking_close = false;
-            if close {
-                self.close_confirmed = true;
-                session.disconnect();
-                ctx.send_viewport_cmd(ViewportCommand::Close);
-            }
-        }
+        self.show_closing(ctx);
         self.show_event_log(ctx);
         self.show_editor(ctx);
         self.show_settings(ctx);
     }
 
     fn show_event_log(&mut self, ctx: &egui::Context) {
-        let (Some(height), Some(session)) = (&mut self.event_log, &self.session) else {
+        let Some(mut height) = self.event_log else {
             return;
         };
-        match dialogs::event_log(ctx, &session.target, &session.log, height) {
+        let Some(session) = self.active_session() else {
+            self.event_log = None;
+            return;
+        };
+        let action = dialogs::event_log(ctx, &session.target, &session.log, &mut height);
+        match action {
             Some(dialogs::LogAction::Copy) => ctx.copy_text(session.log_text()),
-            Some(dialogs::LogAction::Close) => self.event_log = None,
+            Some(dialogs::LogAction::Close) => {
+                self.event_log = None;
+                return;
+            }
             None => {}
         }
+        self.event_log = Some(height);
     }
 
     /// The session editor; what it saved goes into the settings at once (R-SSH-11).

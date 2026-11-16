@@ -50,3 +50,18 @@ screen in a `--screenshot` run, with the settings Phase 26 saved.
 | R-SSH-14 | `parley-ssh [user@]host[:port] -p -l -i -load -A -a`, wrong arguments with usage and exit 2. | `parley-ssh -load NAME` and `parley-ssh me@host -i key` in a terminal. |
 | R-SSH-15 | Session ▸ New session (Ctrl+Shift+N) and Duplicate session (Ctrl+Shift+D) start `parley-ssh` again: `-load NAME` for a saved session, else its host and options. | Both, on each OS. |
 | R-SSH-16 | Session ▸ Event log: every line with its time, Copy, never a password or key. | Read it after a connection; copy it. |
+
+### Phase 33: tabs and split panes (built 2026-11-16, Linux under WSL)
+
+Automated (all pass): `panes.rs` the layout (split, close, rectangles, Alt+arrow neighbours, dragging a divider),
+`window_keys.rs` the window's shortcuts (taken before the terminal; Ctrl+digits and Ctrl+letters stay the host's;
+Alt+arrows only in a split tab; Cmd on macOS), `tabs.rs` a tab's panes, `tests.rs` (kittest): new tab and the bar
+from two tabs, Ctrl+Tab and Ctrl+Alt+2, close without asking for a start screen, the last tab leaving a start screen,
+splitting right and down, Alt+Left, closing the pane in front, a connected tab asking before it closes, Duplicate in a
+tab and New window through the launcher. Not yet seen in the running app.
+
+| ID | Built | Still to check in the running app |
+|---|---|---|
+| R-SSH-39 | Tabs with title, state dot, close button, middle click, drag to move, + for a new tab; Ctrl+Shift+T/W, Ctrl+Tab, Ctrl+Alt+1…9; the header, status bar, event log and Edit menu follow the tab in front. | The tab bar's look in light and dark; dragging tabs; closing a connected tab asks. |
+| R-SSH-40 | Panes split right and down (Alt+Shift+= and -, Session ▸ Split), each its own connection and size, Alt+arrows, dividers dragged, an accent border on the pane in front; a pane's questions wait until it is in front. | Two sessions side by side with vim and htop; resize by the divider; host-key and password questions in a pane not in front. |
+| R-SSH-41 | New session and New tab (Ctrl+Shift+N/T) open a tab; Duplicate (Ctrl+Shift+D) the session in a tab; New window (Ctrl+Shift+Alt+N) another `parley-ssh`; the command line's session is the first tab. | New window on each OS. |
