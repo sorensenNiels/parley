@@ -4,6 +4,9 @@
 
 use egui::{Button, ComboBox, Grid, TextEdit, Ui};
 use parley_core::{CodePage, SessionConfig};
+use parley_sql_core::options::{
+    ConnectOptions, DateFormat, DecimalSeparator, Isolation, Naming, TimeFormat,
+};
 use serde::{Deserialize, Serialize};
 
 use parley_ui_egui::connect::Entry;
@@ -15,6 +18,11 @@ Host: the IBM i's name or IP address.
 TLS: encrypt the connection (the IBM i's host servers need TLS set up). A CA certificate \
 names a PEM file to trust besides the system's own.
 Code page: how binary columns show as text in the hex view.
+Naming: SQL (SCHEMA.TABLE) or System (LIBRARY/FILE and the library list).
+Libraries: set at connect, separated by commas or blanks; with SQL naming the first is the \
+default schema, with System naming they make the library list. Empty: the user profile's.
+Auto-commit: how the Autocommit switch starts. Isolation: the commitment control level.
+Date, time and decimal separator: the formats the IBM i uses for this connection.
 User: filled in at sign-on; the password is asked each time and never kept.";
 
 /// One saved connection.
@@ -29,6 +37,8 @@ pub struct SqlConnection {
     pub code_page: CodePage,
     /// The user to fill in at sign-on; empty for none. The last one signed on with.
     pub user: String,
+    /// Naming, libraries, commitment control and formats (R-SQL-97..100).
+    pub options: ConnectOptions,
 }
 
 impl Default for SqlConnection {
@@ -41,6 +51,7 @@ impl Default for SqlConnection {
             ca_file: String::new(),
             code_page: CodePage::default(),
             user: String::new(),
+            options: ConnectOptions::default(),
         }
     }
 }
@@ -70,6 +81,7 @@ impl SqlConnection {
             ca_file: config.ca_file.clone(),
             code_page: config.code_page,
             user: String::new(),
+            options: ConnectOptions::default(),
         }
     }
 
@@ -317,6 +329,99 @@ fn fields(ui: &mut Ui, draft: &mut SqlConnection) {
             "Without TLS, statements, results and the password travel as plain text.",
         );
     }
+    database_fields(ui, &mut draft.options);
+}
+
+/// The connection's database options (R-SQL-97..100).
+fn database_fields(ui: &mut Ui, options: &mut ConnectOptions) {
+    ui.add_space(8.0);
+    theme::section_label(ui, "Database");
+    Grid::new("sql-connection-database")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            ui.label("Naming");
+            theme::segmented(
+                ui,
+                &mut options.naming,
+                &[(Naming::Sql, "SQL"), (Naming::System, "System")],
+            );
+            ui.end_row();
+
+            let label = ui.label("Libraries");
+            theme::sized_edit(
+                ui,
+                300.0,
+                TextEdit::singleline(&mut options.libraries).hint_text("the user profile's"),
+            )
+            .labelled_by(label.id);
+            ui.end_row();
+
+            ui.label("");
+            ui.horizontal(|ui| {
+                theme::switch_row(ui, "Auto-commit", &mut options.autocommit);
+                choice(
+                    ui,
+                    "Isolation",
+                    "sql-isolation",
+                    &mut options.isolation,
+                    &Isolation::ALL,
+                );
+            });
+            ui.end_row();
+
+            ui.label("Formats");
+            ui.horizontal(|ui| {
+                choice(
+                    ui,
+                    "Date",
+                    "sql-date",
+                    &mut options.date_format,
+                    &DateFormat::ALL,
+                );
+                choice(
+                    ui,
+                    "Time",
+                    "sql-time",
+                    &mut options.time_format,
+                    &TimeFormat::ALL,
+                );
+            });
+            ui.end_row();
+
+            ui.label("Decimal separator");
+            theme::segmented(
+                ui,
+                &mut options.decimal_separator,
+                &[
+                    (DecimalSeparator::Period, "Period ."),
+                    (DecimalSeparator::Comma, "Comma ,"),
+                ],
+            );
+            ui.end_row();
+        });
+}
+
+/// A labelled drop-down of `all`'s choices.
+fn choice<T: PartialEq + Copy>(
+    ui: &mut Ui,
+    name: &str,
+    id: &str,
+    value: &mut T,
+    all: &[(T, &str)],
+) {
+    let label = ui.label(name);
+    let shown = all.iter().find(|(v, _)| v == value).map_or("", |(_, n)| *n);
+    ComboBox::from_id_salt(id)
+        .selected_text(shown)
+        .width(110.0)
+        .show_ui(ui, |ui| {
+            for (v, n) in all {
+                ui.selectable_value(value, *v, *n);
+            }
+        })
+        .response
+        .labelled_by(label.id);
 }
 
 #[cfg(test)]

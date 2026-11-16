@@ -415,6 +415,9 @@ impl ParleyUi {
         self.view.palette = self.palette();
         self.view.blinking = self.settings.blinking_text;
         self.view.frames = self.settings.window_frames;
+        self.view.cursor = self.settings.cursor;
+        self.view.paste_breaks = self.settings.paste_breaks;
+        self.view.cursor_blink = self.settings.cursor_blink;
         if let Some(session) = session.as_deref_mut() {
             session.set_type_ahead(self.settings.type_ahead);
         }
@@ -921,6 +924,7 @@ impl ParleyUi {
                 Function::Key(_)
                 | Function::CopyScreen
                 | Function::CopyTable
+                | Function::PasteText(_)
                 | Function::Find
                 | Function::Paste => {}
             }
@@ -1834,6 +1838,29 @@ mod tests {
     }
 
     #[test]
+    fn the_terminal_page_chooses_the_cursor_and_its_blink_r_ui_28() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("Terminal").click();
+        harness.run();
+        harness.get_by_label("Underline").scroll_to_me();
+        harness.run();
+        harness.get_by_label("Underline").click();
+        harness.get_by_label("Blinking cursor").click();
+        harness.run();
+        harness.get_by_label("Save").click();
+        harness.run();
+        let settings = harness.state().settings();
+        assert_eq!(settings.cursor, terminal::CursorShape::Underline);
+        assert!(settings.cursor_blink);
+        assert_eq!(
+            harness.state().view.cursor,
+            terminal::CursorShape::Underline
+        );
+    }
+
+    #[test]
     fn the_terminal_page_turns_type_ahead_on_r_key_11() {
         let mut harness = app_with(Vec::new());
         harness.get_by_label("Settings").click();
@@ -2587,6 +2614,24 @@ mod tests {
         assert_eq!(harness.state().reconnect, None);
         let note = harness.state().closed.clone().unwrap_or_default();
         assert!(note.starts_with("The connection dropped"), "{note}");
+    }
+
+    #[test]
+    fn the_keep_alive_interval_shows_only_while_keep_alive_is_on_r_net_11() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("New session…").click();
+        harness.run();
+        type_into(&mut harness, "Name", "Prod");
+        type_into(&mut harness, "Host", "prod");
+        assert!(harness.query_by_label("Keep-alive every").is_none());
+        harness.get_by_label("Send keep-alive").click();
+        harness.run();
+        harness.get_by_label("Keep-alive every");
+        harness.get_by_label("Apply").click();
+        harness.run();
+        let config = &harness.state().profiles()[0].config;
+        assert!(config.keep_alive);
+        assert_eq!(config.keep_alive_seconds, 60);
     }
 
     #[test]

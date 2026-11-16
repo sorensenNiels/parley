@@ -187,6 +187,8 @@ pub enum Function {
     Key(Key),
     /// Copy the selection, or the whole screen (R-UI-1, R-UI-22).
     CopyScreen,
+    /// Text pasted from the clipboard, for the screen to type (R-KEY-12); not bindable.
+    PasteText(String),
     /// Copy the selection, or the whole screen, as a table (R-UI-22).
     CopyTable,
     Paste,
@@ -244,6 +246,7 @@ impl Function {
         match self {
             Self::Key(key) => key_name_of(*key).unwrap_or_default(),
             Self::CopyScreen => "copy".to_owned(),
+            Self::PasteText(_) => "pasted-text".to_owned(),
             Self::CopyTable => "copy-table".to_owned(),
             Self::Paste => "paste".to_owned(),
             Self::Find => "find".to_owned(),
@@ -284,6 +287,7 @@ impl Function {
                     .map_or_else(String::new, |(_, name)| (*name).to_owned())
             }
             Self::CopyScreen => "Copy the selection or the screen".to_owned(),
+            Self::PasteText(_) => "Pasted text".to_owned(),
             Self::CopyTable => "Copy as a table".to_owned(),
             Self::Paste => "Paste into fields".to_owned(),
             Self::Find => "Find on the screen".to_owned(),
@@ -304,6 +308,7 @@ impl Function {
             (Self::Paste, true) => Some("Cmd+V"),
             (
                 Self::Key(_)
+                | Self::PasteText(_)
                 | Self::CopyTable
                 | Self::Find
                 | Self::RecordMacro
@@ -551,9 +556,11 @@ impl KeyInput {
                     let typed = text.chars().filter(|c| !c.is_control()).map(Key::Char);
                     functions.extend(typed.map(Function::Key));
                 }
+                // The screen turns it into keys: what a line break does depends on where the
+                // cursor is (R-KEY-12).
                 Event::Paste(text) => {
                     other_input = true;
-                    functions.extend(pasted(text).map(Function::Key));
+                    functions.push(Function::PasteText(text.clone()));
                 }
                 Event::Key {
                     key,
@@ -579,17 +586,36 @@ impl KeyInput {
     }
 }
 
-/// Pasted text goes into fields as typed; a line break or tab moves to the next field.
-fn pasted(text: &str) -> impl Iterator<Item = Key> + '_ {
+/// What a line break does when pasting (R-KEY-12).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PasteBreaks {
+    /// Field Exit: on to the next field (R-UI-1).
+    #[default]
+    NextField,
+    /// The next line goes in one row down, at the column the paste began in.
+    NextRow,
+}
+
+/// A piece of pasted text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pasted {
+    Key(Key),
+    LineBreak,
+}
+
+/// Pasted text: characters as typed, a tab as Field Exit, and line breaks (CR, LF or CR LF
+/// as one) for the screen to place as [`PasteBreaks`] says.
+pub fn pasted(text: &str) -> impl Iterator<Item = Pasted> + '_ {
     let mut previous = None;
     text.chars().filter_map(move |c| {
         let after_cr = previous == Some('\r');
         previous = Some(c);
         match c {
             '\n' if after_cr => None,
-            '\r' | '\t' | '\n' => Some(Key::FieldExit),
+            '\r' | '\n' => Some(Pasted::LineBreak),
+            '\t' => Some(Pasted::Key(Key::FieldExit)),
             c if c.is_control() => None,
-            c => Some(Key::Char(c)),
+            c => Some(Pasted::Key(Key::Char(c))),
         }
     })
 }
@@ -678,20 +704,29 @@ mod tests {
     #[test]
     fn typed_and_pasted_text_become_characters() {
         let keys = keys_for(&[Event::Text("æ1".into()), Event::Paste("ab\r\nc\td".into())]);
-        let expected: Vec<Function> = [
-            Key::Char('æ'),
-            Key::Char('1'),
-            Key::Char('a'),
-            Key::Char('b'),
-            Key::FieldExit,
-            Key::Char('c'),
-            Key::FieldExit,
-            Key::Char('d'),
-        ]
-        .into_iter()
-        .map(Function::Key)
-        .collect();
-        assert_eq!(keys, expected);
+        assert_eq!(
+            keys,
+            [
+                Function::Key(Key::Char('æ')),
+                Function::Key(Key::Char('1')),
+                Function::PasteText("ab\r\nc\td".into()),
+            ]
+        );
+        let pieces: Vec<Pasted> = pasted("ab\r\nc\td\ne").collect();
+        let (k, br) = (Pasted::Key, Pasted::LineBreak);
+        assert_eq!(
+            pieces,
+            [
+                k(Key::Char('a')),
+                k(Key::Char('b')),
+                br,
+                k(Key::Char('c')),
+                k(Key::FieldExit),
+                k(Key::Char('d')),
+                br,
+                k(Key::Char('e')),
+            ]
+        );
     }
 
     #[test]

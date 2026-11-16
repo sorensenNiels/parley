@@ -72,6 +72,8 @@ pub struct Settings {
     pub java_path: String,
     /// Rows the SQL window fetches at first and with each Fetch more (R-SQL-18).
     pub sql_rows: u32,
+    /// What separates fields in CSV downloads and exports (R-SQL-100).
+    pub sql_csv_delimiter: parley_sql_core::transfer::CsvDelimiter,
     /// Seconds before the SQL helper stops a statement; 0 for none (R-SQL-18).
     pub sql_timeout: u32,
     /// What the SQL window's column headings say (R-SQL-29).
@@ -111,6 +113,7 @@ impl Default for Settings {
             addons: AddOnSettings::default(),
             java_path: String::new(),
             sql_rows: parley_sql_core::protocol::FIRST_ROWS,
+            sql_csv_delimiter: parley_sql_core::transfer::CsvDelimiter::default(),
             sql_timeout: 0,
             sql_header: crate::grid::HeaderMode::default(),
             sql_results: crate::layout::ResultsPlace::default(),
@@ -185,6 +188,7 @@ impl Page {
                 settings.sql_timeout = defaults.sql_timeout;
                 settings.sql_snippets_shared = defaults.sql_snippets_shared;
                 settings.sql_format = defaults.sql_format;
+                settings.sql_csv_delimiter = defaults.sql_csv_delimiter;
             }
             Self::Assistant => assistant::restore_defaults(settings),
             Self::About => settings.check_for_updates = defaults.check_for_updates,
@@ -338,6 +342,21 @@ impl Dialog {
                         .range(0..=86_400)
                         .suffix(" s");
                     ui.add(value).labelled_by(name_id);
+                },
+            );
+            rows.row(
+                "CSV delimiter",
+                Some("Semicolon for Excel where the comma is the decimal separator."),
+                |ui, _| {
+                    use parley_sql_core::transfer::CsvDelimiter;
+                    theme::segmented(
+                        ui,
+                        &mut settings.sql_csv_delimiter,
+                        &[
+                            (CsvDelimiter::Comma, "Comma ,"),
+                            (CsvDelimiter::Semicolon, "Semicolon ;"),
+                        ],
+                    );
                 },
             );
             rows.row(

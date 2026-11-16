@@ -36,6 +36,8 @@ pub struct Results {
     pub code_page: CodePage,
     /// The key columns a comparison matches rows by, by name; empty for the first (R-SQL-41).
     compare_keys: Vec<String>,
+    /// What separates fields when exporting to CSV (R-SQL-100).
+    pub csv_delimiter: parley_sql_core::transfer::CsvDelimiter,
 }
 
 /// What the results area asks of the window.
@@ -125,6 +127,7 @@ impl Results {
             return None;
         }
         self.tab_strip(ui);
+        let delimiter = self.csv_delimiter;
         let shown = self.shown;
         let tab = self.tabs.get_mut(shown)?;
         let view = &mut tab.view;
@@ -156,7 +159,7 @@ impl Results {
         let mut ask = None;
         let note = &mut self.note;
         Panel::bottom("sql-grid-actions").show(ui, |ui| {
-            ask = bar(ui, view, idle, saver, note);
+            ask = bar(ui, view, idle, saver, note, delimiter);
         });
         if let Some(mut shown) = view.chart.take() {
             {
@@ -298,6 +301,7 @@ fn bar(
     idle: bool,
     saver: Option<&dyn SqlFiles>,
     note: &mut Option<String>,
+    delimiter: parley_sql_core::transfer::CsvDelimiter,
 ) -> Option<Ask> {
     let mut ask = None;
     ui.horizontal(|ui| {
@@ -335,11 +339,13 @@ fn bar(
                     .on_hover_text("The rows shown, as CSV")
                     .clicked()
                 {
-                    *note = Some(match saver.export_csv("query.csv", view.csv().as_bytes()) {
-                        Ok(Some(path)) => format!("Saved {path}"),
-                        Ok(None) => String::new(),
-                        Err(e) => format!("Not saved: {e}"),
-                    });
+                    *note = Some(
+                        match saver.export_csv("query.csv", view.csv(delimiter).as_bytes()) {
+                            Ok(Some(path)) => format!("Saved {path}"),
+                            Ok(None) => String::new(),
+                            Err(e) => format!("Not saved: {e}"),
+                        },
+                    );
                 }
             }
             let what = if view.selected_count() > 0 {

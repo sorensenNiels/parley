@@ -144,7 +144,7 @@ impl SqlWindow {
         ui.add_space(4.0);
         match self.tab {
             Tab::Results => self.results(ui, around.files),
-            Tab::Messages => self.messages(ui),
+            Tab::Messages => self.messages(ui, around.files),
             Tab::History => self.history(ui, around.history),
             Tab::View(view) => self.system.tab(ui, view, &mut self.database),
         }

@@ -17,6 +17,7 @@ pub mod hostserver;
 pub mod java;
 pub mod message;
 pub mod net;
+pub mod options;
 pub mod params;
 pub mod protocol;
 pub mod runner;

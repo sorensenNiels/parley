@@ -1181,6 +1181,31 @@ fn a_window_that_does_not_fit_is_a_bad_record_r_ds_10() {
 }
 
 #[test]
+fn the_keep_alive_interval_defaults_to_a_minute_and_stays_in_range_r_net_11() {
+    let config = |seconds| SessionConfig {
+        keep_alive_seconds: seconds,
+        ..SessionConfig::default()
+    };
+    assert_eq!(
+        SessionConfig::default().keep_alive_interval(),
+        Duration::from_secs(60)
+    );
+    assert_eq!(config(25).keep_alive_interval(), Duration::from_secs(25));
+    assert_eq!(config(1).keep_alive_interval(), Duration::from_secs(10));
+    assert_eq!(
+        config(60_000).keep_alive_interval(),
+        Duration::from_secs(3600)
+    );
+    let old: SessionConfig =
+        serde_json::from_str(r#"{"host": "x", "keep_alive": true}"#).expect("reads");
+    assert_eq!(
+        old.keep_alive_interval(),
+        Duration::from_secs(60),
+        "saved before R-NET-11"
+    );
+}
+
+#[test]
 fn a_session_saved_with_the_gui_switch_on_reads_as_off_d38() {
     let saved: SessionConfig =
         serde_json::from_str(r#"{"host": "dksoft00", "port": 23, "gui": true}"#).expect("reads");

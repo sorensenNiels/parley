@@ -2,7 +2,7 @@
 //! It asks for no user or password: Parley never signs on by itself (R-NET-7).
 
 use egui::{Button, ComboBox, DragValue, Grid, TextEdit, Ui};
-use parley_core::session::{TELNET_PORT, TLS_PORT};
+use parley_core::session::{KEEP_ALIVE_RANGE, TELNET_PORT, TLS_PORT};
 use parley_core::{CodePage, ScreenSize, SessionConfig};
 
 use crate::keymap::{DEFAULT_MAP, KeyMap};
@@ -24,8 +24,8 @@ Exit when the session ends: close Parley when the IBM i ends the session (sign-o
 Confirm exit: ask before closing Parley while connected.
 Reconnect when the connection drops: when the network fails (not when the IBM i ends the \
 session), connect again after 2, 4, 8 … up to 60 seconds; the session's macro runs again.
-Send keep-alive: send a telnet no-operation after a minute without traffic, so firewalls \
-keep an idle connection open.
+Send keep-alive: send a telnet no-operation after the seconds given without traffic (60 \
+unless changed), so firewalls keep an idle connection open.
 Connect on program start: connect to this session when Parley starts.
 Run macro: on connecting, run a macro recorded with Record macro in the Tools menu, from \
 the first screen (it may sign on, asking for the password).";
@@ -173,7 +173,7 @@ impl Editor {
             "Reconnect when the connection drops",
             &mut profile.reconnect,
         );
-        theme::switch_row(ui, "Send keep-alive", &mut profile.config.keep_alive);
+        keep_alive(ui, &mut profile.config);
         theme::switch_row(
             ui,
             "Connect to this session on program start",
@@ -396,6 +396,22 @@ fn connection_fields(ui: &mut Ui, config: &mut SessionConfig) {
             .labelled_by(label.id);
             ui.end_row();
         });
+}
+
+/// "Send keep-alive" and, while it is on, how often (R-NET-5, R-NET-11).
+fn keep_alive(ui: &mut Ui, config: &mut SessionConfig) {
+    theme::switch_row(ui, "Send keep-alive", &mut config.keep_alive);
+    if config.keep_alive {
+        ui.horizontal(|ui| {
+            let label = ui.label("Keep-alive every");
+            ui.add(
+                DragValue::new(&mut config.keep_alive_seconds)
+                    .range(KEEP_ALIVE_RANGE)
+                    .suffix(" s"),
+            )
+            .labelled_by(label.id);
+        });
+    }
 }
 
 /// The 5250 screen's colours for the session (R-UI-23); `None` uses the settings'.

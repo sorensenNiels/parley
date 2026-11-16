@@ -68,6 +68,8 @@ pub struct Connect {
     pub password: Password,
     /// A company CA certificate (PEM) to trust besides Java's own; empty for none.
     pub ca_file: String,
+    /// The saved connection's database options (R-SQL-97..100).
+    pub options: crate::options::ConnectOptions,
 }
 
 impl std::fmt::Debug for Connect {
@@ -78,6 +80,7 @@ impl std::fmt::Debug for Connect {
             .field("user", &self.user)
             .field("password", &self.password)
             .field("ca_file", &self.ca_file)
+            .field("options", &self.options)
             .finish()
     }
 }
@@ -97,6 +100,16 @@ impl Request {
                 put("user", c.user.clone().into());
                 put("password", c.password.expose().into());
                 put("ca_file", c.ca_file.clone().into());
+                // R-SQL-97..100: JTOpen properties over the helper's defaults, and how
+                // autocommit starts.
+                let properties: serde_json::Map<String, Value> = c
+                    .options
+                    .jdbc_properties()
+                    .into_iter()
+                    .map(|(name, value)| (name.to_owned(), value.into()))
+                    .collect();
+                put("properties", properties.into());
+                put("autocommit", c.options.autocommit.into());
                 "connect"
             }
             Self::Run {
@@ -405,9 +418,33 @@ mod tests {
             user: "USR".to_owned(),
             password: Password::new("TopSecret9".to_owned()),
             ca_file: String::new(),
+            options: crate::options::ConnectOptions::default(),
         });
         assert!(connect.line(1).contains("\"password\":\"TopSecret9\""));
         assert!(!format!("{connect:?}").contains("TopSecret9"));
+    }
+
+    #[test]
+    fn the_connect_line_carries_the_connection_s_jtopen_properties_r_sql_97() {
+        let options = crate::options::ConnectOptions {
+            naming: crate::options::Naming::System,
+            libraries: "nodejt400".into(),
+            autocommit: false,
+            ..crate::options::ConnectOptions::default()
+        };
+        let line = Request::Connect(Connect {
+            host: "ibmi".to_owned(),
+            tls: true,
+            user: "USR".to_owned(),
+            password: Password::new(String::new()),
+            ca_file: String::new(),
+            options,
+        })
+        .line(1);
+        let json: Value = serde_json::from_str(&line).expect("json");
+        assert_eq!(json["properties"]["naming"], "system");
+        assert_eq!(json["properties"]["libraries"], "NODEJT400");
+        assert_eq!(json["autocommit"], false);
     }
 
     #[test]

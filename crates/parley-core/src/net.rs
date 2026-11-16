@@ -20,8 +20,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a read waits before the thread checks for keys to send: the worst-case delay
 /// between a key and its bytes leaving.
 const POLL: Duration = Duration::from_millis(15);
-/// With keep-alive on, a No Operation goes out after this long without sending (R-NET-5).
-const KEEP_ALIVE: Duration = Duration::from_secs(60);
 
 /// Set `PARLEY_TRACE` to a file name to append the bytes the host sends, as hex, for building
 /// test fixtures. Only inbound data is traced: outbound data holds what the operator typed,
@@ -172,7 +170,7 @@ impl Link {
             }
             let (outbound, gave_up) = {
                 let mut session = lock(&self.session);
-                if config.keep_alive && last_sent.elapsed() >= KEEP_ALIVE {
+                if config.keep_alive && last_sent.elapsed() >= config.keep_alive_interval() {
                     session.keep_alive();
                 }
                 let gave_up = session.check_macro_time(Instant::now());

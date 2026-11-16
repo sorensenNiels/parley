@@ -28,6 +28,8 @@ parley-sql-ui.workspace = true
 keyring = "4.2"
 # The 5250 alarm's beep (R-UI-25, D37): playback only, no decoders. ALSA on Linux.
 rodio = { version = "0.23", default-features = false, features = ["playback"] }
+# Opens a finished download in the program the system uses for it (R-SQL-101).
+opener = { version = "0.9", default-features = false }
 
 # File windows for importing and exporting macros (R-KEY-7). GTK on Linux, as Tortuga: the
 # xdg-desktop-portal backend fails silently where no portal runs (WSL).

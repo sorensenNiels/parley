@@ -76,6 +76,7 @@ impl SqlWindow {
             user: self.user.trim().to_owned(),
             password: Password::new(std::mem::take(&mut self.password.0)),
             ca_file: self.config.ca_file.clone(),
+            options: self.options.clone(),
         });
         let wake = ctx.clone();
         match Runner::start(&self.java, &self.files, move || wake.request_repaint()) {

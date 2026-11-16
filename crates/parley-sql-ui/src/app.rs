@@ -173,6 +173,7 @@ impl ParleySqlUi {
             &self.settings,
         ) {
             Ok(window) => {
+                let window = window.with_options(connection.options.clone());
                 self.window = Some(window.embedded());
                 self.current = Some(connection);
                 self.note = None;
@@ -594,6 +595,25 @@ mod tests {
     }
 
     #[test]
+    fn the_csv_delimiter_is_chosen_on_the_sql_page_r_sql_100() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("SQL").click();
+        harness.run();
+        harness.get_by_label("Semicolon ;").scroll_to_me();
+        harness.run();
+        harness.get_by_label("Semicolon ;").click();
+        harness.run();
+        harness.get_by_label("Save").click();
+        harness.run();
+        assert_eq!(
+            harness.state().settings.sql_csv_delimiter,
+            parley_sql_core::transfer::CsvDelimiter::Semicolon
+        );
+    }
+
+    #[test]
     fn a_new_connection_is_saved_from_the_start_screen_r_sql_46() {
         let mut harness = app_with(Vec::new());
         harness.get_by_label("No connections yet.");
@@ -613,6 +633,42 @@ mod tests {
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].name, "Test");
         assert!(saved[0].tls, "TLS by default");
+    }
+
+    fn type_into(harness: &mut Harness<'static, ParleySqlUi>, label: &str, text: &str) {
+        harness.get_by_label(label).focus();
+        harness.run();
+        harness.get_by_label(label).type_text(text);
+        harness.run();
+    }
+
+    #[test]
+    fn the_connection_dialog_saves_the_database_options_r_sql_97_r_sql_98_r_sql_99() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("New connection…").click();
+        harness.run();
+        type_into(&mut harness, "Name", "Dev");
+        type_into(&mut harness, "Host", "dev.example.com");
+        harness.get_by_label("System").click();
+        type_into(&mut harness, "Libraries", "nodejt400 qgpl");
+        harness.get_by_label("Auto-commit").click();
+        harness.run();
+        harness.get_by_label("Save").click();
+        harness.run();
+        let options = &harness.state().connections()[0].options;
+        assert_eq!(options.naming, parley_sql_core::options::Naming::System);
+        assert_eq!(options.library_list(), ["NODEJT400", "QGPL"]);
+        assert!(!options.autocommit);
+    }
+
+    #[test]
+    fn a_window_starts_autocommit_as_its_connection_says_r_sql_99() {
+        let options = parley_sql_core::options::ConnectOptions {
+            autocommit: false,
+            ..parley_sql_core::options::ConnectOptions::default()
+        };
+        let window = prod_window().with_options(options);
+        assert!(!window.autocommit);
     }
 
     #[test]

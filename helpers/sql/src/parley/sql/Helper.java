@@ -248,6 +248,16 @@ public final class Helper {
         properties.setProperty("query timeout mechanism", "cancel");
         // Seconds to give up connecting; JTOpen's own default waits minutes for a silent host.
         properties.setProperty("login timeout", String.valueOf(LOGIN_TIMEOUT));
+        // R-SQL-97..100: the saved connection's options (naming, libraries, isolation, formats)
+        // as JTOpen properties, over the defaults above. Absent from an older Parley SQL.
+        Object chosen = request.get("properties");
+        if (chosen instanceof Map) {
+            for (Map.Entry<?, ?> e : ((Map<?, ?>) chosen).entrySet()) {
+                if (e.getKey() instanceof String && e.getValue() instanceof String) {
+                    properties.setProperty((String) e.getKey(), (String) e.getValue());
+                }
+            }
+        }
         request.remove("password");
         try {
             Class.forName("com.ibm.as400.access.AS400JDBCDriver");
@@ -255,7 +265,8 @@ public final class Helper {
             throw new IllegalArgumentException("jt400.jar is not on the class path");
         }
         connection = DriverManager.getConnection("jdbc:as400://" + host, properties);
-        connection.setAutoCommit(true);
+        // R-SQL-99: how the SQL window's Autocommit switch starts; on unless the connection says.
+        connection.setAutoCommit(!Boolean.FALSE.equals(request.get("autocommit")));
         Map<String, Object> about = new LinkedHashMap<>();
         about.put("job", serverJob(connection));
         about.put("release", connection.getMetaData().getDatabaseProductVersion());

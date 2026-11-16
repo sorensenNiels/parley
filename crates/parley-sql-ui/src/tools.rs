@@ -10,7 +10,7 @@ use parley_sql_core::runner::Event;
 use parley_sql_core::{catalog, message, text};
 
 use super::grid::ResultView;
-use super::{Note, SqlWindow, Stage, Tab, Waiting};
+use super::{Note, SqlFiles, SqlWindow, Stage, Tab, Waiting};
 use parley_ui_egui::{icons, theme};
 
 /// Seconds the window's own queries may take.
@@ -30,8 +30,47 @@ pub struct JobContext {
 pub type Helps = BTreeMap<usize, String>;
 
 impl SqlWindow {
-    /// Row counts, warnings and errors; Explain on an error with a message ID, and Job log.
-    pub(super) fn messages(&mut self, ui: &mut Ui) {
+    /// The file a download just finished, with Open, Show in folder and a close button
+    /// (R-SQL-101); an error opening it goes to the messages.
+    fn downloaded_file(&mut self, ui: &mut Ui, files: Option<&dyn SqlFiles>) {
+        let (Some(path), Some(files)) = (self.transfer.done.clone(), files) else {
+            return;
+        };
+        let mut result = None;
+        let mut close = false;
+        theme::card(ui).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(theme::semibold("Downloaded"));
+                ui.add(egui::Label::new(path.display().to_string()).truncate());
+                theme::button_row(ui, |ui| {
+                    let closer = ui.add(theme::icon_button(ui, "🗙")).on_hover_text("Close");
+                    closer.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::Role::Button, true, "Close download")
+                    });
+                    close = closer.clicked();
+                    if ui.button("Show in folder").clicked() {
+                        result = Some(files.show_in_folder(&path));
+                    }
+                    if ui.add(theme::primary_button(ui, "Open")).clicked() {
+                        result = Some(files.open_file(&path));
+                    }
+                });
+            });
+        });
+        if let Some(Err(e)) = result {
+            self.messages.push(Note::Error(format!(
+                "Could not open {}: {e}",
+                path.display()
+            )));
+        }
+        if close {
+            self.transfer.done = None;
+        }
+    }
+
+    /// Row counts, warnings and errors; Explain on an error with a message ID, and Job log;
+    /// Open and Show in folder for the file a download just finished (R-SQL-101).
+    pub(super) fn messages(&mut self, ui: &mut Ui, files: Option<&dyn SqlFiles>) {
         let idle = self.waiting.is_none() && self.queue.is_empty();
         let mut explain = None;
         let mut job_log = false;
@@ -44,6 +83,7 @@ impl SqlWindow {
                     .clicked();
             });
         });
+        self.downloaded_file(ui, files);
         if self.messages.is_empty() {
             theme::hint(ui, "Row counts, warnings and errors appear here.");
         }

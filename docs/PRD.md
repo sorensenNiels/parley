@@ -77,7 +77,7 @@ tested against recorded host traffic.
 | | Keep-alive for idle connections | R-NET-5 | Done |
 | 5250 data stream | Commands and orders for sign-on, menus and normal use; Save/Restore Screen, 27×132 | R-DS-1..4 | Done |
 | | Checked point by point against IBM's Functions Reference | R-DS-5 | Done |
-| Character sets | EBCDIC CCSID 37, 277, 1140, 1142 | R-EBC-1 | Done |
+| Character sets | EBCDIC CCSID 37, 273, 277, 285, 297, 500, 871 and their euro variants 1140–1142, 1146–1149 | R-EBC-1, R-EBC-2 | Done |
 | Keyboard | Default map, field rules (numeric only, auto enter, field exit required, …) | R-KEY-1 | Done |
 | | Keyboard maps of the user's own, chosen per session | R-KEY-2 | Done |
 | | Record and run macros, saved as text files | R-KEY-3, R-KEY-4 | Done |

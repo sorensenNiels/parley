@@ -17,6 +17,16 @@ CODE_PAGES = [
     ("CCSID_277", "IBM277", "CCSID 277: Denmark, Norway"),
     ("CCSID_1140", "IBM1140", "CCSID 1140: CCSID 37 with the euro sign"),
     ("CCSID_1142", "IBM1142", "CCSID 1142: CCSID 277 with the euro sign"),
+    ("CCSID_273", "IBM273", "CCSID 273: Germany, Austria"),
+    ("CCSID_285", "IBM285", "CCSID 285: United Kingdom"),
+    ("CCSID_297", "IBM297", "CCSID 297: France"),
+    ("CCSID_500", "IBM500", "CCSID 500: International (Belgium, Switzerland)"),
+    ("CCSID_871", "IBM871", "CCSID 871: Iceland"),
+    ("CCSID_1141", "IBM1141", "CCSID 1141: CCSID 273 with the euro sign"),
+    ("CCSID_1146", "IBM1146", "CCSID 1146: CCSID 285 with the euro sign"),
+    ("CCSID_1147", "IBM1147", "CCSID 1147: CCSID 297 with the euro sign"),
+    ("CCSID_1148", "IBM1148", "CCSID 1148: CCSID 500 with the euro sign"),
+    ("CCSID_1149", "IBM1149", "CCSID 1149: CCSID 871 with the euro sign"),
 ]
 OUT = Path(__file__).resolve().parent.parent / "crates" / "parley-core" / "src" / "ebcdic" / "tables.rs"
 

@@ -7,6 +7,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use rust_xlsxwriter::{ExcelDateTime, Format as CellFormat, Workbook, Worksheet};
+use serde::{Deserialize, Serialize};
 
 use super::export;
 use super::protocol::{Column, Row};
@@ -35,19 +36,38 @@ impl Format {
     }
 }
 
-/// One line of CSV (RFC 4180): fields with a comma, quote or line break are quoted.
-pub fn csv_line<'a>(fields: impl IntoIterator<Item = &'a str>) -> String {
+/// What separates the fields of a CSV line (R-SQL-100): a comma, or a semicolon as Excel in
+/// Danish or Norwegian (where the comma is the decimal separator) reads a CSV file.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CsvDelimiter {
+    #[default]
+    Comma,
+    Semicolon,
+}
+
+impl CsvDelimiter {
+    pub const fn char(self) -> char {
+        match self {
+            Self::Comma => ',',
+            Self::Semicolon => ';',
+        }
+    }
+}
+
+/// One line of CSV (RFC 4180): fields with the delimiter, a quote or a line break are quoted.
+pub fn csv_line<'a>(fields: impl IntoIterator<Item = &'a str>, delimiter: CsvDelimiter) -> String {
+    let d = delimiter.char();
     let quoted: Vec<String> = fields
         .into_iter()
         .map(|s| {
-            if s.contains([',', '"', '\n', '\r']) {
+            if s.contains([d, '"', '\n', '\r']) {
                 format!("\"{}\"", s.replace('"', "\"\""))
             } else {
                 s.to_owned()
             }
         })
         .collect();
-    let mut line = quoted.join(",");
+    let mut line = quoted.join(&d.to_string());
     line.push_str("\r\n");
     line
 }
@@ -68,7 +88,7 @@ pub struct Download {
 
 #[derive(Debug)]
 enum Sink {
-    Csv(BufWriter<File>),
+    Csv(BufWriter<File>, CsvDelimiter),
     Excel(Box<Excel>),
     Sql(Box<Script>),
 }
@@ -84,7 +104,8 @@ struct Script {
 
 impl Download {
     /// Starts `path` in `format` with a header row of `names` (one per column of `columns`);
-    /// an Excel file's first sheet is called `sheet` (made a valid sheet name).
+    /// an Excel file's first sheet is called `sheet` (made a valid sheet name); a CSV file's
+    /// fields are separated by `delimiter`.
     ///
     /// # Errors
     /// When the file cannot be created.
@@ -94,15 +115,16 @@ impl Download {
         columns: &[Column],
         names: &[String],
         sheet: &str,
+        delimiter: CsvDelimiter,
     ) -> Result<Self> {
         let sink = match format {
             Format::Csv => {
                 let file = File::create(path).map_err(|e| file_error(path, &e))?;
                 let mut out = BufWriter::new(file);
-                let header = csv_line(names.iter().map(String::as_str));
+                let header = csv_line(names.iter().map(String::as_str), delimiter);
                 out.write_all(format!("\u{FEFF}{header}").as_bytes())
                     .map_err(|e| file_error(path, &e))?;
-                Sink::Csv(out)
+                Sink::Csv(out, delimiter)
             }
             Format::Excel => Sink::Excel(Box::new(Excel::new(columns, names, sheet)?)),
             Format::Sql => {
@@ -172,9 +194,9 @@ impl Download {
     /// When the file cannot be written.
     pub fn write(&mut self, rows: &[Row]) -> Result<()> {
         match &mut self.sink {
-            Sink::Csv(out) => {
+            Sink::Csv(out, delimiter) => {
                 for row in rows {
-                    let line = csv_line(row.iter().map(|v| v.as_deref().unwrap_or("")));
+                    let line = csv_line(row.iter().map(|v| v.as_deref().unwrap_or("")), *delimiter);
                     out.write_all(line.as_bytes())
                         .map_err(|e| file_error(&self.path, &e))?;
                 }
@@ -217,7 +239,7 @@ impl Download {
     /// When the file cannot be written.
     pub fn finish(self) -> Result<u64> {
         match self.sink {
-            Sink::Csv(mut out) => out.flush().map_err(|e| file_error(&self.path, &e))?,
+            Sink::Csv(mut out, _) => out.flush().map_err(|e| file_error(&self.path, &e))?,
             Sink::Sql(mut script) => script.out.flush().map_err(|e| file_error(&self.path, &e))?,
             Sink::Excel(mut excel) => excel.workbook.save(&self.path).map_err(|e| {
                 Error::Transfer(format!("{} was not saved: {e}", self.path.display()))
@@ -480,10 +502,21 @@ mod tests {
     #[test]
     fn csv_quotes_only_what_needs_it_r_sql_8() {
         assert_eq!(
-            csv_line(["a", "b,c", "say \"hi\"", "æøå"]),
+            csv_line(["a", "b,c", "say \"hi\"", "æøå"], CsvDelimiter::Comma),
             "a,\"b,c\",\"say \"\"hi\"\"\",æøå\r\n"
         );
-        assert_eq!(csv_line(["line\nbreak", ""]), "\"line\nbreak\",\r\n");
+        assert_eq!(
+            csv_line(["line\nbreak", ""], CsvDelimiter::Comma),
+            "\"line\nbreak\",\r\n"
+        );
+    }
+
+    #[test]
+    fn a_semicolon_delimiter_separates_and_quotes_by_the_semicolon_r_sql_100() {
+        assert_eq!(
+            csv_line(["a", "1,5", "x;y", "æøå"], CsvDelimiter::Semicolon),
+            "a;1,5;\"x;y\";æøå\r\n"
+        );
     }
 
     #[test]
@@ -495,8 +528,15 @@ mod tests {
             column("BELOB", "DECIMAL", true),
         ];
         let names = vec!["NAVN".to_owned(), "BELØB".to_owned()];
-        let mut download =
-            Download::create(&path, Format::Csv, &columns, &names, "KUNDER").expect("created");
+        let mut download = Download::create(
+            &path,
+            Format::Csv,
+            &columns,
+            &names,
+            "KUNDER",
+            CsvDelimiter::Comma,
+        )
+        .expect("created");
         download
             .write(&[row(&[Some("Søren, Å"), Some("12.50")])])
             .expect("written");
@@ -517,8 +557,15 @@ mod tests {
             column("NAVN", "VARCHAR", false),
             column("BELOB", "DECIMAL", true),
         ];
-        let mut download =
-            Download::create(&path, Format::Sql, &columns, &[], "KUNDER").expect("created");
+        let mut download = Download::create(
+            &path,
+            Format::Sql,
+            &columns,
+            &[],
+            "KUNDER",
+            CsvDelimiter::Comma,
+        )
+        .expect("created");
         download
             .write(&[
                 row(&[Some("Søren's æøå"), Some("12.50")]),
@@ -561,8 +608,15 @@ mod tests {
         for format in [Format::Csv, Format::Excel, Format::Sql] {
             let path = scratch.file(&format!("stopped.{}", format.extension()));
             let columns = vec![column("A", "INTEGER", true)];
-            let mut download =
-                Download::create(&path, format, &columns, &["A".to_owned()], "T").expect("created");
+            let mut download = Download::create(
+                &path,
+                format,
+                &columns,
+                &["A".to_owned()],
+                "T",
+                CsvDelimiter::Comma,
+            )
+            .expect("created");
             download.write(&[row(&[Some("1")])]).expect("written");
             download.abandon();
             assert!(!path.exists(), "{format:?} removed");
@@ -572,7 +626,8 @@ mod tests {
     #[test]
     fn a_folder_that_is_not_there_is_an_error_naming_the_file_r_sql_71() {
         let path = Path::new("/no/such/folder/æøå.csv");
-        let err = Download::create(path, Format::Csv, &[], &[], "T").expect_err("no folder");
+        let err = Download::create(path, Format::Csv, &[], &[], "T", CsvDelimiter::Comma)
+            .expect_err("no folder");
         assert!(err.to_string().contains("æøå.csv"), "{err}");
     }
 
@@ -589,8 +644,15 @@ mod tests {
             column("ID", "BIGINT", true),
         ];
         let names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
-        let mut download =
-            Download::create(&path, Format::Excel, &columns, &names, "KUNDER").expect("created");
+        let mut download = Download::create(
+            &path,
+            Format::Excel,
+            &columns,
+            &names,
+            "KUNDER",
+            CsvDelimiter::Comma,
+        )
+        .expect("created");
         download
             .write(&[
                 row(&[

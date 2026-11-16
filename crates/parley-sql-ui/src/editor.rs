@@ -1245,6 +1245,12 @@ mod tests {
     struct KeptFile(std::sync::Mutex<String>);
 
     impl SqlFiles for KeptFile {
+        fn open_file(&self, _: &std::path::Path) -> Result<(), String> {
+            Ok(())
+        }
+        fn show_in_folder(&self, _: &std::path::Path) -> Result<(), String> {
+            Ok(())
+        }
         fn save_text(&self, _: &str, _: &str) -> Result<Option<String>, String> {
             Ok(None)
         }

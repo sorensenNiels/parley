@@ -12,6 +12,21 @@
 
 ## In progress
 
+- **R-SQL-101** (2026-11-16): Open and Show in folder for a finished download. **Automated** (`make test`): a
+  finished tab download keeps its file (`æøå.csv`); the Messages tab's card opens it and its folder through the
+  launcher and goes when closed. **Left:** Open a CSV and an Excel download in the running app (Excel or the
+  system's program starts), then move to REQUIREMENTS.md.
+
+- **Phase 25: connection settings** (2026-11-16), built; `make verify` on Linux under WSL. **Automated** (`make test`):
+  the defaults are the JTOpen properties Parley SQL always sent (naming sql, ISO dates and times, a period); chosen
+  options become `naming`, `libraries` (upper case, commas or blanks, `æøå`), `transaction isolation` (each level by
+  its JDBC name), `date format`, `time format` and `decimal separator`, sent in the connect line with how
+  autocommit starts; old saved connections read with the defaults; the connection dialog saves naming, libraries and
+  auto-commit, and keeps its place; a window starts Autocommit as its connection says; the helper puts the
+  properties over its defaults (`make helper`). The CSV delimiter: a semicolon separates and quotes by the
+  semicolon, in downloads and Export, chosen on the SQL page. **Left:** a sign-on with System naming and a library
+  list, auto-commit off, and a semicolon CSV opened in Excel, on the owner's IBM i; then move to REQUIREMENTS.md.
+
 - **R-SQL-93..96** (2026-11-15): a library's SQL, a table with its indexes and views, rows as `INSERT` statements, a
   library backed up as SQL (Phase 23, D39). Built; **automated** (`make test`): the `GENERATE_SQL` calls and catalog
   queries, the order of a library's parts, failures kept as comments, a table's indexes and views, the backup's file

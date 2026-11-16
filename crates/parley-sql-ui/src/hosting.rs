@@ -46,7 +46,8 @@ pub fn open(
     )
     .with_limits(settings.sql_rows, settings.sql_timeout)
     .with_header(settings.sql_header)
-    .with_side(settings.sql_side, groups))
+    .with_side(settings.sql_side, groups)
+    .with_csv(settings.sql_csv_delimiter))
 }
 
 /// Keeps what `window` for session `name` changed in `settings`: the statements it ran

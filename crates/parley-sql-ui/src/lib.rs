@@ -81,6 +81,10 @@ pub trait SqlFiles: std::fmt::Debug {
     /// Saves `text` as a `.txt` file where the operator chooses, offered as `suggested`; the
     /// path (R-SQL-78).
     fn save_text(&self, suggested: &str, text: &str) -> Result<Option<String>, String>;
+    /// Opens `path` in the program the system uses for it (R-SQL-101).
+    fn open_file(&self, path: &std::path::Path) -> Result<(), String>;
+    /// Opens the folder `path` is in (R-SQL-101).
+    fn show_in_folder(&self, path: &std::path::Path) -> Result<(), String>;
 }
 
 /// What the SQL window is given by Parley each frame.
@@ -230,6 +234,10 @@ enum Choice {
 #[derive(Debug)]
 pub struct SqlWindow {
     config: SessionConfig,
+    /// The saved connection's database options, sent at sign-on (R-SQL-97..100).
+    options: parley_sql_core::options::ConnectOptions,
+    /// What separates fields in CSV downloads and exports (R-SQL-100).
+    csv_delimiter: parley_sql_core::transfer::CsvDelimiter,
     java: PathBuf,
     files: HelperFiles,
     stage: Stage,
@@ -320,6 +328,8 @@ impl SqlWindow {
     ) -> Self {
         Self {
             config: config.clone(),
+            options: parley_sql_core::options::ConnectOptions::default(),
+            csv_delimiter: parley_sql_core::transfer::CsvDelimiter::default(),
             java,
             files,
             stage: Stage::SignIn,
@@ -406,6 +416,23 @@ impl SqlWindow {
     #[must_use]
     pub const fn with_header(mut self, header: grid::HeaderMode) -> Self {
         self.header = header;
+        self
+    }
+
+    /// CSV downloads and exports separate fields with `delimiter` (R-SQL-100).
+    #[must_use]
+    pub const fn with_csv(mut self, delimiter: parley_sql_core::transfer::CsvDelimiter) -> Self {
+        self.csv_delimiter = delimiter;
+        self.results.csv_delimiter = delimiter;
+        self
+    }
+
+    /// Signs on with the saved connection's `options`, and starts Autocommit as they say
+    /// (R-SQL-97..100).
+    #[must_use]
+    pub fn with_options(mut self, options: parley_sql_core::options::ConnectOptions) -> Self {
+        self.autocommit = options.autocommit;
+        self.options = options;
         self
     }
 

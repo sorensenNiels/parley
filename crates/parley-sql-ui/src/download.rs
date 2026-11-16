@@ -66,6 +66,8 @@ pub struct Tables {
 pub struct Transfer {
     dialog: Option<Choice>,
     pub running: Option<Downloading>,
+    /// The file the last download finished, for Open and Show in folder (R-SQL-101).
+    pub done: Option<std::path::PathBuf>,
 }
 
 impl Transfer {
@@ -145,8 +147,16 @@ impl SqlWindow {
                 };
                 let sheet = transfer::suggested_name(&columns);
                 let names = names(&columns, choice.headings);
-                match transfer::Download::create(&path, choice.format, &columns, &names, &sheet) {
+                match transfer::Download::create(
+                    &path,
+                    choice.format,
+                    &columns,
+                    &names,
+                    &sheet,
+                    self.csv_delimiter,
+                ) {
                     Ok(writer) => {
+                        self.transfer.done = None;
                         self.transfer.running = Some(Downloading {
                             writer: Some(writer),
                             pending: None,
@@ -169,6 +179,7 @@ impl SqlWindow {
                     .generate(&library, BTreeSet::new(), goal, &mut self.database);
             }
             Source::Table { library, name } => {
+                self.transfer.done = None;
                 self.transfer.running = Some(Downloading {
                     writer: None,
                     pending: Some((path, choice.format, choice.headings, name.clone())),
@@ -263,6 +274,7 @@ impl SqlWindow {
             Err(e) => return self.fail(format!("{not}: {e}")),
         };
         self.error_line = None;
+        self.transfer.done = None;
         self.transfer.running = Some(Downloading {
             writer: Some(writer),
             pending: None,
@@ -347,7 +359,14 @@ impl SqlWindow {
                 };
                 running.cursor = more.then_some(cursor);
                 let names = names(&columns, headings);
-                match transfer::Download::create(&path, format, &columns, &names, &sheet) {
+                match transfer::Download::create(
+                    &path,
+                    format,
+                    &columns,
+                    &names,
+                    &sheet,
+                    self.csv_delimiter,
+                ) {
                     Ok(writer) => {
                         running.writer = Some(writer);
                         self.download_rows(&rows, more);
@@ -421,7 +440,11 @@ impl SqlWindow {
             writer.abandon();
             return self.fail(format!("{not}: {e}"));
         }
-        match writer.finish() {
+        let finished = writer.finish();
+        if finished.is_ok() {
+            self.transfer.done = Some(std::path::PathBuf::from(&path));
+        }
+        match finished {
             Ok(rows) if whole => {
                 let tables = running.tables.as_ref().map_or(0, |t| t.read);
                 self.messages.push(Note::Info(format!(
@@ -497,6 +520,12 @@ mod tests {
     struct PicksFile(PathBuf);
 
     impl SqlFiles for PicksFile {
+        fn open_file(&self, _: &std::path::Path) -> Result<(), String> {
+            Ok(())
+        }
+        fn show_in_folder(&self, _: &std::path::Path) -> Result<(), String> {
+            Ok(())
+        }
         fn export_csv(&self, _: &str, _: &[u8]) -> Result<Option<String>, String> {
             Ok(None)
         }
@@ -599,6 +628,79 @@ mod tests {
                 .iter()
                 .any(|m| m.text().starts_with("Downloaded 3 rows"))
         );
+    }
+
+    /// A file window that records what it was asked to open (R-SQL-101).
+    #[derive(Debug, Default)]
+    struct Opens(std::sync::Mutex<Vec<(&'static str, PathBuf)>>);
+
+    impl SqlFiles for Opens {
+        fn export_csv(&self, _: &str, _: &[u8]) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+        fn open_script(&self) -> Result<Option<(String, String)>, String> {
+            Ok(None)
+        }
+        fn open_csv(&self) -> Result<Option<(String, String)>, String> {
+            Ok(None)
+        }
+        fn download_path(&self, _: &str, _: Format) -> Result<Option<PathBuf>, String> {
+            Ok(None)
+        }
+        fn save_script(&self, _: Option<&str>, _: &str, _: &str) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+        fn save_text(&self, _: &str, _: &str) -> Result<Option<String>, String> {
+            Ok(None)
+        }
+        fn open_file(&self, path: &std::path::Path) -> Result<(), String> {
+            self.0
+                .lock()
+                .expect("not poisoned")
+                .push(("open", path.to_owned()));
+            Ok(())
+        }
+        fn show_in_folder(&self, path: &std::path::Path) -> Result<(), String> {
+            self.0
+                .lock()
+                .expect("not poisoned")
+                .push(("folder", path.to_owned()));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_finished_download_offers_open_and_show_in_folder_r_sql_101() {
+        use egui_kittest::kittest::Queryable;
+        let scratch = Scratch::new("open");
+        let path = scratch.0.join("æøå.csv");
+        let mut w = window();
+        w.results.add(
+            "SELECT NAVN FROM T",
+            ResultView::new(vec![column("NAVN")], rows(&["a"]), false, 7),
+        );
+        w.start_download(choice(Source::Tab, false), Some(&PicksFile(path.clone())));
+        assert_eq!(w.transfer.done.as_deref(), Some(path.as_path()));
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(900.0, 400.0))
+            .build_ui_state(
+                |ui, (w, files): &mut (crate::SqlWindow, Opens)| {
+                    parley_ui_egui::test_support::install_fonts(ui);
+                    w.messages(ui, Some(&*files));
+                },
+                (w, Opens::default()),
+            );
+        harness.run();
+        harness.get_by_label("Open").click();
+        harness.run();
+        harness.get_by_label("Show in folder").click();
+        harness.run();
+        let asked = harness.state().1.0.lock().expect("not poisoned").clone();
+        assert_eq!(asked, [("open", path.clone()), ("folder", path)]);
+        harness.get_by_label("Close download").click();
+        harness.run();
+        assert!(harness.state().0.transfer.done.is_none());
+        assert!(harness.query_by_label("Open").is_none());
     }
 
     #[test]

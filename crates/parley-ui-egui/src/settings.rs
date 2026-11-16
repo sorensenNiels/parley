@@ -54,6 +54,11 @@ pub struct Settings {
     pub type_ahead: bool,
     /// The host's windows are drawn with frames (R-UI-26).
     pub window_frames: bool,
+    /// What a line break does when pasting (R-KEY-12).
+    pub paste_breaks: crate::keymap::PasteBreaks,
+    /// The cursor's shape, and whether it blinks (R-UI-28).
+    pub cursor: terminal::CursorShape,
+    pub cursor_blink: bool,
     /// Look for a new version when Parley starts (R-UI-11).
     pub check_for_updates: bool,
     /// Which add-ons are on (R-ADD-1).
@@ -75,6 +80,9 @@ impl Default for Settings {
             blinking_text: true,
             type_ahead: false,
             window_frames: true,
+            paste_breaks: crate::keymap::PasteBreaks::default(),
+            cursor: terminal::CursorShape::default(),
+            cursor_blink: false,
             check_for_updates: true,
             addons: AddOnSettings::default(),
             keyboard_maps: Vec::new(),
@@ -143,6 +151,9 @@ impl Page {
                 settings.blinking_text = defaults.blinking_text;
                 settings.type_ahead = defaults.type_ahead;
                 settings.window_frames = defaults.window_frames;
+                settings.cursor = defaults.cursor;
+                settings.paste_breaks = defaults.paste_breaks;
+                settings.cursor_blink = defaults.cursor_blink;
             }
             // The map shown gets the Default map's keys: see `keyboard::Page::restore`.
             Self::Keyboard => {}
@@ -342,6 +353,29 @@ impl Dialog {
                 "Blinking text",
                 Some("Off: blinking text shows steady in reverse image."),
                 &mut settings.blinking_text,
+            );
+            rows.row(
+                "Cursor",
+                Some("In insert mode it shows as a bar, or a block when this is the bar."),
+                |ui, _| {
+                    theme::segmented(ui, &mut settings.cursor, &terminal::CursorShape::ALL);
+                },
+            );
+            rows.switch("Blinking cursor", None, &mut settings.cursor_blink);
+            rows.row(
+                "Paste line breaks",
+                Some("Next row: each pasted line goes in one row down, at the column it began."),
+                |ui, _| {
+                    use crate::keymap::PasteBreaks;
+                    theme::segmented(
+                        ui,
+                        &mut settings.paste_breaks,
+                        &[
+                            (PasteBreaks::NextField, "Next field"),
+                            (PasteBreaks::NextRow, "Next row"),
+                        ],
+                    );
+                },
             );
             rows.switch(
                 "Window frames",

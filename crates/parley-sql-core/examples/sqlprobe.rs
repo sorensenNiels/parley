@@ -820,6 +820,7 @@ fn connect(host: &str, user: &str, tls: bool) -> Option<parley_sql_core::helper:
         user: user.to_owned(),
         password: Password::new(password),
         ca_file: String::new(),
+        options: parley_sql_core::options::ConnectOptions::default(),
     });
     match call::<Connected>(&mut helper, &request) {
         Ok(c) => {

@@ -43,8 +43,11 @@ pub struct SessionConfig {
     pub screen_size: ScreenSize,
     /// The IBM i device name to ask for (R-NET-3). Empty: the host makes one up (`QPADEVxxxx`).
     pub device_name: String,
-    /// Send a telnet No Operation after a minute without traffic (R-NET-5).
+    /// Send a telnet No Operation after `keep_alive_seconds` without traffic (R-NET-5).
     pub keep_alive: bool,
+    /// How long without traffic before a keep-alive goes, in seconds (R-NET-11); see
+    /// [`SessionConfig::keep_alive_interval`].
+    pub keep_alive_seconds: u16,
     /// Claim IBM i's GUI-like 5250 and draw its windows (R-DS-10, D38). Never stored: with
     /// Phase 22 paused nothing turns it on, and sessions saved with it on read as off.
     #[serde(skip)]
@@ -62,12 +65,25 @@ impl Default for SessionConfig {
             screen_size: ScreenSize::default(),
             device_name: String::new(),
             keep_alive: false,
+            keep_alive_seconds: KEEP_ALIVE_SECONDS,
             gui: false,
         }
     }
 }
 
+/// The keep-alive interval when none is chosen, and the range one may be (R-NET-11).
+pub const KEEP_ALIVE_SECONDS: u16 = 60;
+pub const KEEP_ALIVE_RANGE: std::ops::RangeInclusive<u16> = 10..=3600;
+
 impl SessionConfig {
+    /// The keep-alive interval, kept within [`KEEP_ALIVE_RANGE`] whatever the settings say.
+    pub fn keep_alive_interval(&self) -> std::time::Duration {
+        let seconds = self
+            .keep_alive_seconds
+            .clamp(*KEEP_ALIVE_RANGE.start(), *KEEP_ALIVE_RANGE.end());
+        std::time::Duration::from_secs(u64::from(seconds))
+    }
+
     /// The usual port for TN5250 with `tls` or without.
     pub const fn default_port(tls: bool) -> u16 {
         if tls { TLS_PORT } else { TELNET_PORT }

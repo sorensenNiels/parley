@@ -4,10 +4,12 @@
 //! copy (R-UI-22), and the find bar's matches are highlighted (R-UI-21).
 
 mod colors;
+mod cursor;
 mod find;
 mod windows;
 
 pub use colors::{COLORS, CustomColors, Palette, Scheme};
+pub use cursor::CursorShape;
 
 pub use find::{FindAction, FindBar, bar as find_bar};
 
@@ -18,7 +20,7 @@ use egui::{
 use parley_core::screen::{Hotspot, Rectangle, Span, Target, hotspots, rectangle_text, table_text};
 use parley_core::{Color, Key, Session};
 
-use crate::keymap::{Function, KeyInput, KeyMap};
+use crate::keymap::{Function, KeyInput, KeyMap, PasteBreaks, Pasted, pasted};
 
 /// What the operator has on the screen beside the session: the find bar and the selection.
 #[derive(Debug, Default)]
@@ -30,6 +32,14 @@ pub struct View {
     pub blinking: bool,
     /// Windows are drawn with frames (R-UI-26).
     pub frames: bool,
+    /// What a line break does when pasting (R-KEY-12).
+    pub paste_breaks: PasteBreaks,
+    /// The cursor's shape, and whether it blinks (R-UI-28).
+    pub cursor: CursorShape,
+    pub cursor_blink: bool,
+    /// When the operator last pressed a key (egui's clock): a blinking cursor stays on while
+    /// typing (R-UI-28).
+    last_key: f64,
     /// The screen's border flashes until this time (egui's clock, seconds) for the alarm
     /// (R-UI-25).
     flash_until: f64,
@@ -108,6 +118,23 @@ impl View {
     }
 }
 
+/// How the cursor shows now (R-UI-28): an outline without the keyboard, else its shape for
+/// insert mode, and while it blinks a frame asked for at the next change.
+fn cursor_look(ui: &Ui, view: &View, focused: bool, insert: bool, now: f64) -> cursor::Look {
+    if !focused {
+        return cursor::Look::Outline;
+    }
+    if view.cursor_blink {
+        let left = cursor::until_blink_change(now, view.last_key);
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(left));
+        if !cursor::blink_visible(now, view.last_key) {
+            return cursor::Look::Hidden;
+        }
+    }
+    cursor::Look::Shape(view.cursor.shown(insert))
+}
+
 /// Draws the session's screen in all the space there is and passes the keyboard to it, read
 /// with `map` (R-KEY-2). `grab_focus` takes the keyboard focus (after a toolbar button, for
 /// example). Returns what the keys asked of Parley beside the session: macros.
@@ -166,9 +193,14 @@ pub fn show(
             match function {
                 Function::Key(key) => {
                     view.selection = None;
+                    view.last_key = ui.input(|i| i.time);
                     session.key(key);
                 }
                 Function::CopyScreen => ui.ctx().copy_text(view.copy_text(session)),
+                Function::PasteText(text) => {
+                    view.selection = None;
+                    paste(session, &text, view.paste_breaks);
+                }
                 Function::CopyTable => ui.ctx().copy_text(view.table_text(session)),
                 Function::Find => view.open_find(),
                 // The text comes back as a paste event, read above next frame.
@@ -209,14 +241,8 @@ pub fn show(
     if let Some(spot) = hovered {
         underline_hotspot(&painter, &grid, &cells, spot, palette);
     }
-    draw_cursor(
-        &painter,
-        session,
-        &grid,
-        &cells,
-        response.has_focus(),
-        palette,
-    );
+    let look = cursor_look(ui, view, response.has_focus(), session.insert_mode(), now);
+    cursor::draw(&painter, session, &grid, &cells, look, palette);
 
     let text = session.screen().text(session.code_page());
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Terminal, true, &text));
@@ -309,6 +335,25 @@ fn draw_cells(
         if style.column_separators {
             let tick = (rect.bottom() - grid.cell_size.y * 0.2)..=rect.bottom();
             painter.vline(rect.left(), tick, Stroke::new(1.0, fg.gamma_multiply(0.6)));
+        }
+    }
+}
+
+/// Types pasted text (R-UI-1, R-KEY-12): a line break is Field Exit, or a move one row down
+/// to the column the paste began in.
+fn paste(session: &mut Session, text: &str, breaks: PasteBreaks) {
+    let (_, start_column) = session.screen().row_column(session.screen().cursor);
+    for piece in pasted(text) {
+        match (piece, breaks) {
+            (Pasted::Key(key), _) => session.key(key),
+            (Pasted::LineBreak, PasteBreaks::NextField) => session.key(Key::FieldExit),
+            (Pasted::LineBreak, PasteBreaks::NextRow) => {
+                let (row, _) = session.screen().row_column(session.screen().cursor);
+                session.key(Key::MoveTo {
+                    row: row + 1,
+                    column: start_column,
+                });
+            }
         }
     }
 }
@@ -406,45 +451,6 @@ fn underline_hotspot(
         first.bottom() - 1.0,
         Stroke::new(1.0, palette.color(cell.style.color)),
     );
-}
-
-fn draw_cursor(
-    painter: &egui::Painter,
-    session: &Session,
-    grid: &Grid,
-    cells: &[parley_core::screen::Cell],
-    focused: bool,
-    palette: &Palette,
-) {
-    let screen = session.screen();
-    let (row, column) = screen.row_column(screen.cursor);
-    let rect = grid.cell(row, column);
-    let Some(cell) = cells.get(screen.cursor) else {
-        return;
-    };
-    let color = palette.color(cell.style.color);
-    if !focused {
-        painter.rect_stroke(
-            rect,
-            CornerRadius::ZERO,
-            Stroke::new(1.0, color),
-            egui::StrokeKind::Inside,
-        );
-    } else if session.insert_mode() {
-        let bar = Rect::from_min_max(Pos2::new(rect.left(), rect.bottom() - 3.0), rect.max);
-        painter.rect_filled(bar, CornerRadius::ZERO, color);
-    } else {
-        painter.rect_filled(rect, CornerRadius::ZERO, color);
-        if cell.ch != ' ' {
-            painter.text(
-                rect.left_top(),
-                Align2::LEFT_TOP,
-                cell.ch,
-                grid.font.clone(),
-                palette.background,
-            );
-        }
-    }
 }
 
 /// Where the positions go: the largest monospace font that fits, centred in the space.
@@ -834,5 +840,30 @@ mod tests {
         let mut view = View::default();
         view.flash(10.0);
         assert!(view.flash_until > 10.0 && view.flash_until <= 10.0 + FLASH);
+    }
+
+    #[test]
+    fn a_pasted_line_break_moves_to_the_next_field_or_the_next_row_r_key_12() {
+        for (breaks, cursor) in [
+            (PasteBreaks::NextField, (1, 1)),
+            (PasteBreaks::NextRow, (2, 1)),
+        ] {
+            let mut harness = harness();
+            harness.state_mut().2.paste_breaks = breaks;
+            harness.run();
+            harness.event(Event::Paste("ab\r\n".into()));
+            harness.run();
+            let session = &harness.state().0;
+            let screen = session.screen().text(CodePage::Ccsid37);
+            assert!(
+                screen.lines().nth(1).is_some_and(|l| l.starts_with(" ab")),
+                "{screen}"
+            );
+            assert_eq!(
+                session.screen().row_column(session.screen().cursor),
+                cursor,
+                "{breaks:?}"
+            );
+        }
     }
 }

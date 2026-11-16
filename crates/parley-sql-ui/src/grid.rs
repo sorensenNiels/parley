@@ -235,17 +235,21 @@ impl ResultView {
 
     /// The rows shown as CSV (RFC 4180, UTF-8 with a byte-order mark so spreadsheets read
     /// æøå): the column names, then the rows in the order shown; NULL as an empty field.
-    pub fn csv(&self) -> String {
+    pub fn csv(&self, delimiter: transfer::CsvDelimiter) -> String {
         let names: Vec<String> = self
             .columns
             .iter()
             .map(|c| header_text(c, self.header))
             .collect();
         let mut out = String::from('\u{FEFF}');
-        out.push_str(&transfer::csv_line(names.iter().map(String::as_str)));
+        out.push_str(&transfer::csv_line(
+            names.iter().map(String::as_str),
+            delimiter,
+        ));
         for (_, row) in self.shown() {
             out.push_str(&transfer::csv_line(
                 row.iter().map(|v| v.as_deref().unwrap_or("")),
+                delimiter,
             ));
         }
         out
@@ -666,8 +670,19 @@ mod tests {
             false,
             0,
         );
-        assert_eq!(v.csv(), "\u{FEFF}A,B\r\n\"say \"\"hi\"\", æøå\",\r\n");
+        assert_eq!(
+            v.csv(transfer::CsvDelimiter::Comma),
+            "\u{FEFF}A,B\r\n\"say \"\"hi\"\", æøå\",\r\n"
+        );
         assert_eq!(v.cursor, None, "no more rows");
+    }
+
+    #[test]
+    fn exported_csv_uses_the_chosen_delimiter_r_sql_100() {
+        let v = view();
+        let csv = v.csv(transfer::CsvDelimiter::Semicolon);
+        let header = csv.lines().next().unwrap_or_default();
+        assert!(header.contains(';') && !header.contains(','), "{header}");
     }
 
     #[test]
@@ -677,7 +692,10 @@ mod tests {
         v.refilter();
         assert_eq!(v.counts(), (1, 4));
         assert_eq!(v.tsv(), "AMOUNT\tNAME\n10.5\tæøå");
-        assert_eq!(v.csv(), "\u{FEFF}AMOUNT,NAME\r\n10.5,æøå\r\n");
+        assert_eq!(
+            v.csv(transfer::CsvDelimiter::Comma),
+            "\u{FEFF}AMOUNT,NAME\r\n10.5,æøå\r\n"
+        );
         "nothing like it".clone_into(&mut v.filter);
         v.refilter();
         assert_eq!(v.counts(), (0, 4));
@@ -757,7 +775,7 @@ mod tests {
         assert_eq!(v.tsv().lines().next(), Some("REGSEQ\tT"));
         v.header = HeaderMode::Both;
         assert_eq!(
-            v.csv().lines().next(),
+            v.csv(transfer::CsvDelimiter::Comma).lines().next(),
             Some("\u{FEFF}REGSEQ · &Registration.Sequence,T")
         );
     }

@@ -73,6 +73,15 @@ mod tests {
 pub struct SqlFileWindow;
 
 impl parley_sql_ui::SqlFiles for SqlFileWindow {
+    fn open_file(&self, path: &std::path::Path) -> Result<(), String> {
+        opener::open(path).map_err(|e| e.to_string())
+    }
+
+    fn show_in_folder(&self, path: &std::path::Path) -> Result<(), String> {
+        let folder = path.parent().unwrap_or(path);
+        opener::open(folder).map_err(|e| e.to_string())
+    }
+
     fn export_csv(&self, suggested: &str, bytes: &[u8]) -> Result<Option<String>, String> {
         let Some(path) = rfd::FileDialog::new()
             .set_title("Export rows")

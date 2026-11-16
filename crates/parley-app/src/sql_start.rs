@@ -17,7 +17,8 @@ Options:
   --name NAME          The new connection's name (default: HOST)
   --tls | --no-tls     Whether the new connection uses TLS (default: TLS)
   --ca-file FILE       A PEM file of CAs to trust besides the system's own
-  --ccsid N            The new connection's code page: 37, 277, 1140 or 1142
+  --ccsid N            The new connection's code page: 37, 273, 277, 285, 297, 500,
+                       871, or a euro variant (1140-1142, 1146-1149)
   --screenshot FILE    After a few seconds, save the window as a PPM image and quit
                        (for development)
   --version            Print the version and quit
@@ -198,6 +199,7 @@ mod tests {
             ca_file: "/etc/ca.pem".to_owned(),
             code_page: CodePage::Ccsid277,
             user: String::new(),
+            ..SqlConnection::default()
         };
         let parsed = parse(args_for(&connection)).expect("Parley's own arguments parse");
         let Command::Run(parsed) = parsed else {
@@ -231,7 +233,7 @@ mod tests {
 
     #[test]
     fn bad_arguments_are_errors_not_panics_r_sql_70() {
-        for bad in ["--host", "--ccsid 500 --host h", "--tls", "--bogus", "a b"] {
+        for bad in ["--host", "--ccsid 999 --host h", "--tls", "--bogus", "a b"] {
             assert!(parse(args(bad)).is_err(), "{bad}");
         }
     }
