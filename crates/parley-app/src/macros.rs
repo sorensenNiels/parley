@@ -72,7 +72,7 @@ impl MacroFolder {
 fn macro_file_window(title: &str) -> rfd::FileDialog {
     rfd::FileDialog::new()
         .set_title(title)
-        .add_filter("Parley macro", &[EXTENSION])
+        .add_filter("Parley 5250 macro", &[EXTENSION])
 }
 
 impl MacroStore for MacroFolder {

@@ -8,8 +8,8 @@ fn main() {
     }
     let mut resource = winresource::WindowsResource::new();
     resource.set_icon("icons/parley.ico");
-    resource.set("ProductName", "Parley");
-    resource.set("FileDescription", "Parley TN5250 terminal");
+    resource.set("ProductName", "Parley 5250");
+    resource.set("FileDescription", "Parley 5250, a TN5250 terminal");
     if let Err(e) = resource.compile() {
         // Without the Windows resource compiler the app still builds, just without its icon.
         println!("cargo::warning=could not embed the Windows icon: {e}");

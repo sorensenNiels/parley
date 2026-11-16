@@ -22,7 +22,7 @@ impl Program {
     /// The name the header, the title bar and the About page show.
     pub const fn name(self) -> &'static str {
         match self {
-            Self::Parley => "Parley",
+            Self::Parley => "Parley 5250",
             Self::ParleySql => "Parley SQL",
         }
     }
@@ -45,8 +45,6 @@ pub enum Action {
     Paste,
     /// Edit ▸ Find… (R-UI-21).
     Find,
-    /// The keyboard shortcut sheet (R-UI-17).
-    Shortcuts,
     /// Tools ▸ SQL… (R-SQL-6).
     Sql,
     /// The gear (R-UI-18).
@@ -115,8 +113,9 @@ pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     MenuBar::new().ui(ui, |ui| {
         brand(ui, header.logo, Program::Parley);
         let tools = header.macros.is_some() || header.sql;
-        let menus = [file_menu, edit_menu, view_menu, tools_menu];
-        for menu in menus.into_iter().take(if tools { 4 } else { 3 }) {
+        // Tools, last, only while it has items.
+        let menus = [file_menu, edit_menu, tools_menu];
+        for menu in menus.into_iter().take(menus.len() - usize::from(!tools)) {
             if let Some(chosen) = menu(ui, header) {
                 action = Some(chosen);
             }
@@ -238,17 +237,6 @@ fn edit_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
         let find = (icons::MAGNIFYING_GLASS, "Find…");
         if item(ui, header, on, find, Some(&Function::Find)) {
             action = Some(Action::Find);
-        }
-    });
-    action
-}
-
-fn view_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
-    let mut action = None;
-    ui.menu_button("View", |ui| {
-        let shortcuts = (icons::KEYBOARD, "Keyboard shortcuts");
-        if item(ui, header, true, shortcuts, Some(&Function::Shortcuts)) {
-            action = Some(Action::Shortcuts);
         }
     });
     action

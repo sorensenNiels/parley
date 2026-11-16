@@ -1,6 +1,6 @@
 [package]
 name = "parley-app"
-description = "Parley desktop application: launches the egui UI from parley-ui-egui."
+description = "Parley 5250 and Parley SQL desktop applications: launch the egui UIs."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -50,10 +50,10 @@ workspace = true
 
 # Installers (R-NF-1), built with cargo-packager: `make package` (see docs/RELEASING.md).
 [package.metadata.packager]
-product-name = "Parley"
+product-name = "Parley 5250"
 identifier = "dk.softdesign.parley"
 description = "A TN5250 terminal for IBM i"
-long-description = "Parley is a fast, modern TN5250 terminal emulator for IBM i: green screens over telnet or TLS, in colour, with familiar keys."
+long-description = "Parley 5250 is a fast, modern TN5250 terminal emulator for IBM i: green screens over telnet or TLS, in colour, with familiar keys."
 homepage = "https://github.com/sorensenNiels/parley"
 category = "Utility"
 license-file = "../../LICENSE-MIT"

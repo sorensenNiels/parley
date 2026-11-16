@@ -1,4 +1,4 @@
-# Parley architecture
+# Parley 5250 architecture
 
 > How Parley is built, with pictures. The why behind each choice is a decision in [ROADMAP.md](ROADMAP.md) §7 (D1–D18) or
 > [sql/ROADMAP.md](sql/ROADMAP.md) §6 (D19–D35, the SQL window; D36 splits the crates); the

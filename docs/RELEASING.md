@@ -15,10 +15,10 @@ where the OS allows it (R-NF-2):
 
 | Package | Commands | Menu |
 |---|---|---|
-| `.msi` | The install folder goes on the system PATH (removed on uninstall): both in a new terminal. | Parley and Parley SQL in the Start menu. |
-| `.deb` | Both in `/usr/bin`. | Parley and Parley SQL (`linux/parley-sql.desktop`). |
-| `.AppImage` | It starts `parley`; `--sql`, or a link named `parley-sql`, starts Parley SQL. The user makes the links. | Parley only. |
-| `.dmg` | Both in `Parley.app/Contents/MacOS`; the user links them into `/usr/local/bin`. | Parley only. |
+| `.msi` | The install folder goes on the system PATH (removed on uninstall): both in a new terminal. | Parley 5250 and Parley SQL in the Start menu. |
+| `.deb` | Both in `/usr/bin`. | Parley 5250 and Parley SQL (`linux/parley-sql.desktop`). |
+| `.AppImage` | It starts `parley`; `--sql`, or a link named `parley-sql`, starts Parley SQL. The user makes the links. | Parley 5250 only. |
+| `.dmg` | Both in `Parley 5250.app/Contents/MacOS`; the user links them into `/usr/local/bin`. | Parley 5250 only. |
 
 The Windows PATH entry and Start menu shortcut are a WiX fragment in `[package.metadata.packager.wix]`. The install
 notes users see head every release's notes: `.github/release-install.md`.

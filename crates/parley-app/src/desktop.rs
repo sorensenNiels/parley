@@ -95,7 +95,7 @@ pub fn run() -> eframe::Result {
     };
 
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("Parley")
+        .with_title("Parley 5250")
         .with_app_id("parley")
         .with_inner_size([1000.0, 640.0])
         .with_min_inner_size([480.0, 320.0]);
@@ -107,8 +107,10 @@ pub fn run() -> eframe::Result {
         viewport,
         ..Default::default()
     };
+    // The name shown (D39). The settings folder comes from the app id `parley` above, so saved
+    // sessions stay where they were.
     eframe::run_native(
-        "Parley",
+        "Parley 5250",
         options,
         Box::new(move |cc| {
             let profiles = cc.storage.map(saved_profiles).unwrap_or_default();

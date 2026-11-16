@@ -14,6 +14,9 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
+- **R-UI-27** (2026-11-16): no View menu. **Automated** (`make test`): the header has File, Edit, Tools and no View
+  menu or Keyboard shortcuts item; Tools still goes when it has no items; Ctrl+/ still opens the sheet (R-UI-17's
+  tests). **Left:** seen in the running app, then move to REQUIREMENTS.md.
 
 - **R-DS-10** (2026-11-15): GUI windows behind the session switch "GUI elements (beta)" (D38). **Automated** (`make
   test`): a window is written as the 5494 writes it (border attribute and characters, centred title `Æble`, cleared

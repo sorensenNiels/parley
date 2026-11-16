@@ -1,8 +1,9 @@
-# Parley
+# Parley 5250
 
-A TN5250 terminal emulator for IBM i, written in Rust, for Windows, Linux and macOS.
+A TN5250 terminal emulator for IBM i, written in Rust, for Windows, Linux and macOS. It was called Parley until
+2026-11-16; the command, the repository and the settings folder keep that name. Parley SQL, the SQL window, comes with it.
 
-> **Status:** early development. Parley connects to an IBM i over telnet or TLS, shows the 5250 screen in colour and
+> **Status:** early development. Parley 5250 connects to an IBM i over telnet or TLS, shows the 5250 screen in colour and
 > takes input in its fields. It has been checked against a real IBM i up to the sign-on screen; see
 > [docs/FEATURES.md](docs/FEATURES.md) for what is verified and [docs/ROADMAP.md](docs/ROADMAP.md) for the plan.
 

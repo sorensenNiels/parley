@@ -253,8 +253,8 @@ impl ParleyUi {
     /// The window title for the current state.
     pub fn title(&self) -> String {
         match (&self.connection, &self.current) {
-            (Some(_), Some(profile)) => format!("{} – Parley", profile.name),
-            _ => "Parley".to_owned(),
+            (Some(_), Some(profile)) => format!("{} – Parley 5250", profile.name),
+            _ => "Parley 5250".to_owned(),
         }
     }
 
@@ -643,7 +643,6 @@ impl ParleyUi {
                     self.focus_terminal = true;
                 }
                 Action::Settings => self.settings_dialog = Some(self.open_settings(ctx)),
-                Action::Shortcuts => self.shortcut_sheet = Some(shortcuts::Sheet::default()),
                 Action::Sql => self.start_parley_sql(connected),
                 Action::Key(key) => {
                     if let Some(s) = session.as_deref_mut() {
@@ -1362,7 +1361,7 @@ mod tests {
             .with_size(egui::vec2(1000.0, 800.0))
             .build_ui_state(|ui, app: &mut ParleyUi| app.ui(ui), app);
         assert!(
-            harness.query_all_by_label("Parley").count() >= 1,
+            harness.query_all_by_label("Parley 5250").count() >= 1,
             "the name"
         );
         let file = harness.get_by_label("File").rect();
@@ -1722,21 +1721,17 @@ mod tests {
     fn the_header_and_status_bar_are_there_before_connecting_without_the_keys_menu() {
         // R-UI-15, R-UI-16: one header row; the Keys menu only while connected.
         let harness = app_with(Vec::new());
-        for menu in ["File", "Edit", "View", "Tools", "Settings", "Offline"] {
+        for menu in ["File", "Edit", "Tools", "Settings", "Offline"] {
             harness.get_by_label(menu);
         }
         assert!(harness.query_by_label("Keys").is_none());
     }
 
     #[test]
-    fn the_shortcut_sheet_opens_from_the_view_menu_r_ui_17() {
-        let mut harness = app_with(Vec::new());
-        harness.get_by_label("View").click();
-        harness.run();
-        harness.get_by_label("Keyboard shortcuts").click();
-        harness.run();
-        assert!(harness.state().shortcut_sheet.is_some());
-        harness.get_by_label("Field Exit");
+    fn there_is_no_view_menu_r_ui_27() {
+        let harness = app_with(Vec::new());
+        assert!(harness.query_by_label("View").is_none());
+        assert!(harness.query_by_label("Keyboard shortcuts").is_none());
     }
 
     /// The status bar for `session` on TLS, with the Default map and a clock.
@@ -2767,7 +2762,7 @@ mod tests {
         assert_eq!(current.name, "Local æøå");
         assert_eq!(current.config.port, port, "the connection's settings stay");
         assert_eq!(app.current_index(), Some(0), "Connect again finds it");
-        assert_eq!(app.title(), "Local æøå – Parley");
+        assert_eq!(app.title(), "Local æøå – Parley 5250");
     }
 
     #[test]

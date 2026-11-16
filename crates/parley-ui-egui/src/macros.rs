@@ -95,7 +95,7 @@ impl MacroStore for NoMacroStore {
     }
 }
 
-const NO_PLACE: &str = "Parley has no place to keep macros.";
+const NO_PLACE: &str = "Parley 5250 has no place to keep macros.";
 
 /// A trimmed macro name, or why it cannot be one.
 pub fn check_name(name: &str) -> Result<String, String> {
@@ -424,7 +424,7 @@ impl Manager {
                         }
                     });
                 }
-                None => theme::hint(ui, "Parley has no place to keep macros."),
+                None => theme::hint(ui, "Parley 5250 has no place to keep macros."),
             }
             ui.add_space(16.0);
             ui.horizontal(|ui| {

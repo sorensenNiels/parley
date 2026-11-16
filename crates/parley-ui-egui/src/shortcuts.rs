@@ -159,7 +159,7 @@ mod tests {
         let headings: Vec<_> = groups.iter().map(|(h, _)| *h).collect();
         assert_eq!(
             headings,
-            ["Send to the host", "Fields and cursor", "Parley"]
+            ["Send to the host", "Fields and cursor", "Parley 5250"]
         );
         let parley = &groups[2].1;
         let sheet = parley.iter().find(|(name, _)| name == "Keyboard shortcuts");

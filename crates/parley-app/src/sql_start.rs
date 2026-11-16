@@ -125,7 +125,7 @@ pub fn start(name: &str, config: &parley_core::SessionConfig) -> Result<(), Stri
 /// Parley SQL's program, installed beside this one.
 fn beside() -> Result<std::path::PathBuf, String> {
     let program = std::env::current_exe()
-        .map_err(|e| format!("Parley could not find its own folder: {e}"))?
+        .map_err(|e| format!("Parley 5250 could not find its own folder: {e}"))?
         .with_file_name(format!("parley-sql{}", std::env::consts::EXE_SUFFIX));
     if program.is_file() {
         Ok(program)

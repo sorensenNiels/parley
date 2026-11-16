@@ -332,7 +332,7 @@ pub fn groups(macros: Option<&[String]>, sql: bool) -> Vec<(&'static str, Vec<Fu
         ("Send to the host", host),
         ("Fields and cursor", keys(&FIELD_KEYS)),
         (
-            "Parley",
+            "Parley 5250",
             vec![
                 Function::CopyScreen,
                 Function::CopyTable,

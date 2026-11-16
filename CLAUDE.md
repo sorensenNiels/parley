@@ -1,9 +1,10 @@
-# Parley
+# Parley 5250
 
-A TN5250 terminal emulator for IBM i, written in Rust.
+A TN5250 terminal emulator for IBM i, written in Rust. Shown as "Parley 5250" since 2026-11-16 (D39); crates, the
+`parley` command, folders, the app id and the keychain service keep the name Parley, and so do the releases.
 Targets: Windows, Linux and macOS desktop only (roadmap D5).
 
-**Scope rule:** `docs/ROADMAP.md` is the plan for Parley (the terminal), `docs/sql/ROADMAP.md` for Parley SQL (the SQL
+**Scope rule:** `docs/ROADMAP.md` is the plan for Parley 5250 (the terminal; "Parley" in the docs), `docs/sql/ROADMAP.md` for Parley SQL (the SQL
 window: Parley's SQL add-on and `parley-sql`). Build what the user asks for; when choosing what comes next,
 follow the roadmap's order. If a request is unclear, or would change a decision recorded in the roadmap, ask before building.
 
