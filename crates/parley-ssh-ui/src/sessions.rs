@@ -3,7 +3,9 @@
 
 use egui::Context;
 use parley_ssh_core::net::agent::AgentAddress;
+use parley_ssh_core::net::jump;
 use parley_ssh_core::net::{Options, Target};
+use parley_ssh_core::openssh_config::Config;
 use parley_ui_egui::{dialog, theme};
 use serde::{Deserialize, Serialize};
 
@@ -28,6 +30,8 @@ pub struct SavedSession {
     pub agent_forwarding: bool,
     /// Programs on the host that ask for the mouse get it (R-SSH-18); Shift still selects.
     pub mouse_reporting: bool,
+    /// Jump hosts as OpenSSH's `ProxyJump` writes them, `[user@]host[:port]` separated by commas (R-SSH-43).
+    pub proxy_jump: String,
 }
 
 impl Default for SavedSession {
@@ -42,6 +46,7 @@ impl Default for SavedSession {
             agent_key: String::new(),
             agent_forwarding: false,
             mouse_reporting: true,
+            proxy_jump: String::new(),
         }
     }
 }
@@ -66,15 +71,35 @@ impl SavedSession {
         }
     }
 
-    /// How to sign on: the agent the system names, when the session uses one (R-SSH-13).
-    pub fn options(&self) -> Options {
-        Options {
-            key_files: self
-                .key_files
-                .iter()
-                .filter(|k| !k.trim().is_empty())
-                .map(|k| k.trim().into())
-                .collect(),
+    /// How to sign on: the agent the system names, when the session uses one (R-SSH-13), and the jump hosts,
+    /// their names looked up in `~/.ssh/config` (R-SSH-43), which is read only when there are any.
+    ///
+    /// # Errors
+    /// Jump hosts that cannot be read, said for the user.
+    pub fn options(&self) -> Result<Options, String> {
+        let config = if self.proxy_jump.trim().is_empty() {
+            None
+        } else {
+            Config::from_home()
+        };
+        self.options_with(config.as_ref())
+    }
+
+    /// [`Self::options`] with the config given.
+    ///
+    /// # Errors
+    /// Jump hosts that cannot be read, said for the user.
+    pub fn options_with(&self, config: Option<&Config>) -> Result<Options, String> {
+        let key_files: Vec<std::path::PathBuf> = self
+            .key_files
+            .iter()
+            .filter(|k| !k.trim().is_empty())
+            .map(|k| k.trim().into())
+            .collect();
+        let jumps = jump::resolve(&self.proxy_jump, self.user.trim(), &key_files, config)
+            .map_err(|e| format!("The jump hosts cannot be used: {e}."))?;
+        Ok(Options {
+            key_files,
             agent: if self.use_agent {
                 AgentAddress::from_environment()
             } else {
@@ -82,7 +107,8 @@ impl SavedSession {
             },
             agent_key: Some(self.agent_key.trim().to_owned()).filter(|k| !k.is_empty()),
             agent_forwarding: self.use_agent && self.agent_forwarding,
-        }
+            jumps,
+        })
     }
 
     /// The line under the name on the start screen.
@@ -104,6 +130,9 @@ impl SavedSession {
             args.extend(["-i".to_owned(), key.clone()]);
         }
         args.push(if self.agent_forwarding { "-A" } else { "-a" }.to_owned());
+        if !self.proxy_jump.trim().is_empty() {
+            args.extend(["-J".to_owned(), self.proxy_jump.trim().to_owned()]);
+        }
         args
     }
 }
@@ -220,6 +249,13 @@ impl Editor {
                     .hint_text("One path per line, e.g. ~/.ssh/id_ed25519 or a PuTTY .ppk");
                 theme::sized_edit(ui, 300.0, edit).labelled_by(label.id);
                 ui.end_row();
+                field(
+                    ui,
+                    "Jump hosts",
+                    &mut self.session.proxy_jump,
+                    "bastion, me@gw.example.com:2222",
+                    300.0,
+                );
             });
         ui.add_space(10.0);
         theme::section_label(ui, "Agent");
@@ -292,6 +328,11 @@ impl Editor {
             .filter(|l| !l.is_empty())
             .map(str::to_owned)
             .collect();
+        self.session
+            .proxy_jump
+            .trim()
+            .clone_into(&mut session.proxy_jump);
+        jump::check(&session.proxy_jump).map_err(|e| format!("Jump hosts: {e}."))?;
         if self.defaults {
             return Ok(session);
         }
@@ -346,7 +387,8 @@ mod tests {
     fn a_session_signs_on_with_its_keys_and_the_agent_r_ssh_11() {
         let session = prod();
         assert_eq!(session.target().label(), "me@box.lan:2222");
-        let options = session.options();
+        let options = session.options().expect("no jump hosts");
+        assert_eq!(options.jumps, []);
         assert_eq!(
             options.key_files,
             [std::path::PathBuf::from("/home/me/.ssh/id_ed25519")]
@@ -358,10 +400,42 @@ mod tests {
             agent_forwarding: true,
             ..prod()
         };
-        assert_eq!(off.options().agent, None);
+        let off = off.options().expect("no jump hosts");
+        assert_eq!(off.agent, None);
+        assert!(!off.agent_forwarding, "no agent, nothing to forward");
+    }
+
+    #[test]
+    fn jump_hosts_sign_on_as_the_session_unless_told_and_with_its_keys_r_ssh_43() {
+        let session = SavedSession {
+            proxy_jump: "gw, ops@inner:2200".into(),
+            ..prod()
+        };
+        let options = session.options_with(None).expect("readable");
+        let jumps: Vec<String> = options.jumps.iter().map(|j| j.target.label()).collect();
+        assert_eq!(jumps, ["me@gw", "ops@inner:2200"]);
+        assert_eq!(options.jumps[0].key_files, options.key_files);
+        let bad = SavedSession {
+            proxy_jump: "gw:x".into(),
+            ..prod()
+        };
+        let error = bad.options_with(None).expect_err("not readable");
         assert!(
-            !off.options().agent_forwarding,
-            "no agent, nothing to forward"
+            error.starts_with("The jump hosts cannot be used"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn another_window_gets_the_jump_hosts_on_its_command_line_r_ssh_43() {
+        let session = SavedSession {
+            proxy_jump: " gw ".into(),
+            ..prod()
+        };
+        assert!(
+            session
+                .command_line(false)
+                .ends_with(&["-J".to_owned(), "gw".to_owned()])
         );
     }
 
@@ -409,6 +483,14 @@ mod tests {
         assert!(editor.checked(&[]).is_err(), "no host");
         editor.session.host = "box".into();
         assert!(editor.checked(&["Prod"]).is_err(), "taken");
+        editor.session.proxy_jump = "@gw".into();
+        let error = editor.checked(&[]).expect_err("not readable");
+        assert!(error.starts_with("Jump hosts:"), "{error}");
+        editor.session.proxy_jump = " gw ".into();
+        assert_eq!(
+            editor.checked(&[]).map(|s| s.proxy_jump),
+            Ok("gw".to_owned())
+        );
         editor.port = "0".into();
         assert!(editor.checked(&[]).is_err(), "port");
         editor.port = "22".into();

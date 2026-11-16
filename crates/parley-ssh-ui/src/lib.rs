@@ -52,6 +52,8 @@ pub struct StartRequest {
     pub key_files: Vec<String>,
     /// `-A` (true) or `-a` (false).
     pub agent_forwarding: Option<bool>,
+    /// `-J [user@]host[:port],…` (R-SSH-43); `none` for no jump host.
+    pub proxy_jump: Option<String>,
 }
 
 /// What is about to close, waiting for the user's yes (R-SSH-10).
@@ -218,6 +220,13 @@ impl ParleySshUi {
         source.key_files.extend(request.key_files);
         if let Some(forwarding) = request.agent_forwarding {
             source.agent_forwarding = forwarding;
+        }
+        if let Some(jumps) = request.proxy_jump {
+            source.proxy_jump = if jumps.trim().eq_ignore_ascii_case("none") {
+                String::new()
+            } else {
+                jumps
+            };
         }
         Ok(Some((source, saved)))
     }

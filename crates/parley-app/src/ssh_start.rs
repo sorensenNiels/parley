@@ -1,5 +1,5 @@
 //! Parley SSH's command line (R-SSH-14), as `PuTTY`'s and OpenSSH's: `parley-ssh [user@]host[:port]`, `-p`, `-l`,
-//! `-i`, `-load`, `-A`/`-a`; starting another Parley SSH window (R-SSH-15); and starting Parley SSH from Parley
+//! `-i`, `-load`, `-A`/`-a`, `-J` (R-SSH-43); starting another Parley SSH window (R-SSH-15); and starting Parley SSH from Parley
 //! 5250's Tools ▸ SSH… (R-SSH-59).
 
 use parley_ssh_ui::StartRequest;
@@ -18,6 +18,8 @@ Options:
   -i FILE              Try the private key in FILE (OpenSSH or PuTTY .ppk); may be repeated
   -A                   Forward the agent to the server
   -a                   Do not forward the agent
+  -J [USER@]HOST[:PORT][,...]
+                       Through these jump hosts, in order (none: no jump host)
   --screenshot FILE    After a few seconds, save the window as a PPM image and quit
                        (for development)
   --version            Print the version and quit
@@ -59,6 +61,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
             "-i" => request.key_files.push(value()?),
             "-A" => request.agent_forwarding = Some(true),
             "-a" => request.agent_forwarding = Some(false),
+            "-J" => {
+                let jumps = value()?;
+                parley_ssh_core::net::jump::check(&jumps).map_err(|e| format!("-J: {e}"))?;
+                request.proxy_jump = Some(jumps);
+            }
             _ if !arg.starts_with('-') && request.host.is_none() => request.host = Some(arg),
             _ if !arg.starts_with('-') => return Err(format!("a second host '{arg}'")),
             _ => return Err(format!("unknown option '{arg}'")),
@@ -135,6 +142,26 @@ mod tests {
         assert_eq!(
             run("me@æøå.lan:2200 -a").expect("valid").host.as_deref(),
             Some("me@æøå.lan:2200")
+        );
+    }
+
+    #[test]
+    fn jump_hosts_on_the_command_line_as_ssh_takes_them_r_ssh_43() {
+        let request = run("-J gw,ops@inner:2200 box").expect("valid");
+        assert_eq!(request.proxy_jump.as_deref(), Some("gw,ops@inner:2200"));
+        assert_eq!(
+            run("-J none box").expect("valid").proxy_jump.as_deref(),
+            Some("none")
+        );
+        let error = run("-J gw:x box").expect_err("not a port");
+        assert!(
+            error.starts_with("-J:") && error.contains("not a port"),
+            "{error}"
+        );
+        assert!(
+            run("box -J")
+                .expect_err("no value")
+                .contains("needs a value")
         );
     }
 

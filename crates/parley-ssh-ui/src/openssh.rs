@@ -103,6 +103,9 @@ pub fn apply(session: &mut SavedSession, host: &Host) {
     if let Some(forward) = host.forward_agent {
         session.agent_forwarding = forward;
     }
+    if let Some(jumps) = &host.proxy_jump {
+        jumps.clone_into(&mut session.proxy_jump);
+    }
 }
 
 #[cfg(test)]
@@ -126,9 +129,11 @@ mod tests {
             port: Some(2222),
             identity_files: vec![PathBuf::from("/k/web")],
             forward_agent: Some(true),
+            proxy_jump: Some("bastion".into()),
             ..Host::default()
         };
         let session = session(&defaults, &host);
+        assert_eq!(session.proxy_jump, "bastion", "R-SSH-43");
         assert_eq!(session.name, "web");
         assert_eq!(session.host, "web1.lan");
         assert_eq!(session.user, "dflt");

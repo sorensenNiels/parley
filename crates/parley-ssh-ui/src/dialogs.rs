@@ -185,16 +185,22 @@ impl Prompt {
     }
 
     /// Draws the dialog; `None` while it is open.
-    pub fn show(&mut self, ctx: &Context, target: &Target) -> Option<Answered> {
-        let title = if self.request.name.trim().is_empty() {
-            format!("Sign on to {}", target.label())
-        } else {
+    pub fn show(&mut self, ctx: &Context) -> Option<Answered> {
+        let named = !self.request.name.trim().is_empty();
+        let title = if named {
             self.request.name.clone()
+        } else {
+            format!("Sign on to {}", self.request.host)
         };
         let (close, (cancel, confirm)) = dialog::dialog(ctx, "ssh-prompt", &title, WIDTH, |ui| {
             if let Some(banner) = &self.banner {
                 ui.label(RichText::new(banner_excerpt(banner)).monospace().small());
                 ui.add_space(10.0);
+            }
+            if named {
+                // With jump hosts several hosts ask in turn: each says who it is (R-SSH-43).
+                theme::hint(ui, format!("For {}", self.request.host));
+                ui.add_space(6.0);
             }
             if !self.request.instructions.trim().is_empty() {
                 ui.label(self.request.instructions.trim());
@@ -509,6 +515,7 @@ mod tests {
     #[test]
     fn the_sign_on_prompt_hides_secrets_and_returns_the_answers_r_ssh_4() {
         let prompt = net::Prompt {
+            host: "me@box".into(),
             name: String::new(),
             instructions: "Two things".into(),
             fields: vec![
@@ -522,11 +529,6 @@ mod tests {
                 },
             ],
         };
-        let target = Target {
-            host: "box".into(),
-            port: 22,
-            user: "me".into(),
-        };
         let state = (
             Prompt::new(prompt, Some("Authorised use only".into())),
             None::<Answered>,
@@ -534,12 +536,13 @@ mod tests {
         let mut h = harness(
             state,
             move |ui, (dialog, answer): &mut (Prompt, Option<Answered>)| {
-                if let Some(a) = dialog.show(ui.ctx(), &target) {
+                if let Some(a) = dialog.show(ui.ctx()) {
                     *answer = Some(a);
                 }
             },
         );
         stays_put(&mut h, "Sign on");
+        h.get_by_label("Sign on to me@box");
         h.get_by_label("Password").type_text("æøå-secret");
         h.run_steps(2);
         h.get_by_label("Sign on").click();
@@ -549,6 +552,24 @@ mod tests {
         };
         assert_eq!(answers[0].expose(), "æøå-secret");
         assert_eq!(answers[1].expose(), "");
+    }
+
+    #[test]
+    fn a_named_prompt_says_which_host_asks_r_ssh_43() {
+        let prompt = net::Prompt {
+            host: "ops@bastion:2200".into(),
+            name: "Key passphrase".into(),
+            instructions: String::new(),
+            fields: vec![PromptField {
+                label: "Passphrase".into(),
+                echo: false,
+            }],
+        };
+        let mut h = harness(Prompt::new(prompt, None), |ui, dialog: &mut Prompt| {
+            dialog.show(ui.ctx());
+        });
+        stays_put(&mut h, "Sign on");
+        h.get_by_label("For ops@bastion:2200");
     }
 
     #[test]

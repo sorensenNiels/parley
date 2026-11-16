@@ -9,7 +9,8 @@ use russh::{Preferred, cipher, kex, mac};
 
 use super::agent::{self, AgentAddress};
 use super::{
-    Algorithms, Command, Commands, Event, HostKeyAnswer, HostKeyQuestion, Link, Target, wait_for,
+    Algorithms, Command, Commands, Event, Hop, HostKeyAnswer, HostKeyQuestion, Link, Target,
+    wait_for,
 };
 use crate::Error;
 use crate::known_hosts::{self, HostKeyStatus, KnownHosts};
@@ -87,6 +88,7 @@ pub(super) struct Client {
     known_hosts: KnownHosts,
     /// The agent the server may use, when forwarding is on (R-SSH-13).
     forward_to: Option<AgentAddress>,
+    hop: Hop,
     commands: Commands,
     link: Link,
     fingerprint: String,
@@ -97,6 +99,7 @@ impl Client {
         target: &Target,
         known_hosts: KnownHosts,
         forward_to: Option<AgentAddress>,
+        hop: Hop,
         commands: Commands,
         link: Link,
     ) -> Self {
@@ -105,6 +108,7 @@ impl Client {
             port: target.port,
             known_hosts,
             forward_to,
+            hop,
             commands,
             link,
             fingerprint: String::new(),
@@ -195,10 +199,14 @@ impl ssh::Handler for Client {
             "Key exchange {}, host key {}, cipher {}, MAC {}",
             algorithms.kex, algorithms.host_key, algorithms.cipher, algorithms.mac
         ));
-        self.link.send(Event::Secured {
-            algorithms,
-            fingerprint: self.fingerprint.clone(),
-        });
+        match self.hop {
+            Hop::Target => self.link.send(Event::Secured {
+                algorithms,
+                fingerprint: self.fingerprint.clone(),
+            }),
+            // A jump host's are in the event log only (R-SSH-43).
+            Hop::Jump => {}
+        }
         Ok(())
     }
 

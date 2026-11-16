@@ -1,6 +1,6 @@
 //! A whole connection against a small SSH server in this process (russh's own): the host key question
 //! (R-SSH-3), signing on with a password and its retries (R-SSH-4), with key files (R-SSH-12) and an agent and its
-//! forwarding (R-SSH-13), the shell with its pseudo-terminal, output into
+//! forwarding (R-SSH-13), jump hosts (R-SSH-43), the shell with its pseudo-terminal, output into
 //! the terminal and the terminal's replies back, typing, resizing and the exit status (R-SSH-5). No real server.
 
 #![expect(
@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use parley_ssh_core::Secret;
 use parley_ssh_core::known_hosts::{HostKeyStatus, KnownHosts};
 use parley_ssh_core::net::agent::AgentAddress;
+use parley_ssh_core::net::jump::Jump;
 use parley_ssh_core::net::{
     Command, Connection, Ending, Event, HostKeyAnswer, Options, Target, lock,
 };
@@ -91,6 +92,8 @@ struct Seen {
     input: Vec<u8>,
     /// The client asked for agent forwarding.
     agent_requested: bool,
+    /// Where `direct-tcpip` channels were asked to go (R-SSH-43).
+    forwarded: Vec<(String, u32)>,
 }
 
 struct Server {
@@ -150,6 +153,39 @@ impl server::Handler for Server {
         Ok(())
     }
 
+    /// As OpenSSH's `direct-tcpip`: connects to the address asked for and carries the bytes (R-SSH-43).
+    async fn channel_open_direct_tcpip(
+        &mut self,
+        channel: Channel<Msg>,
+        host_to_connect: &str,
+        port_to_connect: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: server::ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.seen
+            .lock()
+            .expect("not poisoned")
+            .forwarded
+            .push((host_to_connect.to_owned(), port_to_connect));
+        let address = format!("{host_to_connect}:{port_to_connect}");
+        match tokio::net::TcpStream::connect(address).await {
+            Ok(mut socket) => {
+                reply.accept().await;
+                tokio::spawn(async move {
+                    let mut channel = channel.into_stream();
+                    // Either side closing ends the relay.
+                    let _ = tokio::io::copy_bidirectional(&mut channel, &mut socket).await;
+                });
+            }
+            Err(_) => {
+                reply.reject(russh::ChannelOpenFailure::ConnectFailed).await;
+            }
+        }
+        Ok(())
+    }
+
     async fn pty_request(
         &mut self,
         _channel: ChannelId,
@@ -205,6 +241,10 @@ impl server::Handler for Server {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
+        // russh also hands a `direct-tcpip` channel's data here: that is the relay's, not the shell's.
+        if !self.channels.iter().any(|c| c.id() == channel) {
+            return Ok(());
+        }
         let input = {
             let mut seen = self.seen.lock().expect("not poisoned");
             seen.input.extend_from_slice(data);
@@ -657,4 +697,136 @@ fn an_agent_key_not_named_is_not_used_and_forwarding_stays_off_r_ssh_13() {
     connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
     assert_eq!(next(&connection), Event::Started);
     assert!(!seen.lock().expect("not poisoned").agent_requested);
+}
+
+/// A `Target` for a test server, signing on as `tester`.
+fn target_of(address: SocketAddr) -> Target {
+    Target {
+        host: address.ip().to_string(),
+        port: address.port(),
+        user: "tester".into(),
+    }
+}
+
+/// Answers the host key once and the password, checking both are for `address`.
+fn sign_on_to(connection: &Connection, address: SocketAddr) {
+    let event = next(connection);
+    let other = event.clone();
+    let Event::HostKey(question) = event else {
+        panic!("host key question for {address}: {other:?}")
+    };
+    assert_eq!(
+        question.port,
+        address.port(),
+        "the hop's own host key is asked about"
+    );
+    connection.send(Command::HostKey(HostKeyAnswer::ConnectOnce));
+    let Event::Prompt(prompt) = next(connection) else {
+        panic!("password prompt for {address}")
+    };
+    assert_eq!(
+        prompt.host,
+        target_of(address).label(),
+        "the prompt names its hop"
+    );
+    connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
+}
+
+#[test]
+fn a_session_through_two_jump_hosts_checks_and_signs_on_to_each_r_ssh_43() {
+    let first_seen = Arc::new(Mutex::new(Seen::default()));
+    let second_seen = Arc::new(Mutex::new(Seen::default()));
+    let first = start_server(Arc::clone(&first_seen));
+    let second = start_server(Arc::clone(&second_seen));
+    let target = start_server(Arc::new(Mutex::new(Seen::default())));
+    let options = Options {
+        jumps: [first, second]
+            .map(|a| Jump {
+                target: target_of(a),
+                key_files: Vec::new(),
+            })
+            .to_vec(),
+        ..Options::default()
+    };
+    let terminal = Arc::new(Mutex::new(Terminal::new(80, 24)));
+    let connection = Connection::open(
+        target_of(target),
+        options,
+        known_hosts("jumps"),
+        Arc::clone(&terminal),
+        || {},
+    );
+    sign_on_to(&connection, first);
+    sign_on_to(&connection, second);
+    let Event::HostKey(question) = next(&connection) else {
+        panic!("the target's host key")
+    };
+    assert_eq!(question.port, target.port());
+    connection.send(Command::HostKey(HostKeyAnswer::ConnectOnce));
+    assert!(
+        matches!(next(&connection), Event::Secured { .. }),
+        "only the target's algorithms go to the status bar"
+    );
+    let Event::Prompt(prompt) = next(&connection) else {
+        panic!("the target's password")
+    };
+    assert_eq!(prompt.host, target_of(target).label());
+    connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
+    assert_eq!(next(&connection), Event::Started);
+    wait_until("the greeting", || {
+        screen_text(&terminal).contains("Velkommen æøå")
+    });
+    let to = |a: SocketAddr| vec![(a.ip().to_string(), u32::from(a.port()))];
+    assert_eq!(
+        first_seen.lock().expect("not poisoned").forwarded,
+        to(second)
+    );
+    assert_eq!(
+        second_seen.lock().expect("not poisoned").forwarded,
+        to(target)
+    );
+}
+
+#[test]
+fn a_jump_host_that_cannot_reach_the_target_says_so_r_ssh_43() {
+    let jump = start_server(Arc::new(Mutex::new(Seen::default())));
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let nobody = listener.local_addr().expect("address");
+    drop(listener);
+    let options = Options {
+        jumps: vec![Jump {
+            target: target_of(jump),
+            key_files: Vec::new(),
+        }],
+        ..Options::default()
+    };
+    let terminal = Arc::new(Mutex::new(Terminal::new(80, 24)));
+    let connection = Connection::open(
+        target_of(nobody),
+        options,
+        known_hosts("jump-refused"),
+        terminal,
+        || {},
+    );
+    sign_on_to(&connection, jump);
+    let Event::Ended(Ending::Failed(why)) = next(&connection) else {
+        panic!("failed")
+    };
+    assert!(
+        why.contains(&format!(
+            "the jump host {} could not reach",
+            target_of(jump).label()
+        )),
+        "{why}"
+    );
+}
+
+#[test]
+fn a_connection_that_never_started_ends_with_its_problem_r_ssh_43() {
+    let terminal = Arc::new(Mutex::new(Terminal::new(80, 24)));
+    let connection = Connection::failed("bad jump".into(), terminal);
+    assert_eq!(
+        next(&connection),
+        Event::Ended(Ending::Failed("bad jump".into()))
+    );
 }

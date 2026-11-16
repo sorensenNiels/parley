@@ -95,13 +95,17 @@ impl Session {
         repaint: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         let target = source.target();
-        let connection = Connection::open(
-            target.clone(),
-            source.options(),
-            known_hosts.clone(),
-            Arc::clone(&terminal),
-            repaint,
-        );
+        let connection = match source.options() {
+            Ok(options) => Connection::open(
+                target.clone(),
+                options,
+                known_hosts.clone(),
+                Arc::clone(&terminal),
+                repaint,
+            ),
+            // Said as any connection that fails, so a split pane is taken out again (R-SSH-58).
+            Err(problem) => Connection::failed(problem, Arc::clone(&terminal)),
+        };
         Self {
             target,
             source,
@@ -302,7 +306,7 @@ impl Session {
             self.grab_focus = true;
         }
         if let Some(dialog) = &mut self.prompt
-            && let Some(answers) = dialog.show(ctx, &self.target)
+            && let Some(answers) = dialog.show(ctx)
         {
             let answers = match answers {
                 dialogs::Answered::Cancel => None,

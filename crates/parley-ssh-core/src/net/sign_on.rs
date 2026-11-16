@@ -108,6 +108,7 @@ async fn password(
     link: &Link,
 ) -> Result<Outcome, Error> {
     let prompt = Prompt {
+        host: target.label(),
         name: String::new(),
         instructions: String::new(),
         fields: vec![PromptField {
@@ -165,6 +166,7 @@ async fn keyboard_interactive(
                         .collect();
                     ask(
                         Prompt {
+                            host: target.label(),
                             name,
                             instructions,
                             fields,

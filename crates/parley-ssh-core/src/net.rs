@@ -4,6 +4,7 @@
 
 pub mod agent;
 mod client;
+pub mod jump;
 mod public_key;
 mod sign_on;
 
@@ -52,6 +53,8 @@ pub struct Options {
     pub agent_key: Option<String>,
     /// Let the server use the agent while connected (`auth-agent-req@openssh.com`); off by default.
     pub agent_forwarding: bool,
+    /// Jump hosts reached first, in order, each through the one before (R-SSH-43).
+    pub jumps: Vec<jump::Jump>,
 }
 
 /// What the UI tells the connection.
@@ -93,6 +96,8 @@ pub struct HostKeyQuestion {
 /// A request for secret answers: the password, or a keyboard-interactive round (RFC 4256 §3.2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prompt {
+    /// Who asks: `user@host` of the hop being signed on to (R-SSH-43).
+    pub host: String,
     pub name: String,
     pub instructions: String,
     pub fields: Vec<PromptField>,
@@ -208,6 +213,19 @@ impl Connection {
     }
 
     /// Sends a command. After the connection ended there is no one to tell, which is harmless.
+    /// A connection that never started: it ends at once with `problem` (jump hosts that cannot be read).
+    pub fn failed(problem: String, terminal: Arc<Mutex<Terminal>>) -> Self {
+        let (commands, _) = unbounded_channel();
+        let (event_tx, events) = mpsc::channel();
+        // The receiver is held just below, so this cannot fail.
+        let _ = event_tx.send(Event::Ended(Ending::Failed(problem)));
+        Self {
+            commands,
+            events,
+            terminal,
+        }
+    }
+
     pub fn send(&self, command: Command) {
         let _ = self.commands.send(command);
     }
@@ -278,30 +296,38 @@ async fn session(
     commands: &Commands,
     link: &Link,
 ) -> Result<Ending, Error> {
-    link.log(format!(
-        "Connecting to {} port {}",
-        target.host, target.port
-    ));
-    let forward_to = options.agent.clone().filter(|_| options.agent_forwarding);
-    let handler = client::Client::new(
+    // Each jump host is reached through the one before and kept open while the session runs (R-SSH-43).
+    let mut jumps: Vec<Through> = Vec::new();
+    for jump in &options.jumps {
+        let hop = Options {
+            key_files: jump.key_files.clone(),
+            agent: options.agent.clone(),
+            agent_key: None,
+            agent_forwarding: false,
+            jumps: Vec::new(),
+        };
+        let handle = hop_connect(
+            &jump.target,
+            &hop,
+            jumps.last(),
+            Hop::Jump,
+            known_hosts.clone(),
+            commands,
+            link,
+        )
+        .await?;
+        jumps.push((handle, jump.target.label()));
+    }
+    let handle = hop_connect(
         target,
+        options,
+        jumps.last(),
+        Hop::Target,
         known_hosts,
-        forward_to.clone(),
-        Arc::clone(commands),
-        link.clone(),
-    );
-    let config = Arc::new(client::config());
-    let connecting = ssh::connect(config, (target.host.as_str(), target.port), handler);
-    let mut handle = match tokio::time::timeout(CONNECT_TIMEOUT, connecting).await {
-        Ok(result) => result?,
-        Err(_) => {
-            return Err(Error::Timeout(
-                target.host.clone(),
-                CONNECT_TIMEOUT.as_secs(),
-            ));
-        }
-    };
-    sign_on::sign_on(&mut handle, target, options, commands, link).await?;
+        commands,
+        link,
+    )
+    .await?;
 
     let (columns, rows) = {
         let t = lock(terminal);
@@ -320,7 +346,7 @@ async fn session(
             &modes,
         )
         .await?;
-    if forward_to.is_some() {
+    if options.agent.is_some() && options.agent_forwarding {
         channel.agent_forward(false).await?;
         link.log("Agent forwarding requested");
     }
@@ -368,6 +394,79 @@ async fn session(
         }
     }
     Ok(ending)
+}
+
+/// A jump host signed on to, with its `user@host` for messages.
+type Through = (ssh::Handle<client::Client>, String);
+
+/// Whether a hop is a jump host or the target: only the target's algorithms go to the status bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Hop {
+    Jump,
+    Target,
+}
+
+/// Connects to `target`, directly or through the jump host `through` (`direct-tcpip`, RFC 4254 §7.2), checks
+/// its host key and signs on.
+async fn hop_connect(
+    target: &Target,
+    options: &Options,
+    through: Option<&Through>,
+    hop: Hop,
+    known_hosts: KnownHosts,
+    commands: &Commands,
+    link: &Link,
+) -> Result<ssh::Handle<client::Client>, Error> {
+    let via = through.map(|(_, label)| format!(" through {label}"));
+    link.log(format!(
+        "Connecting to {} port {}{}",
+        target.host,
+        target.port,
+        via.unwrap_or_default()
+    ));
+    let forward_to = options.agent.clone().filter(|_| options.agent_forwarding);
+    let handler = client::Client::new(
+        target,
+        known_hosts,
+        forward_to,
+        hop,
+        Arc::clone(commands),
+        link.clone(),
+    );
+    let config = Arc::new(client::config());
+    let connecting = async {
+        match through {
+            None => ssh::connect(config, (target.host.as_str(), target.port), handler).await,
+            Some((jump, label)) => {
+                let channel = jump
+                    .channel_open_direct_tcpip(
+                        target.host.as_str(),
+                        u32::from(target.port),
+                        "127.0.0.1",
+                        0,
+                    )
+                    .await
+                    .map_err(|e| Error::JumpRefused {
+                        jump: label.clone(),
+                        host: target.host.clone(),
+                        port: target.port,
+                        reason: e.to_string(),
+                    })?;
+                ssh::connect_stream(config, channel.into_stream(), handler).await
+            }
+        }
+    };
+    let mut handle = match tokio::time::timeout(CONNECT_TIMEOUT, connecting).await {
+        Ok(result) => result?,
+        Err(_) => {
+            return Err(Error::Timeout(
+                target.host.clone(),
+                CONNECT_TIMEOUT.as_secs(),
+            ));
+        }
+    };
+    sign_on::sign_on(&mut handle, target, options, commands, link).await?;
+    Ok(handle)
 }
 
 /// A size in cells as the protocol's `uint32`.

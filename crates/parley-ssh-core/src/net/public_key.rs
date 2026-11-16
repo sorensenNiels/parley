@@ -48,7 +48,7 @@ pub(super) async fn sign_on(
         }
     }
     for path in &options.key_files {
-        let Some(key) = load(path, commands, link).await? else {
+        let Some(key) = load(path, target, commands, link).await? else {
             continue;
         };
         let public = key.public_key().clone();
@@ -146,7 +146,12 @@ fn hash_for(key: &PublicKey, rsa_hash: Option<HashAlg>) -> Option<HashAlg> {
 /// Reads the key file at `path`: OpenSSH's format, PKCS #8 or `PuTTY`'s `.ppk` (versions 2 and 3). An encrypted key
 /// asks for its passphrase, up to [`PASSPHRASE_TRIES`] times. A file that cannot be read, or Cancel, skips the key
 /// with a word to the user.
-async fn load(path: &Path, commands: &Commands, link: &Link) -> Result<Option<PrivateKey>, Error> {
+async fn load(
+    path: &Path,
+    target: &Target,
+    commands: &Commands,
+    link: &Link,
+) -> Result<Option<PrivateKey>, Error> {
     let shown = path.display().to_string();
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
@@ -177,6 +182,7 @@ async fn load(path: &Path, commands: &Commands, link: &Link) -> Result<Option<Pr
             format!("The key {shown} is protected by a passphrase.")
         };
         let prompt = Prompt {
+            host: target.label(),
             name: "Key passphrase".to_owned(),
             instructions,
             fields: vec![PromptField {

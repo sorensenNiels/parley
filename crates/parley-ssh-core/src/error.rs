@@ -22,6 +22,13 @@ pub enum Error {
     Cancelled,
     #[error("the server refused the sign-on (it offers: {0})")]
     SignOnRefused(String),
+    #[error("the jump host {jump} could not reach {host} port {port}: {reason}")]
+    JumpRefused {
+        jump: String,
+        host: String,
+        port: u16,
+        reason: String,
+    },
     #[error("the server would not start a shell")]
     ShellRefused,
     #[error("SSH: {0}")]
