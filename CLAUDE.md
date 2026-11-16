@@ -12,18 +12,20 @@ follow the roadmap's order. If a request is unclear, or would change a decision 
 
 | File | Holds | Rule |
 |---|---|---|
-| `docs/ROADMAP.md` | Vision, principles, phases, open requirements (`R-NET-1`), decisions (`D1`), next free IDs. | The plan and the spec for what is not done. Implement requirements as written; record new decisions there. |
-| `docs/IDEAS.md` | Ideas (`IDEA-n`) that may become requirements later, by theme; own next free ID on its last line. | Not a plan: new ideas go here. When one is picked, write requirements in the roadmap and mark the idea. |
-| `docs/FEATURES.md` | Implemented **and verified** features by requirement ID, and how each was verified. | Add an entry only when the requirement is fully met, tested, and checked in the running app; record which OS. Otherwise it goes under "In progress". |
-| `docs/REQUIREMENTS.md` | The text of every completed requirement. | When a requirement is verified, move its row here from the roadmap. |
-| `docs/sql/` | The same five documents (`ROADMAP`, `IDEAS`, `FEATURES`, `REQUIREMENTS`, `PRD`) for SQL: every `R-SQL`, the SQL probes (R-NET-8/9), the assistant switch (R-ADD-3), decisions D19–D27. | Same rules. One sequence of numbers for both: `R-SQL` is counted on the SQL roadmap's last line; every other area, `D`, phases and `IDEA` on `docs/ROADMAP.md`'s and `docs/IDEAS.md`'s last lines, whichever product uses it. |
+| `docs/ROADMAP.md` | Vision, principles, phase status, unfinished phases, open requirements (`R-NET-1`), next free IDs. | The plan and the spec for what is not done. Implement requirements as written. |
+| `docs/phases/` | One file per finished phase (`phase-NN-<slug>.md`, plus `between-phases.md`): its story, the full text of its requirements, how each was verified. | A verified requirement's row and its verification move here; a finished phase's §4 story too. |
+| `docs/REQUIREMENTS.md` | Index of finished requirements: ID, title, link to the phase file. | One row per ID, added when the row moves to its phase file. |
+| `docs/FEATURES.md` | Checks of requirements still in progress; links to the phase files. | Verification goes into the phase file only when the requirement is fully met, tested, and checked in the running app; record which OS. |
+| `docs/DECISIONS.md` | Decisions (`D1`). | Record new decisions here. |
+| `docs/IDEAS.md`, `docs/ideas/` | Ideas (`IDEA-n`) that may become requirements, one file per theme; next free ID on `IDEAS.md`'s last line. | Not a plan: new ideas go here. When one is picked, write requirements in the roadmap and mark the idea. |
+| `docs/sql/` | The same layout for SQL: every `R-SQL`, the SQL probes (R-NET-8/9), the assistant switch (R-ADD-3), decisions D19–D35 and D39 in `sql/DECISIONS.md`. | Same rules. One sequence of numbers for both: `R-SQL` is counted on the SQL roadmap's last line; every other area, `D`, phases and `IDEA` on `docs/ROADMAP.md`'s and `docs/IDEAS.md`'s last lines, whichever product uses it. |
 | `docs/PRD.md`, `docs/ARCHITECTURE.md` | The product summary and the design with diagrams (`docs/images/`), for readers new to Parley. | Summaries that link IDs, not specs: update them when a phase ends or the design changes; never copy requirement text into them. |
 
 ## Working efficiently
 
 Context is the budget; spend it on code that changes.
-- Once they grow, don't read the planning docs or `README.md` whole: `grep -n` the ID (`"R-NET-1 "`, `"| D3 "`) or
-  heading, then read that range. Next free IDs are the roadmap's last line (`R-SQL`: `docs/sql/ROADMAP.md`'s; ideas: the last line of `docs/IDEAS.md`).
+- Don't read the planning docs or `README.md` whole: look an ID up with `grep -rn "R-UI-14 " docs/` (or `"| D3 "`,
+  a heading), then read that range. Next free IDs are the roadmap's last line (`R-SQL`: `docs/sql/ROADMAP.md`'s; ideas: the last line of `docs/IDEAS.md`).
 - Source files over ~500 lines: `grep -n` the symbol, then read with offset/limit. Don't re-read a file after editing it.
 - While working, run the narrowest check (`cargo test -p <crate> <filter>`); run `/verify` once at the end. Send long
   command output to a file under `target/` and grep it instead of printing it.
