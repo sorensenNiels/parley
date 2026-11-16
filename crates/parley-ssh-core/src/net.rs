@@ -7,6 +7,7 @@ mod client;
 pub mod jump;
 mod public_key;
 mod sign_on;
+mod transport;
 
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::Duration;
@@ -17,9 +18,12 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use crate::known_hosts::{HostKeyStatus, KnownHosts};
 use crate::term::Terminal;
 use crate::{Error, Secret};
+pub use transport::{AddressFamily, Proxy};
 
 /// How long connecting may take before it is given up.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+/// How long the server has to answer an environment variable (R-SSH-28).
+const ENV_ANSWER: Duration = Duration::from_secs(5);
 /// What the shell is told the terminal is (R-SSH-5).
 const TERMINAL_TYPE: &str = "xterm-256color";
 
@@ -55,6 +59,59 @@ pub struct Options {
     pub agent_forwarding: bool,
     /// Jump hosts reached first, in order, each through the one before (R-SSH-43).
     pub jumps: Vec<jump::Jump>,
+    /// How the connection is kept and carried (R-SSH-26, R-SSH-27, R-SSH-29).
+    pub transport: Transport,
+    /// What runs on the server (R-SSH-28).
+    pub shell: Shell,
+}
+
+/// How the connection is kept and carried (D51).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Transport {
+    /// `keepalive@openssh.com` after this long without a word from the server; three unanswered end it (R-SSH-26).
+    pub keepalive: Option<Duration>,
+    pub family: AddressFamily,
+    /// Keys are exchanged again after this long, and after this many bytes each way (R-SSH-27).
+    pub rekey_after: Duration,
+    pub rekey_bytes: usize,
+    /// `zlib@openssh.com` compression (R-SSH-27).
+    pub compression: bool,
+    /// Before the first hop (R-SSH-29).
+    pub proxy: Proxy,
+}
+
+impl Default for Transport {
+    fn default() -> Self {
+        Self {
+            keepalive: None,
+            family: AddressFamily::Any,
+            rekey_after: Duration::from_secs(3600),
+            rekey_bytes: 1 << 30,
+            compression: false,
+            proxy: Proxy::None,
+        }
+    }
+}
+
+/// What runs on the server (R-SSH-28).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shell {
+    /// A command instead of the shell, still with a pseudo-terminal.
+    pub command: Option<String>,
+    /// Environment variables sent as `env` requests; the server may refuse them.
+    pub env: Vec<(String, String)>,
+    /// What the pseudo-terminal says it is.
+    pub terminal_type: String,
+}
+
+impl Default for Shell {
+    fn default() -> Self {
+        Self {
+            command: None,
+            env: Vec::new(),
+            terminal_type: TERMINAL_TYPE.to_owned(),
+        }
+    }
 }
 
 /// What the UI tells the connection.
@@ -151,6 +208,9 @@ pub enum Ending {
     Closed,
     /// The user disconnected.
     Disconnected,
+    /// The host key or the sign-on was refused, by the user or the server, in plain words: trying again by
+    /// itself would not help (R-SSH-51).
+    Refused(String),
     /// Something went wrong, in plain words.
     Failed(String),
 }
@@ -280,6 +340,9 @@ async fn run(
     match session(&target, &options, known_hosts, &terminal, &commands, &link).await {
         Ok(ending) => ending,
         Err(Error::Cancelled) => Ending::Disconnected,
+        Err(e @ (Error::HostKeyRejected | Error::HostKeyRevoked | Error::SignOnRefused(_))) => {
+            Ending::Refused(e.to_string())
+        }
         Err(e) => Ending::Failed(e.to_string()),
     }
 }
@@ -305,6 +368,8 @@ async fn session(
             agent_key: None,
             agent_forwarding: false,
             jumps: Vec::new(),
+            transport: options.transport.clone(),
+            shell: Shell::default(),
         };
         let handle = hop_connect(
             &jump.target,
@@ -334,24 +399,7 @@ async fn session(
         (t.columns(), t.rows())
     };
     let mut channel = handle.channel_open_session().await?;
-    let modes = [(Pty::IUTF8, 1)];
-    channel
-        .request_pty(
-            false,
-            TERMINAL_TYPE,
-            cells(columns),
-            cells(rows),
-            0,
-            0,
-            &modes,
-        )
-        .await?;
-    if options.agent.is_some() && options.agent_forwarding {
-        channel.agent_forward(false).await?;
-        link.log("Agent forwarding requested");
-    }
-    channel.request_shell(true).await?;
-    link.log("Shell requested");
+    start_shell(&mut channel, options, (columns, rows), link).await?;
 
     let mut started = false;
     let mut ending = Ending::Closed;
@@ -433,10 +481,16 @@ async fn hop_connect(
         Arc::clone(commands),
         link.clone(),
     );
-    let config = Arc::new(client::config());
+    let config = Arc::new(client::config(&options.transport));
     let connecting = async {
         match through {
-            None => ssh::connect(config, (target.host.as_str(), target.port), handler).await,
+            None => {
+                let transport = &options.transport;
+                let stream =
+                    transport::open(target, transport.family, &transport.proxy, commands, link)
+                        .await?;
+                ssh::connect_stream(config, stream, handler).await
+            }
             Some((jump, label)) => {
                 let channel = jump
                     .channel_open_direct_tcpip(
@@ -467,6 +521,74 @@ async fn hop_connect(
     };
     sign_on::sign_on(&mut handle, target, options, commands, link).await?;
     Ok(handle)
+}
+
+/// The pseudo-terminal, agent forwarding, the environment, then the shell or the command (R-SSH-5, R-SSH-13,
+/// R-SSH-28).
+async fn start_shell(
+    channel: &mut russh::Channel<ssh::Msg>,
+    options: &Options,
+    (columns, rows): (usize, usize),
+    link: &Link,
+) -> Result<(), Error> {
+    let modes = [(Pty::IUTF8, 1)];
+    channel
+        .request_pty(
+            false,
+            &options.shell.terminal_type,
+            cells(columns),
+            cells(rows),
+            0,
+            0,
+            &modes,
+        )
+        .await?;
+    if options.agent.is_some() && options.agent_forwarding {
+        channel.agent_forward(false).await?;
+        link.log("Agent forwarding requested");
+    }
+    send_environment(channel, &options.shell.env, link).await?;
+    if let Some(command) = &options.shell.command {
+        channel.exec(true, command.as_bytes()).await?;
+        link.log(format!("Command requested: {command}"));
+    } else {
+        channel.request_shell(true).await?;
+        link.log("Shell requested");
+    }
+    Ok(())
+}
+
+/// Sends each environment variable and waits for the server's answer, saying a refusal in the event log
+/// (RFC 4254 §6.4).
+async fn send_environment(
+    channel: &mut russh::Channel<ssh::Msg>,
+    env: &[(String, String)],
+    link: &Link,
+) -> Result<(), Error> {
+    for (name, value) in env {
+        channel.set_env(true, name.as_str(), value.as_str()).await?;
+        let answer = async {
+            loop {
+                match channel.wait().await {
+                    Some(ChannelMsg::Success) => return Some(true),
+                    Some(ChannelMsg::Failure) => return Some(false),
+                    Some(ChannelMsg::Close) | None => return None,
+                    Some(_) => {}
+                }
+            }
+        };
+        match tokio::time::timeout(ENV_ANSWER, answer).await {
+            Ok(Some(true)) => link.log(format!("Environment variable {name} set")),
+            Ok(Some(false)) => link.log(format!(
+                "The server refused the environment variable {name} (OpenSSH's AcceptEnv decides)"
+            )),
+            Ok(None) => return Err(Error::ShellRefused),
+            Err(_) => link.log(format!(
+                "The server did not answer for the environment variable {name}"
+            )),
+        }
+    }
+    Ok(())
 }
 
 /// A size in cells as the protocol's `uint32`.

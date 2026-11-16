@@ -112,16 +112,52 @@ fn the_header_has_parley_sshs_menus() {
 }
 
 #[test]
-fn view_changes_the_text_size_within_its_limits() {
+fn view_sizes_the_screens_text_within_its_limits_r_ssh_20() {
     let mut app = ParleySshUi::new(Settings::default(), known());
     let ctx = egui::Context::default();
     app.carry_out(&ctx, Action::TextLarger);
-    assert_eq!(app.settings.text_size, 110);
-    app.settings.text_size = TEXT_SIZES.1;
+    assert_eq!(app.settings.font_size, 15);
+    app.settings.font_size = 32;
     app.carry_out(&ctx, Action::TextLarger);
-    assert_eq!(app.settings.text_size, TEXT_SIZES.1);
+    assert_eq!(app.settings.font_size, 32);
+    app.settings.font_size = 8;
+    app.carry_out(&ctx, Action::TextSmaller);
+    assert_eq!(app.settings.font_size, 8);
     app.carry_out(&ctx, Action::TextActualSize);
-    assert_eq!(app.settings.text_size, 100);
+    assert_eq!(app.settings.font_size, 14);
+    assert_eq!(
+        app.settings.text_size, 100,
+        "the window's own text size stays"
+    );
+}
+
+#[test]
+fn the_appearance_page_chooses_themes_and_text_and_its_buttons_stay_put_r_ssh_20() {
+    let mut h = app(Settings::default());
+    h.run_steps(2);
+    h.state_mut()
+        .carry_out(&egui::Context::default(), Action::Settings);
+    h.run_steps(3);
+    let before = h.get_by_label("Save").rect();
+    h.get_by_label("When dark").click();
+    h.run_steps(2);
+    h.get_by_label("Nord").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state().settings.dark_theme,
+        crate::screen::themes::TerminalTheme::Nord
+    );
+    // The page scrolls inside the dialog's fixed frame.
+    h.get_by_label("Underline").scroll_to_me();
+    h.run_steps(3);
+    h.get_by_label("Underline").click();
+    h.run_steps(3);
+    assert_eq!(h.state().settings.cursor, settings::CursorStyle::Underline);
+    assert_eq!(
+        h.get_by_label("Save").rect(),
+        before,
+        "the dialog keeps its size"
+    );
 }
 
 #[test]
@@ -160,7 +196,8 @@ fn edit_and_delete_change_the_saved_sessions_r_ssh_11() {
     });
     h.run_steps(2);
     h.get_by_label("Edit…").click();
-    h.run_steps(2);
+    // The editor's page area learns its height in the first frames (`fitting_scroll_area`).
+    h.run_steps(4);
     h.get_by_label("Delete").click();
     h.run_steps(2);
     h.get_by_label("Delete").click();
@@ -371,7 +408,11 @@ fn a_split_pane_whose_session_fails_to_start_is_taken_out_r_ssh_58() {
     h.state_mut().connect_pane(&ctx, first, refused(), true);
     press(&mut h, egui::Key::Equals, ALT_SHIFT);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while h.state().tabs[0].panes.len() > 1 && std::time::Instant::now() < deadline {
+    // Both connections fail on their own threads, in either order: wait for both.
+    let settled = |app: &ParleySshUi| {
+        app.tabs[0].panes.len() == 1 && app.active_session().is_some_and(Session::failed_to_start)
+    };
+    while !settled(h.state()) && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(20));
         h.run_steps(1);
     }
@@ -555,7 +596,7 @@ fn config_hosts_are_listed_and_saved_as_sessions_r_ssh_42() {
         "the skipped line is said"
     );
     h.get_by_label("Save as session…").click();
-    h.run_steps(2);
+    h.run_steps(4);
     h.get_by_label("Save").click();
     h.run_steps(3);
     let saved = &h.state().settings.sessions;
@@ -613,4 +654,221 @@ fn the_close_button_on_a_tab_closes_it_and_asks_first_while_connected_r_ssh_39()
         "a connected tab asks before it closes"
     );
     assert_eq!(h.state().tabs.len(), 2);
+}
+
+fn key(h: &mut Harness<'static, ParleySshUi>, key: egui::Key, modifiers: egui::Modifiers) {
+    for pressed in [true, false] {
+        h.event(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers,
+        });
+    }
+    h.run_steps(2);
+}
+
+#[test]
+fn ctrl_shift_b_broadcasts_to_the_tab_and_escape_twice_stops_it_r_ssh_50() {
+    let mut h = app(Settings::default());
+    h.run_steps(2);
+    key(&mut h, egui::Key::B, CTRL_SHIFT);
+    assert_eq!(h.state().broadcast_scope(), broadcast::Scope::Tab);
+    // Two quick presses (half a second apart here).
+    press(&mut h, egui::Key::Escape, egui::Modifiers::NONE);
+    press(&mut h, egui::Key::Escape, egui::Modifiers::NONE);
+    assert_eq!(h.state().broadcast_scope(), broadcast::Scope::Off);
+    key(&mut h, egui::Key::B, CTRL_SHIFT);
+    h.get_by_label("Session").click();
+    h.run_steps(2);
+    assert!(h.query_by_label("Stop broadcasting").is_some());
+    h.get_by_label("Stop broadcasting").click();
+    h.run_steps(2);
+    assert_eq!(h.state().broadcast_scope(), broadcast::Scope::Off);
+    let ctx = egui::Context::default();
+    h.state_mut().carry_out(&ctx, Action::BroadcastAll);
+    assert_eq!(h.state().broadcast_scope(), broadcast::Scope::All);
+    h.state_mut().carry_out(&ctx, Action::BroadcastTab);
+    assert_eq!(
+        h.state().broadcast_scope(),
+        broadcast::Scope::Off,
+        "the menu stops it too"
+    );
+}
+
+fn with_snippets() -> Settings {
+    Settings {
+        snippets: vec![
+            snippets::Snippet {
+                name: "uptime".into(),
+                text: "uptime".into(),
+                enter: true,
+                key: "Ctrl+Alt+U".into(),
+            },
+            snippets::Snippet {
+                name: "logs".into(),
+                text: "tail -f {{file:/var/log/syslog}}".into(),
+                ..snippets::Snippet::default()
+            },
+        ],
+        ..Settings::default()
+    }
+}
+
+#[test]
+fn a_snippets_own_key_sends_it_and_without_a_session_says_to_connect_r_ssh_49() {
+    let mut h = app(with_snippets());
+    h.run_steps(2);
+    let ctrl_alt = egui::Modifiers {
+        ctrl: true,
+        alt: true,
+        command: true,
+        ..egui::Modifiers::NONE
+    };
+    key(&mut h, egui::Key::U, ctrl_alt);
+    assert_eq!(
+        h.state().note.as_deref(),
+        Some("A snippet goes to a connected session: connect first.")
+    );
+}
+
+#[test]
+fn a_snippet_with_placeholders_asks_first_from_the_picker_r_ssh_49() {
+    let mut h = app(with_snippets());
+    h.run_steps(2);
+    key(&mut h, egui::Key::S, CTRL_SHIFT);
+    assert!(h.state().picker.is_some(), "Ctrl+Shift+S opens the picker");
+    h.get_by_label("Find").type_text("LOG");
+    h.run_steps(2);
+    assert!(
+        h.query_by_label_contains("uptime").is_none(),
+        "found by name"
+    );
+    key(&mut h, egui::Key::Enter, egui::Modifiers::NONE);
+    assert!(h.state().fill.is_some(), "the placeholder is asked for");
+    h.get_by_label("file");
+    h.get_by_label("Send").click();
+    h.run_steps(2);
+    assert!(h.state().fill.is_none());
+}
+
+#[test]
+fn the_snippets_menu_lists_them_and_opens_their_settings_page_r_ssh_49() {
+    let mut h = app(with_snippets());
+    h.run_steps(2);
+    h.get_by_label("Snippets").click();
+    h.run_steps(2);
+    assert!(h.query_by_label("uptime").is_some());
+    h.get_by_label("Edit snippets…").click();
+    h.run_steps(3);
+    let before = h.get_by_label("Save").rect();
+    h.get_by_label("Add snippet").click();
+    h.run_steps(3);
+    h.get_by_label("Save snippet").scroll_to_me();
+    h.run_steps(2);
+    h.get_by_label("Save snippet").click();
+    h.run_steps(2);
+    h.get_by_label("Give the snippet a name.");
+    assert_eq!(
+        h.get_by_label("Save").rect(),
+        before,
+        "the dialog keeps its size"
+    );
+}
+
+#[test]
+fn the_tabs_of_last_time_open_again_with_their_split_and_sessions_r_ssh_52() {
+    let settings = Settings {
+        restore_tabs: true,
+        sessions: vec![waiting()],
+        ..Settings::default()
+    };
+    let mut h = app(settings);
+    h.run_steps(2);
+    let ctx = h.ctx.clone();
+    {
+        let app = h.state_mut();
+        let first = app.tabs[0].active;
+        app.connect_pane(&ctx, first, waiting(), true);
+        app.split(&ctx, panes::Axis::Row);
+        app.new_tab(&ctx, None);
+    }
+    h.run_steps(2);
+    let kept = h.state().settings_to_save();
+    assert_eq!(kept.last_tabs.len(), 2);
+    assert!(
+        h.state().settings().last_tabs.is_empty(),
+        "only what is saved holds them"
+    );
+
+    let mut again = app(kept.clone());
+    again.state_mut().start(&ctx, StartRequest::default());
+    again.run_steps(2);
+    let app = again.state();
+    assert_eq!(app.tabs.len(), 2);
+    assert!(app.tabs[0].is_split());
+    let sessions = app.tabs[0]
+        .panes
+        .iter()
+        .filter(|(_, p)| p.session().is_some())
+        .count();
+    assert_eq!(sessions, 2, "both panes connect when the tab is shown");
+    assert!(app.tabs[1].shows_start());
+    assert_eq!(app.tabs[1].restore, []);
+
+    let mut off = app_with_host(Settings {
+        restore_tabs: false,
+        ..kept
+    });
+    off.run_steps(2);
+    assert_eq!(off.state().tabs.len(), 1, "restore off");
+    assert_eq!(off.state().settings_to_save().last_tabs, []);
+}
+
+/// The app started with a host on the command line ignores the tabs of last time.
+fn app_with_host(settings: Settings) -> Harness<'static, ParleySshUi> {
+    let mut h = app(settings);
+    let ctx = h.ctx.clone();
+    h.state_mut().start(
+        &ctx,
+        StartRequest {
+            host: Some("me@10.255.255.1".into()),
+            ..StartRequest::default()
+        },
+    );
+    h
+}
+
+#[test]
+fn a_host_on_the_command_line_wins_over_the_tabs_of_last_time_r_ssh_52() {
+    let mut h = app(Settings {
+        restore_tabs: true,
+        ..Settings::default()
+    });
+    h.run_steps(2);
+    let ctx = h.ctx.clone();
+    h.state_mut().new_tab(&ctx, None);
+    let kept = h.state().settings_to_save();
+    let mut started = app_with_host(kept);
+    started.run_steps(2);
+    assert_eq!(started.state().tabs.len(), 1);
+}
+
+#[test]
+fn the_terminal_page_offers_reconnect_and_restore_r_ssh_51_r_ssh_52() {
+    let mut h = app(Settings::default());
+    h.run_steps(2);
+    h.state_mut()
+        .carry_out(&egui::Context::default(), Action::Settings);
+    h.run_steps(2);
+    h.get_by_label("Terminal").click();
+    h.run_steps(2);
+    h.get_by_label("Keep trying for");
+    h.get_by_label("Open the tabs of last time").scroll_to_me();
+    h.run_steps(2);
+    h.get_by_label("Reconnect a lost connection").click();
+    h.run_steps(2);
+    assert!(!h.state().settings.reconnect);
+    assert!(h.query_by_label("Keep trying for").is_none());
 }

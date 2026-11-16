@@ -17,7 +17,7 @@ use parley_ssh_core::known_hosts::{HostKeyStatus, KnownHosts};
 use parley_ssh_core::net::agent::AgentAddress;
 use parley_ssh_core::net::jump::Jump;
 use parley_ssh_core::net::{
-    Command, Connection, Ending, Event, HostKeyAnswer, Options, Target, lock,
+    AddressFamily, Command, Connection, Ending, Event, HostKeyAnswer, Options, Proxy, Target, lock,
 };
 use parley_ssh_core::term::Terminal;
 use russh::keys::agent::client::AgentClient;
@@ -94,6 +94,9 @@ struct Seen {
     agent_requested: bool,
     /// Where `direct-tcpip` channels were asked to go (R-SSH-43).
     forwarded: Vec<(String, u32)>,
+    /// The command asked for instead of a shell, and the environment set (R-SSH-28).
+    command: Option<String>,
+    env: Vec<(String, String)>,
 }
 
 struct Server {
@@ -183,6 +186,40 @@ impl server::Handler for Server {
                 reply.reject(russh::ChannelOpenFailure::ConnectFailed).await;
             }
         }
+        Ok(())
+    }
+
+    /// Takes LANG and refuses everything else, as OpenSSH's default `AcceptEnv` (R-SSH-28).
+    async fn env_request(
+        &mut self,
+        channel: ChannelId,
+        name: &str,
+        value: &str,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        if name == "LANG" {
+            self.seen
+                .lock()
+                .expect("not poisoned")
+                .env
+                .push((name.to_owned(), value.to_owned()));
+            session.channel_success(channel)?;
+        } else {
+            session.channel_failure(channel)?;
+        }
+        Ok(())
+    }
+
+    async fn exec_request(
+        &mut self,
+        channel: ChannelId,
+        data: &[u8],
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let command = String::from_utf8_lossy(data).into_owned();
+        session.channel_success(channel)?;
+        session.data(channel, format!("ran: {command}\r\n").into_bytes())?;
+        self.seen.lock().expect("not poisoned").command = Some(command);
         Ok(())
     }
 
@@ -494,7 +531,7 @@ fn a_changed_host_key_is_refused_unless_the_user_goes_on_r_ssh_3() {
         question.status
     );
     connection.send(Command::HostKey(HostKeyAnswer::Cancel));
-    let Event::Ended(Ending::Failed(why)) = next(&connection) else {
+    let Event::Ended(Ending::Refused(why)) = next(&connection) else {
         panic!("refused")
     };
     assert!(why.contains("host key was not accepted"), "{why}");
@@ -829,4 +866,275 @@ fn a_connection_that_never_started_ends_with_its_problem_r_ssh_43() {
         next(&connection),
         Event::Ended(Ending::Failed("bad jump".into()))
     );
+}
+
+/// Signs on with the password, trusting the host once, up to the shell started; the events in between are checked.
+fn through_to_started(connection: &Connection) {
+    loop {
+        match next(connection) {
+            Event::HostKey(_) => connection.send(Command::HostKey(HostKeyAnswer::ConnectOnce)),
+            Event::Prompt(prompt) if prompt.name.is_empty() => {
+                connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
+            }
+            Event::Prompt(prompt) => panic!("unexpected prompt {prompt:?}"),
+            Event::Started => return,
+            Event::Ended(ending) => panic!("ended: {ending:?}"),
+            Event::Secured { .. } | Event::Banner(_) | Event::Problem(_) | Event::Log(_) => {}
+        }
+    }
+}
+
+#[test]
+fn a_command_runs_instead_of_the_shell_with_its_environment_and_terminal_type_r_ssh_28() {
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let address = start_server(Arc::clone(&seen));
+    let options = Options {
+        shell: parley_ssh_core::net::Shell {
+            command: Some("tmux new -A -s main".into()),
+            env: vec![
+                ("LANG".into(), "da_DK.UTF-8".into()),
+                ("SECRET".into(), "x".into()),
+            ],
+            terminal_type: "xterm".into(),
+        },
+        ..Options::default()
+    };
+    let (connection, terminal) = open_with(address, &known_hosts("command"), options);
+    through_to_started(&connection);
+    wait_until("the command's output", || {
+        screen_text(&terminal).contains("ran: tmux new -A -s main")
+    });
+    let seen = seen.lock().expect("not poisoned");
+    assert_eq!(seen.command.as_deref(), Some("tmux new -A -s main"));
+    assert_eq!(
+        seen.env,
+        [("LANG".to_owned(), "da_DK.UTF-8".to_owned())],
+        "SECRET refused"
+    );
+    assert_eq!(seen.pty.as_ref().map(|p| p.term.as_str()), Some("xterm"));
+}
+
+/// A proxy for one connection on a local port: `serve` speaks the proxy's side, then the bytes are relayed to the
+/// address it read.
+fn start_proxy<F, Fut>(serve: F) -> SocketAddr
+where
+    F: Fn(tokio::net::TcpStream) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Option<(tokio::net::TcpStream, String)>> + Send,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async move {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind");
+            tx.send(listener.local_addr().expect("address"))
+                .expect("test waits");
+            while let Ok((socket, _)) = listener.accept().await {
+                if let Some((mut client, to)) = serve(socket).await
+                    && let Ok(mut server) = tokio::net::TcpStream::connect(to).await
+                {
+                    tokio::spawn(async move {
+                        // Either side closing ends the relay.
+                        let _ = tokio::io::copy_bidirectional(&mut client, &mut server).await;
+                    });
+                }
+            }
+        });
+    });
+    rx.recv().expect("proxy started")
+}
+
+#[test]
+fn a_socks5_proxy_with_a_password_carries_the_connection_r_ssh_29() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let address = start_server(Arc::new(Mutex::new(Seen::default())));
+    let proxy = start_proxy(|mut s| async move {
+        let mut greeting = [0; 4];
+        s.read_exact(&mut greeting).await.ok()?;
+        assert_eq!(
+            greeting,
+            [5, 2, 0, 2],
+            "no authentication and user/password offered"
+        );
+        s.write_all(&[5, 2]).await.ok()?;
+        let mut head = [0; 2];
+        s.read_exact(&mut head).await.ok()?;
+        let mut user = vec![0; usize::from(head[1])];
+        s.read_exact(&mut user).await.ok()?;
+        let mut len = [0; 1];
+        s.read_exact(&mut len).await.ok()?;
+        let mut password = vec![0; usize::from(len[0])];
+        s.read_exact(&mut password).await.ok()?;
+        assert_eq!(
+            (user.as_slice(), password.as_slice()),
+            (b"pxuser".as_slice(), "pxæøå".as_bytes())
+        );
+        s.write_all(&[1, 0]).await.ok()?;
+        let mut request = [0; 5];
+        s.read_exact(&mut request).await.ok()?;
+        assert_eq!(
+            request[..4],
+            [5, 1, 0, 3],
+            "CONNECT to a name the proxy resolves"
+        );
+        let mut host = vec![0; usize::from(request[4])];
+        s.read_exact(&mut host).await.ok()?;
+        let mut port = [0; 2];
+        s.read_exact(&mut port).await.ok()?;
+        s.write_all(&[5, 0, 0, 1, 127, 0, 0, 1, 0, 0]).await.ok()?;
+        let to = format!(
+            "{}:{}",
+            String::from_utf8(host).ok()?,
+            u16::from_be_bytes(port)
+        );
+        Some((s, to))
+    });
+    let options = Options {
+        transport: parley_ssh_core::net::Transport {
+            proxy: Proxy::Socks5 {
+                host: "127.0.0.1".into(),
+                port: proxy.port(),
+                user: "pxuser".into(),
+            },
+            ..parley_ssh_core::net::Transport::default()
+        },
+        ..Options::default()
+    };
+    let (connection, _) = open_with(address, &known_hosts("socks"), options);
+    let Event::Prompt(prompt) = next(&connection) else {
+        panic!("the proxy's password")
+    };
+    assert_eq!(prompt.name, "Proxy password");
+    assert!(
+        prompt.host.starts_with("pxuser@127.0.0.1"),
+        "{}",
+        prompt.host
+    );
+    connection.send(Command::Answers(Some(vec![Secret::new("pxæøå".into())])));
+    through_to_started(&connection);
+}
+
+#[test]
+fn an_http_proxy_asks_for_its_password_when_it_answers_407_r_ssh_29() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let address = start_server(Arc::new(Mutex::new(Seen::default())));
+    let proxy = start_proxy(|mut s| async move {
+        let mut header = Vec::new();
+        while !header.ends_with(b"\r\n\r\n") {
+            let mut byte = [0; 1];
+            s.read_exact(&mut byte).await.ok()?;
+            header.push(byte[0]);
+        }
+        let text = String::from_utf8(header).ok()?;
+        if !text.contains("Proxy-Authorization: Basic cHg6c2VjcmV0") {
+            s.write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n")
+                .await
+                .ok()?;
+            return None;
+        }
+        let to = text.split_whitespace().nth(1)?.to_owned();
+        s.write_all(b"HTTP/1.1 200 Connection established\r\n\r\n")
+            .await
+            .ok()?;
+        Some((s, to))
+    });
+    let options = Options {
+        transport: parley_ssh_core::net::Transport {
+            proxy: Proxy::Http {
+                host: "127.0.0.1".into(),
+                port: proxy.port(),
+                user: "px".into(),
+            },
+            ..parley_ssh_core::net::Transport::default()
+        },
+        ..Options::default()
+    };
+    let (connection, _) = open_with(address, &known_hosts("http-proxy"), options);
+    let Event::Prompt(prompt) = next(&connection) else {
+        panic!("the proxy's password")
+    };
+    assert_eq!(prompt.name, "Proxy password");
+    connection.send(Command::Answers(Some(vec![Secret::new("secret".into())])));
+    through_to_started(&connection);
+}
+
+#[test]
+fn an_http_proxy_without_a_user_says_what_is_missing_r_ssh_29() {
+    use tokio::io::AsyncWriteExt;
+    let proxy = start_proxy(|mut s| async move {
+        let mut buffer = [0; 512];
+        let _ = tokio::io::AsyncReadExt::read(&mut s, &mut buffer).await;
+        s.write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n")
+            .await
+            .ok()?;
+        None
+    });
+    let options = Options {
+        transport: parley_ssh_core::net::Transport {
+            proxy: Proxy::Http {
+                host: "127.0.0.1".into(),
+                port: proxy.port(),
+                user: String::new(),
+            },
+            ..parley_ssh_core::net::Transport::default()
+        },
+        ..Options::default()
+    };
+    let target: SocketAddr = "127.0.0.1:9".parse().expect("address");
+    let (connection, _) = open_with(target, &known_hosts("http-no-user"), options);
+    let Event::Ended(Ending::Failed(why)) = next(&connection) else {
+        panic!("failed")
+    };
+    assert!(why.contains("wants a user name and password"), "{why}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_proxy_command_carries_the_connection_r_ssh_29() {
+    let address = start_server(Arc::new(Mutex::new(Seen::default())));
+    // A relay, as `nc %h %p` would be; Python is on the machines that run these tests.
+    let script = temp_file(
+        "proxy-command",
+        "relay.py",
+        "import os, socket, sys, threading\n\
+         s = socket.create_connection((sys.argv[1], int(sys.argv[2])))\n\
+         def up():\n\
+         \x20   while d := os.read(0, 65536):\n\
+         \x20       s.sendall(d)\n\
+         \x20   s.shutdown(socket.SHUT_WR)\n\
+         threading.Thread(target=up, daemon=True).start()\n\
+         while d := s.recv(65536):\n\
+         \x20   os.write(1, d)\n",
+    );
+    let relay = format!("python3 -I {} %h %p", script.display());
+    let options = Options {
+        transport: parley_ssh_core::net::Transport {
+            proxy: Proxy::Command(relay),
+            ..parley_ssh_core::net::Transport::default()
+        },
+        ..Options::default()
+    };
+    let (connection, _) = open_with(address, &known_hosts("proxy-command"), options);
+    through_to_started(&connection);
+}
+
+#[test]
+fn ipv6_only_to_a_name_with_only_ipv4_says_so_r_ssh_26() {
+    let options = Options {
+        transport: parley_ssh_core::net::Transport {
+            family: AddressFamily::V6,
+            ..parley_ssh_core::net::Transport::default()
+        },
+        ..Options::default()
+    };
+    let target: SocketAddr = "127.0.0.1:9".parse().expect("address");
+    let (connection, _) = open_with(target, &known_hosts("v6"), options);
+    let Event::Ended(Ending::Failed(why)) = next(&connection) else {
+        panic!("failed")
+    };
+    assert!(why.contains("no IPv6 address"), "{why}");
 }

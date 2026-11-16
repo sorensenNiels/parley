@@ -502,3 +502,31 @@ fn shrinking_cuts_a_wide_character_at_the_edge() {
     t.resize(2, 1);
     assert_eq!(cell(&t, 0, 1).width, Width::Narrow);
 }
+
+#[test]
+fn the_users_cursor_stands_until_the_host_chooses_and_comes_back_with_its_default_r_ssh_20() {
+    let mut t = Terminal::new(5, 2);
+    t.set_default_cursor(CursorShape::Bar, false);
+    let shape = |t: &Terminal| (t.modes().cursor_shape, t.modes().cursor_blink);
+    assert_eq!(shape(&t), (CursorShape::Bar, false));
+    t.feed(b"\x1b[3 q");
+    assert_eq!(
+        shape(&t),
+        (CursorShape::Underline, true),
+        "the host's choice"
+    );
+    t.set_default_cursor(CursorShape::Block, false);
+    assert_eq!(
+        shape(&t),
+        (CursorShape::Underline, true),
+        "a cursor the host chose stays"
+    );
+    t.feed(b"\x1b[0 q");
+    assert_eq!(
+        shape(&t),
+        (CursorShape::Block, false),
+        "DECSCUSR 0 is the user's"
+    );
+    t.feed(b"\x1b[5 q\x1bc");
+    assert_eq!(shape(&t), (CursorShape::Block, false), "RIS too");
+}

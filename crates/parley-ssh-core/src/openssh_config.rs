@@ -18,6 +18,12 @@ enum Setting {
     IdentityFile(String),
     ForwardAgent(bool),
     ProxyJump(String),
+    /// R-SSH-26..29: the rest of the line for the two commands.
+    RemoteCommand(String),
+    SetEnv(Vec<String>),
+    AddressFamily(crate::net::AddressFamily),
+    Compression(bool),
+    ProxyCommand(String),
 }
 
 /// When a line applies: each list of `Host` patterns matches (an `Include` inside a `Host` block adds one), and
@@ -54,6 +60,14 @@ pub struct Host {
     pub forward_agent: Option<bool>,
     /// The jump hosts (R-SSH-43); `None` also for `ProxyJump none`.
     pub proxy_jump: Option<String>,
+    /// Run instead of the shell (R-SSH-28); `None` also for `RemoteCommand none`.
+    pub remote_command: Option<String>,
+    /// `NAME=value` each (R-SSH-28).
+    pub set_env: Vec<String>,
+    pub address_family: Option<crate::net::AddressFamily>,
+    pub compression: Option<bool>,
+    /// A local proxy command (R-SSH-29); `None` also for `ProxyCommand none`.
+    pub proxy_command: Option<String>,
 }
 
 /// OpenSSH's config as read, with the files it came from to notice changes.
@@ -118,6 +132,8 @@ impl Config {
         let mut host_name = None;
         let mut identity_files = Vec::new();
         let mut proxy_jump = None;
+        let mut remote_command = None;
+        let mut proxy_command = None;
         let applying = self
             .entries
             .iter()
@@ -130,8 +146,24 @@ impl Config {
                 Setting::IdentityFile(v) => identity_files.push(v.clone()),
                 Setting::ForwardAgent(on) => host.forward_agent = host.forward_agent.or(Some(*on)),
                 Setting::ProxyJump(v) => proxy_jump = proxy_jump.or_else(|| Some(v.clone())),
+                Setting::RemoteCommand(v) => {
+                    remote_command = remote_command.or_else(|| Some(v.clone()));
+                }
+                Setting::ProxyCommand(v) => {
+                    proxy_command = proxy_command.or_else(|| Some(v.clone()));
+                }
+                Setting::SetEnv(v) => {
+                    if host.set_env.is_empty() {
+                        host.set_env.clone_from(v);
+                    }
+                }
+                Setting::AddressFamily(f) => host.address_family = host.address_family.or(Some(*f)),
+                Setting::Compression(on) => host.compression = host.compression.or(Some(*on)),
             }
         }
+        let not_none = |v: Option<String>| v.filter(|v| !v.eq_ignore_ascii_case("none"));
+        host.remote_command = not_none(remote_command);
+        host.proxy_command = not_none(proxy_command);
         host.host_name =
             host_name.map_or_else(|| alias.to_owned(), |name| expand(&name, &[('h', alias)]));
         host.proxy_jump = proxy_jump.filter(|j| !j.eq_ignore_ascii_case("none"));
@@ -214,6 +246,28 @@ impl Config {
             "user" => first.map(Setting::User),
             "identityfile" => first.map(Setting::IdentityFile),
             "proxyjump" => first.map(Setting::ProxyJump),
+            "remotecommand" => (!args.is_empty()).then(|| Setting::RemoteCommand(args.join(" "))),
+            "proxycommand" => (!args.is_empty()).then(|| Setting::ProxyCommand(args.join(" "))),
+            "setenv" => (!args.is_empty()).then(|| Setting::SetEnv(args.to_vec())),
+            "addressfamily" => match first.as_deref().map(str::to_ascii_lowercase).as_deref() {
+                Some("any") => Some(Setting::AddressFamily(crate::net::AddressFamily::Any)),
+                Some("inet") => Some(Setting::AddressFamily(crate::net::AddressFamily::V4)),
+                Some("inet6") => Some(Setting::AddressFamily(crate::net::AddressFamily::V6)),
+                _ => {
+                    self.problems
+                        .push(format!("{place}: AddressFamily is any, inet or inet6."));
+                    return;
+                }
+            },
+            "compression" => match first.as_deref().map(str::to_ascii_lowercase).as_deref() {
+                Some("yes") => Some(Setting::Compression(true)),
+                Some("no") => Some(Setting::Compression(false)),
+                _ => {
+                    self.problems
+                        .push(format!("{place}: Compression is yes or no."));
+                    return;
+                }
+            },
             "port" => match first.as_deref().map(str::parse::<u16>) {
                 Some(Ok(port)) if port > 0 => Some(Setting::Port(port)),
                 _ => {
@@ -610,5 +664,28 @@ mod tests {
     #[test]
     fn tokens_expand_and_unknown_ones_stay() {
         assert_eq!(expand("%h-%%-%z-%", &[('h', "x")]), "x-%-%z-%");
+    }
+
+    #[test]
+    fn the_connection_and_server_keywords_are_read_r_ssh_26_to_29() {
+        let home = Home::new(
+            "connection",
+            "Host a\n  RemoteCommand tmux new -A -s \"main x\"\n  SetEnv LANG=da_DK.UTF-8 TZ=UTC\n  AddressFamily inet6\n  Compression yes\n  ProxyCommand nc -X 5 -x px:1080 %h %p\nHost b\n  RemoteCommand none\n  ProxyCommand none\n  AddressFamily other\n",
+        );
+        let config = home.config();
+        let a = config.host("a", "u");
+        assert_eq!(a.remote_command.as_deref(), Some("tmux new -A -s main x"));
+        assert_eq!(a.set_env, ["LANG=da_DK.UTF-8", "TZ=UTC"]);
+        assert_eq!(a.address_family, Some(crate::net::AddressFamily::V6));
+        assert_eq!(a.compression, Some(true));
+        assert_eq!(a.proxy_command.as_deref(), Some("nc -X 5 -x px:1080 %h %p"));
+        let b = config.host("b", "u");
+        assert_eq!((b.remote_command, b.proxy_command), (None, None));
+        assert!(
+            config
+                .problems()
+                .iter()
+                .any(|p| p.contains("AddressFamily"))
+        );
     }
 }

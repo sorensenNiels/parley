@@ -2,7 +2,8 @@
 //! before the panes see it, so they work on a start screen as in a terminal, and never reach the host. As R-SSH-7,
 //! they use Ctrl+Shift (Cmd on macOS); tabs by number Ctrl+Alt+1…9 (Cmd+1…9), as Windows Terminal, since Ctrl+2…8
 //! are control characters for the host; panes Alt+Shift+= and Alt+Shift+-, and Alt+arrows only while a tab is
-//! split, so they stay the host's otherwise.
+//! split, so they stay the host's otherwise. The text size: Ctrl+= / Ctrl+- / Ctrl+0 (Cmd on macOS), as Windows
+//! Terminal (R-SSH-20).
 
 use egui::{Event, Key, Modifiers};
 
@@ -23,6 +24,12 @@ pub enum WindowKey {
     Duplicate,
     NewWindow,
     Restart,
+    /// The snippet picker (R-SSH-49).
+    Snippets,
+    /// Broadcast to this tab, on or off (R-SSH-50).
+    Broadcast,
+    /// The screen's text size one step bigger (1), smaller (-1) or back to the default (0) (R-SSH-20).
+    FontSize(i8),
 }
 
 /// Which modifiers a shortcut needs: exactly these, nothing more.
@@ -97,6 +104,11 @@ fn shortcut(key: Key, held: Held, mac: bool, split: bool) -> Option<WindowKey> {
         shift: true,
         ..NONE
     };
+    let size = if mac {
+        Held { cmd: true, ..NONE }
+    } else {
+        ctrl
+    };
     let tab_number = if mac {
         Held { cmd: true, ..NONE }
     } else {
@@ -112,6 +124,8 @@ fn shortcut(key: Key, held: Held, mac: bool, split: bool) -> Option<WindowKey> {
         (Key::W, h) if h == ours => WindowKey::CloseTab,
         (Key::D, h) if h == ours => WindowKey::Duplicate,
         (Key::R, h) if h == ours => WindowKey::Restart,
+        (Key::S, h) if h == ours => WindowKey::Snippets,
+        (Key::B, h) if h == ours => WindowKey::Broadcast,
         (Key::Tab, h) if h == ctrl => WindowKey::NextTab,
         (Key::Tab, h)
             if h == Held {
@@ -122,6 +136,17 @@ fn shortcut(key: Key, held: Held, mac: bool, split: bool) -> Option<WindowKey> {
             WindowKey::PreviousTab
         }
         (Key::Equals | Key::Plus, h) if h == alt_shift => WindowKey::SplitRight,
+        (Key::Equals | Key::Plus, h)
+            if h == size
+                || h == Held {
+                    shift: true,
+                    ..size
+                } =>
+        {
+            WindowKey::FontSize(1)
+        }
+        (Key::Minus, h) if h == size => WindowKey::FontSize(-1),
+        (Key::Num0, h) if h == size => WindowKey::FontSize(0),
         (Key::Minus, h) if h == alt_shift => WindowKey::SplitDown,
         (Key::ArrowLeft, h) if split && h == Held { alt: true, ..NONE } => {
             WindowKey::Focus(Direction::Left)
@@ -301,6 +326,30 @@ mod tests {
         assert_eq!(
             keys(&[press(Key::N, more)], false, false).0,
             [WindowKey::NewWindow]
+        );
+    }
+
+    #[test]
+    fn ctrl_plus_minus_and_zero_size_the_text_cmd_on_macos_r_ssh_20() {
+        let ctrl = Modifiers::CTRL;
+        let shift = Modifiers {
+            shift: true,
+            ..Modifiers::CTRL
+        };
+        let found = |key, m, mac| keys(&[press(key, m)], mac, false).0;
+        assert_eq!(found(Key::Equals, ctrl, false), [WindowKey::FontSize(1)]);
+        assert_eq!(found(Key::Plus, shift, false), [WindowKey::FontSize(1)]);
+        assert_eq!(found(Key::Minus, ctrl, false), [WindowKey::FontSize(-1)]);
+        assert_eq!(found(Key::Num0, ctrl, false), [WindowKey::FontSize(0)]);
+        let cmd = Modifiers {
+            mac_cmd: true,
+            command: true,
+            ..Modifiers::NONE
+        };
+        assert_eq!(found(Key::Minus, cmd, true), [WindowKey::FontSize(-1)]);
+        assert!(
+            found(Key::Minus, ctrl, true).is_empty(),
+            "Ctrl+- is the host's on macOS"
         );
     }
 }

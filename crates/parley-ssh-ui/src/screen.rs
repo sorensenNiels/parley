@@ -4,6 +4,7 @@
 pub mod colors;
 pub mod input;
 mod mouse;
+pub mod themes;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -18,20 +19,44 @@ use parley_ssh_core::term::{CursorShape, Point, Terminal, Underline, Weight, Wid
 pub use colors::Palette;
 use input::Typed;
 
-/// The text size of the screen at 100 % (R-SSH-8).
+/// The text size of the screen at 100 % before the settings say (R-SSH-8, R-SSH-20).
 pub const FONT_SIZE: f32 = 14.0;
+
+/// How the screen is drawn (R-SSH-20): the settings' theme, text size, padding and cursor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Look {
+    pub palette: Palette,
+    /// In points at 100 %.
+    pub font_size: f32,
+    /// Room around the cells, in points.
+    pub padding: f32,
+    pub cursor: parley_ssh_core::term::CursorShape,
+    pub cursor_blink: bool,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Self {
+            palette: Palette::dark(),
+            font_size: FONT_SIZE,
+            padding: 0.0,
+            cursor: parley_ssh_core::term::CursorShape::Block,
+            cursor_blink: true,
+        }
+    }
+}
 /// Half a blink of the cursor, in seconds.
 const HALF_BLINK: f64 = 0.53;
 
 /// What the screen asks of the session around it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Out {
+    /// Bytes for the host that only this pane's state explains: focus and mouse reports.
     Send(Vec<u8>),
+    /// Keys typed, which broadcast copies to other panes (R-SSH-50).
+    Typed(Vec<u8>),
     /// The terminal was resized to fit the window.
-    Resized {
-        columns: usize,
-        rows: usize,
-    },
+    Resized { columns: usize, rows: usize },
     /// Text to paste: the session asks first when it is several lines (R-SSH-9).
     Paste(String),
 }
@@ -102,9 +127,24 @@ struct Grid {
     origin: Pos2,
     cell: Vec2,
     font: FontId,
+    faces: crate::fonts::Faces,
 }
 
 impl Grid {
+    /// The cells from `origin` at `font_size` points, scaled by `zoom` percent (0 for 100).
+    fn new(ctx: &egui::Context, origin: Pos2, font_size: f32, zoom: u16) -> Self {
+        let size = font_size * f32::from(if zoom == 0 { 100 } else { zoom }) / 100.0;
+        let faces = crate::fonts::Faces::at(ctx, size);
+        let font = faces.regular.clone();
+        let cell = ctx.fonts_mut(|f| Vec2::new(f.glyph_width(&font, 'M'), f.row_height(&font)));
+        Self {
+            origin,
+            cell,
+            font,
+            faces,
+        }
+    }
+
     #[expect(clippy::cast_precision_loss, reason = "rows and columns are small")]
     fn rect(&self, row: usize, column: usize, width: usize) -> Rect {
         let min = self.origin + Vec2::new(column as f32 * self.cell.x, row as f32 * self.cell.y);
@@ -146,24 +186,18 @@ pub fn show(
     ui: &mut Ui,
     terminal: &Mutex<Terminal>,
     view: &mut View,
-    palette: &Palette,
+    look: &Look,
     grab_focus: bool,
 ) -> Vec<Out> {
+    let palette = &look.palette;
     let mut out = Vec::new();
     let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
-    let size = FONT_SIZE * f32::from(if view.zoom == 0 { 100 } else { view.zoom }) / 100.0;
-    let font = parley_ui_egui::fonts::terminal_font(ui.ctx(), size);
-    let cell = ui
-        .ctx()
-        .fonts_mut(|f| Vec2::new(f.glyph_width(&font, 'M'), f.row_height(&font)));
-    let grid = Grid {
-        origin: response.rect.min,
-        cell,
-        font,
-    };
-    let (columns, rows) = fit(response.rect.size(), cell);
+    let inner = response.rect.shrink(look.padding);
+    let grid = Grid::new(ui.ctx(), inner.min, look.font_size, view.zoom);
+    let (columns, rows) = fit(inner.size(), grid.cell);
 
     let mut t = lock(terminal);
+    t.set_default_cursor(look.cursor, look.cursor_blink);
     if (columns, rows) != (t.columns(), t.rows()) {
         t.resize(columns, rows);
         out.push(Out::Resized { columns, rows });
@@ -193,7 +227,7 @@ pub fn show(
                 Typed::Send(bytes) => {
                     t.scroll_to_bottom();
                     view.selection = None;
-                    out.push(Out::Send(bytes));
+                    out.push(Out::Typed(bytes));
                 }
                 Typed::Copy => {
                     if let Some(text) = view.selected_text(&t) {
@@ -231,7 +265,7 @@ pub fn show(
         }
     } else {
         if response.hovered() {
-            scroll_with_wheel(ui, &mut t, view, cell.y);
+            scroll_with_wheel(ui, &mut t, view, grid.cell.y);
         }
         select(&response, &grid, &t, view);
         if context_menu(&response, &t, view) {
@@ -404,6 +438,7 @@ fn draw(
             let rect = grid.rect(r, c, span);
             let style = cell.style;
             let bold = style.weight == Weight::Bold;
+            let (font, fake_bold) = grid.faces.of(bold, style.italic);
             let mut fg = palette.foreground_of(style.fg, bold);
             let mut bg = palette.background_of(style.bg);
             if style.inverse {
@@ -422,21 +457,15 @@ fn draw(
                 continue;
             }
             if cell.ch != ' ' || !cell.combining.is_empty() {
-                let text = shown_text(painter, view, &grid.font, cell);
-                painter.text(
-                    rect.left_top(),
-                    Align2::LEFT_TOP,
-                    &text,
-                    grid.font.clone(),
-                    fg,
-                );
-                if bold {
-                    // No bold face is bundled: drawn again a little to the right.
+                let text = shown_text(painter, view, font, cell);
+                painter.text(rect.left_top(), Align2::LEFT_TOP, &text, font.clone(), fg);
+                if fake_bold {
+                    // The font has no bold face: drawn again a little to the right.
                     painter.text(
                         rect.left_top() + Vec2::new(0.6, 0.0),
                         Align2::LEFT_TOP,
                         &text,
-                        grid.font.clone(),
+                        font.clone(),
                         fg,
                     );
                 }
@@ -527,7 +556,7 @@ fn draw_cursor(
         .and_then(|r| r.cells.get(column))
         .is_some_and(|c| c.width == Width::Wide);
     let rect = grid.rect(row, column, if wide { 2 } else { 1 });
-    let color = palette.foreground;
+    let color = palette.cursor;
     match (modes.cursor_shape, focused) {
         (_, false) => {
             painter.rect_stroke(
@@ -575,9 +604,14 @@ mod tests {
         out: Vec<Out>,
         /// Take the keyboard on the first frame only, as the session does.
         grab: bool,
+        look: Look,
     }
 
     fn shown(text: &[u8]) -> Harness<'static, Shown> {
+        shown_with(text, Look::default())
+    }
+
+    fn shown_with(text: &[u8], look: Look) -> Harness<'static, Shown> {
         let mut terminal = Terminal::new(80, 24);
         terminal.feed(text);
         let state = Shown {
@@ -585,6 +619,7 @@ mod tests {
             view: View::default(),
             out: Vec::new(),
             grab: true,
+            look,
         };
         Harness::builder()
             .with_size(egui::vec2(640.0, 400.0))
@@ -594,11 +629,35 @@ mod tests {
                 |ui, s: &mut Shown| {
                     parley_ui_egui::test_support::install_fonts(ui);
                     let grab = std::mem::take(&mut s.grab);
-                    let out = show(ui, &s.terminal, &mut s.view, &Palette::dark(), grab);
+                    let out = show(ui, &s.terminal, &mut s.view, &s.look, grab);
                     s.out.extend(out);
                 },
                 state,
             )
+    }
+
+    #[test]
+    fn padding_and_a_bigger_font_leave_fewer_cells_and_the_users_cursor_is_set_r_ssh_20() {
+        let size = |look| {
+            let mut h = shown_with(b"", look);
+            h.run_steps(2);
+            let size = lock(&h.state().terminal).columns();
+            let shape = lock(&h.state().terminal).modes().cursor_shape;
+            (size, shape)
+        };
+        let (plain, _) = size(Look::default());
+        let (padded, shape) = size(Look {
+            padding: 24.0,
+            cursor: CursorShape::Bar,
+            ..Look::default()
+        });
+        let (bigger, _) = size(Look {
+            font_size: 28.0,
+            ..Look::default()
+        });
+        assert!(padded < plain, "{padded} < {plain}");
+        assert!(bigger < plain / 2 + 2, "{bigger} about half of {plain}");
+        assert_eq!(shape, CursorShape::Bar);
     }
 
     #[test]
@@ -628,7 +687,7 @@ mod tests {
             .out
             .iter()
             .filter_map(|o| {
-                if let Out::Send(b) = o {
+                if let Out::Send(b) | Out::Typed(b) = o {
                     Some(b.clone())
                 } else {
                     None
@@ -705,7 +764,7 @@ mod tests {
             .out
             .iter()
             .filter_map(|o| match o {
-                Out::Send(b) => Some(b.clone()),
+                Out::Send(b) | Out::Typed(b) => Some(b.clone()),
                 Out::Resized { .. } | Out::Paste(_) => None,
             })
             .flatten()

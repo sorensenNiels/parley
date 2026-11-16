@@ -106,6 +106,32 @@ pub fn apply(session: &mut SavedSession, host: &Host) {
     if let Some(jumps) = &host.proxy_jump {
         jumps.clone_into(&mut session.proxy_jump);
     }
+    apply_connection(session, host);
+}
+
+/// `RemoteCommand`, `SetEnv`, `AddressFamily`, `Compression` and `ProxyCommand` (R-SSH-26..29).
+fn apply_connection(session: &mut SavedSession, host: &Host) {
+    use crate::sessions::connection::{Family, ProxyKind};
+    if let Some(command) = &host.remote_command {
+        command.clone_into(&mut session.remote_command);
+    }
+    if !host.set_env.is_empty() {
+        session.environment = host.set_env.join("\n");
+    }
+    if let Some(family) = host.address_family {
+        session.address_family = match family {
+            parley_ssh_core::net::AddressFamily::Any => Family::Any,
+            parley_ssh_core::net::AddressFamily::V4 => Family::V4,
+            parley_ssh_core::net::AddressFamily::V6 => Family::V6,
+        };
+    }
+    if let Some(on) = host.compression {
+        session.compression = on;
+    }
+    if let Some(command) = &host.proxy_command {
+        session.proxy = ProxyKind::Command;
+        command.clone_into(&mut session.proxy_command);
+    }
 }
 
 #[cfg(test)]
@@ -134,6 +160,26 @@ mod tests {
         };
         let session = session(&defaults, &host);
         assert_eq!(session.proxy_jump, "bastion", "R-SSH-43");
+        let connection = Host {
+            remote_command: Some("tmux attach".into()),
+            set_env: vec!["A=1".into(), "B=æ".into()],
+            address_family: Some(parley_ssh_core::net::AddressFamily::V4),
+            compression: Some(true),
+            proxy_command: Some("nc %h %p".into()),
+            ..host.clone()
+        };
+        let s = super::session(&defaults, &connection);
+        assert_eq!(
+            (
+                s.remote_command.as_str(),
+                s.environment.as_str(),
+                s.proxy_command.as_str()
+            ),
+            ("tmux attach", "A=1\nB=æ", "nc %h %p"),
+            "R-SSH-28, R-SSH-29"
+        );
+        assert!(s.compression && s.address_family == crate::sessions::connection::Family::V4);
+        assert_eq!(s.proxy, crate::sessions::connection::ProxyKind::Command);
         assert_eq!(session.name, "web");
         assert_eq!(session.host, "web1.lan");
         assert_eq!(session.user, "dflt");

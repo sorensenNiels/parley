@@ -11,11 +11,12 @@ pub struct Palette {
     pub background: Color32,
     pub foreground: Color32,
     pub selection: Color32,
+    pub cursor: Color32,
     /// Black, red, green, yellow, blue, magenta, cyan, white; then the bright ones.
     ansi: [Color32; 16],
 }
 
-const fn rgb(value: u32) -> Color32 {
+pub(super) const fn rgb(value: u32) -> Color32 {
     let [_, r, g, b] = value.to_be_bytes();
     Color32::from_rgb(r, g, b)
 }
@@ -27,6 +28,7 @@ impl Palette {
             background: Color32::BLACK,
             foreground: rgb(0xD8_D8_D8),
             selection: rgb(0x3A_5A_8C),
+            cursor: rgb(0xD8_D8_D8),
             ansi: [
                 rgb(0x00_00_00),
                 rgb(0xE0_4B_4B),
@@ -54,6 +56,7 @@ impl Palette {
             background: rgb(0xFA_FA_F7),
             foreground: rgb(0x1F_1F_1F),
             selection: rgb(0xB4_D2_F5),
+            cursor: rgb(0x1F_1F_1F),
             ansi: [
                 rgb(0x1F_1F_1F),
                 rgb(0xB7_1C_1C),
@@ -75,9 +78,26 @@ impl Palette {
         }
     }
 
-    /// The scheme for the UI's theme.
-    pub const fn for_theme(dark: bool) -> Self {
-        if dark { Self::dark() } else { Self::light() }
+    /// A scheme from its colours as hex numbers: background, foreground, selection, cursor, then the 16 ANSI ones.
+    pub(super) const fn from_hex(base: [u32; 4], ansi: [u32; 16]) -> Self {
+        let mut colours = [Color32::BLACK; 16];
+        let mut i = 0;
+        while i < 16 {
+            colours[i] = rgb(ansi[i]);
+            i += 1;
+        }
+        Self {
+            background: rgb(base[0]),
+            foreground: rgb(base[1]),
+            selection: rgb(base[2]),
+            cursor: rgb(base[3]),
+            ansi: colours,
+        }
+    }
+
+    /// One of the 16 ANSI colours, for previews.
+    pub fn ansi(&self, i: usize) -> Color32 {
+        self.ansi.get(i).copied().unwrap_or(self.foreground)
     }
 
     /// A text colour; `bright` turns the eight normal colours into their bright ones (bold as bright).

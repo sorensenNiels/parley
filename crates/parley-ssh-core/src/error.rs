@@ -29,6 +29,8 @@ pub enum Error {
         port: u16,
         reason: String,
     },
+    #[error("proxy: {0}")]
+    Proxy(String),
     #[error("the server would not start a shell")]
     ShellRefused,
     #[error("SSH: {0}")]

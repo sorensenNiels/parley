@@ -63,8 +63,20 @@ const MACS: &[mac::Name] = &[
     mac::HMAC_SHA512,
 ];
 
-/// The client's configuration: R-SSH-2's algorithms, Nagle off for typing.
-pub(super) fn config() -> ssh::Config {
+/// The client's configuration: R-SSH-2's algorithms, Nagle off for typing, and the keepalive, rekeying and
+/// compression of `transport` (R-SSH-26, R-SSH-27).
+pub(super) fn config(transport: &super::Transport) -> ssh::Config {
+    // russh refuses limits above 1 GiB (a nonce must never repeat).
+    let bytes = transport.rekey_bytes.min(1 << 30);
+    let compression: &'static [russh::compression::Name] = if transport.compression {
+        &[
+            russh::compression::ZLIB_LEGACY,
+            russh::compression::ZLIB,
+            russh::compression::NONE,
+        ]
+    } else {
+        &[russh::compression::NONE]
+    };
     ssh::Config {
         client_id: russh::SshId::Standard(Cow::Owned(format!(
             "SSH-2.0-ParleySSH_{}",
@@ -75,8 +87,12 @@ pub(super) fn config() -> ssh::Config {
             key: Cow::Borrowed(HOST_KEYS),
             cipher: Cow::Borrowed(CIPHERS),
             mac: Cow::Borrowed(MACS),
+            compression: Cow::Borrowed(compression),
             ..Preferred::DEFAULT
         },
+        limits: russh::Limits::new(bytes, bytes, transport.rekey_after),
+        keepalive_interval: transport.keepalive,
+        keepalive_max: 3,
         nodelay: true,
         ..ssh::Config::default()
     }
@@ -252,5 +268,43 @@ impl ssh::Handler for Client {
     async fn auth_banner(&mut self, banner: &str, _session: &mut Session) -> Result<(), Error> {
         self.link.send(Event::Banner(banner.to_owned()));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn keepalive_rekeying_and_compression_reach_russh_r_ssh_26_r_ssh_27() {
+        let plain = config(&super::super::Transport::default());
+        assert_eq!(plain.keepalive_interval, None);
+        assert_eq!(
+            plain.preferred.compression.as_ref(),
+            [russh::compression::NONE]
+        );
+        let transport = super::super::Transport {
+            keepalive: Some(Duration::from_secs(30)),
+            rekey_after: Duration::from_secs(600),
+            rekey_bytes: usize::MAX,
+            compression: true,
+            ..super::super::Transport::default()
+        };
+        let set = config(&transport);
+        assert_eq!(set.keepalive_interval, Some(Duration::from_secs(30)));
+        assert_eq!(set.keepalive_max, 3, "three unanswered end the connection");
+        assert_eq!(set.limits.rekey_time_limit, Duration::from_secs(600));
+        assert_eq!(
+            set.limits.rekey_write_limit,
+            1 << 30,
+            "at most what russh allows"
+        );
+        assert_eq!(
+            set.preferred.compression[0],
+            russh::compression::ZLIB_LEGACY
+        );
+        assert!(set.nodelay);
     }
 }

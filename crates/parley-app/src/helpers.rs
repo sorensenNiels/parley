@@ -175,3 +175,36 @@ impl parley_sql_ui::SqlFiles for SqlFileWindow {
         Ok(Some(path.display().to_string()))
     }
 }
+
+/// Parley SSH's snippets exported to and imported from one JSON file (R-SSH-49), through the system's file window.
+#[derive(Debug)]
+pub struct SnippetFileWindow;
+
+impl parley_ssh_ui::snippets::SnippetFiles for SnippetFileWindow {
+    fn export(&self, json: &str) -> Result<Option<String>, String> {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Export snippets")
+            .add_filter("Parley SSH snippets", &["json"])
+            .set_file_name("parley-ssh-snippets.json")
+            .save_file()
+        else {
+            return Ok(None);
+        };
+        std::fs::write(&path, json)
+            .map_err(|e| format!("{} could not be saved: {e}", path.display()))?;
+        Ok(Some(path.display().to_string()))
+    }
+
+    fn import(&self) -> Result<Option<String>, String> {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Import snippets")
+            .add_filter("Parley SSH snippets", &["json"])
+            .pick_file()
+        else {
+            return Ok(None);
+        };
+        std::fs::read_to_string(&path)
+            .map(Some)
+            .map_err(|e| format!("{} could not be read: {e}", path.display()))
+    }
+}

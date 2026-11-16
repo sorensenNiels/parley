@@ -2,6 +2,7 @@
 //! with the share the first part takes. Pure: no drawing, so it is tested on its own.
 
 use egui::{Pos2, Rect, Vec2};
+use serde::{Deserialize, Serialize};
 
 /// A pane's number, unique in the window.
 pub type PaneId = u64;
@@ -12,7 +13,7 @@ pub const DIVIDER: f32 = 6.0;
 const MIN_SHARE: f32 = 0.1;
 
 /// Side by side (`Row`) or one over the other (`Column`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Axis {
     Row,
     Column,
@@ -27,8 +28,8 @@ pub enum Direction {
     Down,
 }
 
-/// A pane, or a split of two parts.
-#[derive(Debug, Clone, PartialEq)]
+/// A pane, or a split of two parts; kept in the settings for restore (R-SSH-52).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Layout {
     Pane(PaneId),
     Split {
@@ -74,6 +75,21 @@ impl Layout {
         };
         *self = (**other).clone();
         true
+    }
+
+    /// Gives the panes new numbers, `(old, new)` (R-SSH-52); a pane not listed keeps its number.
+    pub fn renumber(&mut self, numbers: &[(PaneId, PaneId)]) {
+        match self {
+            Self::Pane(id) => {
+                if let Some((_, new)) = numbers.iter().find(|(old, _)| old == id) {
+                    *id = *new;
+                }
+            }
+            Self::Split { first, second, .. } => {
+                first.renumber(numbers);
+                second.renumber(numbers);
+            }
+        }
     }
 
     /// The panes, first to last.

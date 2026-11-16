@@ -86,6 +86,21 @@ fn system_font(name: &str) -> Option<FontData> {
     Some(data)
 }
 
+/// The bold, italic or bold italic face of an installed family (Parley SSH, R-SSH-20); `None` when it has none.
+pub fn system_face(name: &str, bold: bool, italic: bool) -> Option<FontData> {
+    let (mut collection, mut cache) = system_collection();
+    let family = collection.family_by_name(name)?;
+    let font = family.fonts().iter().find(|f| {
+        let heavy = f.weight().value() >= 600.0;
+        let slanted = f.style() != fontique::FontStyle::Normal;
+        heavy == bold && slanted == italic
+    })?;
+    let blob = font.load(Some(&mut cache))?;
+    let mut data = FontData::from_owned(blob.data().to_vec());
+    data.index = font.index();
+    Some(data)
+}
+
 /// True if the font's narrow and wide letters are equally wide: a grid needs that.
 fn is_monospace(data: &[u8], index: u32) -> bool {
     let Ok(font) = FontRef::from_index(data, index) else {

@@ -57,6 +57,10 @@ pub struct Tab {
     /// Panes added to a split whose sessions have not started yet, each with the pane in front before it: one
     /// whose sign-on fails is taken out again (R-SSH-58).
     pending: Vec<(PaneId, Option<PaneId>)>,
+    /// Keys typed in the pane in front go to the tab's other panes too (R-SSH-50).
+    pub broadcast: bool,
+    /// Panes restored from last time, connected when the tab is first shown (R-SSH-52).
+    pub restore: Vec<(PaneId, crate::sessions::SavedSession, bool)>,
 }
 
 impl Tab {
@@ -66,6 +70,8 @@ impl Tab {
             panes: vec![(id, pane)],
             active: id,
             pending: Vec::new(),
+            broadcast: false,
+            restore: Vec::new(),
         }
     }
 

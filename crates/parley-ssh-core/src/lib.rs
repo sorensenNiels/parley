@@ -7,6 +7,7 @@ pub mod mouse;
 pub mod net;
 pub mod openssh_config;
 pub mod secret;
+pub mod snippet;
 pub mod term;
 
 pub use error::Error;

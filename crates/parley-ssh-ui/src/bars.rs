@@ -38,6 +38,17 @@ pub enum Action {
     TextActualSize,
     Shortcuts,
     Settings,
+    /// Send the snippet with this index (R-SSH-49).
+    SendSnippet(usize),
+    /// The snippet picker.
+    PickSnippet,
+    /// Settings ▸ Snippets.
+    EditSnippets,
+    /// Broadcast to the tab in front, or to every tab; on, or off again (R-SSH-50).
+    BroadcastTab,
+    BroadcastAll,
+    /// Stop reconnecting the session in front (R-SSH-51).
+    StopReconnect,
 }
 
 /// What the header shows.
@@ -45,6 +56,8 @@ pub struct Header<'a> {
     pub logo: Option<&'a egui::TextureHandle>,
     pub session: Option<&'a Session>,
     pub newer: Option<(&'a str, &'a str)>,
+    pub snippets: &'a [crate::snippets::Snippet],
+    pub broadcast: crate::broadcast::Scope,
 }
 
 impl std::fmt::Debug for Header<'_> {
@@ -76,6 +89,8 @@ pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
             Item(connected, icons::POWER, "Disconnect", Action::Disconnect),
             Item(true, icons::SIGN_OUT, "Close", Action::Close),
             Item(open, icons::LIST, "Event log", Action::EventLog),
+            broadcast_item(header.broadcast, false),
+            broadcast_item(header.broadcast, true),
             Item(true, icons::SIGN_OUT, "Exit", Action::Exit),
         ];
         let edit = [
@@ -101,12 +116,17 @@ pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
             "Keyboard shortcuts",
             Action::Shortcuts,
         )];
-        for (name, items) in [
-            ("Session", &session[..]),
-            ("Edit", &edit),
-            ("View", &view),
-            ("Help", &help),
-        ] {
+        for (name, items) in [("Session", &session[..]), ("Edit", &edit)] {
+            ui.menu_button(name, |ui| {
+                for item in items {
+                    pick(ui, &mut action, item);
+                }
+            });
+        }
+        ui.menu_button("Snippets", |ui| {
+            snippets_menu(ui, header, connected, &mut action);
+        });
+        for (name, items) in [("View", &view[..]), ("Help", &help)] {
             ui.menu_button(name, |ui| {
                 for item in items {
                     pick(ui, &mut action, item);
@@ -133,6 +153,67 @@ fn right_side(ui: &mut Ui, header: &Header<'_>, action: &mut Option<Action>) {
             .on_hover_text("Opens the release page, with its notes and installers.");
         ui.add_space(8.0);
     }
+}
+
+/// Session ▸ Broadcast to this tab or to every tab, or Stop broadcasting while on (R-SSH-50).
+fn broadcast_item(scope: crate::broadcast::Scope, all: bool) -> Item {
+    use crate::broadcast::Scope;
+    match (scope, all) {
+        (Scope::Off, false) => Item(
+            true,
+            icons::LIGHTNING,
+            "Broadcast to this tab",
+            Action::BroadcastTab,
+        ),
+        (Scope::Off | Scope::Tab, true) => Item(
+            true,
+            icons::LIGHTNING,
+            "Broadcast to every tab",
+            Action::BroadcastAll,
+        ),
+        (Scope::Tab | Scope::All, false) => {
+            Item(true, icons::STOP, "Stop broadcasting", Action::BroadcastTab)
+        }
+        (Scope::All, true) => Item(
+            false,
+            icons::LIGHTNING,
+            "Broadcasting to every tab",
+            Action::BroadcastAll,
+        ),
+    }
+}
+
+/// The Snippets menu (R-SSH-49): each snippet with its key, the picker and the settings page.
+fn snippets_menu(ui: &mut Ui, header: &Header<'_>, connected: bool, action: &mut Option<Action>) {
+    for (i, snippet) in header.snippets.iter().enumerate() {
+        let text = if snippet.key.is_empty() {
+            snippet.name.clone()
+        } else {
+            format!("{}    {}", snippet.name, snippet.key)
+        };
+        let button = icons::button(icons::TERMINAL, text.as_str());
+        if icons::add_named(ui, connected, button, &snippet.name).clicked() {
+            *action = Some(Action::SendSnippet(i));
+        }
+    }
+    if !header.snippets.is_empty() {
+        ui.separator();
+    }
+    pick(
+        ui,
+        action,
+        &Item(
+            connected,
+            icons::MAGNIFYING_GLASS,
+            "Send a snippet…",
+            Action::PickSnippet,
+        ),
+    );
+    pick(
+        ui,
+        action,
+        &Item(true, icons::PENCIL, "Edit snippets…", Action::EditSnippets),
+    );
 }
 
 /// A menu item: enabled, its icon and text, and what it does.
@@ -186,12 +267,26 @@ fn pill(ui: &mut Ui, session: &Session) -> Option<Action> {
 }
 
 /// The status bar: where the session stands; its size and security on the right.
-pub fn status_bar(ui: &mut Ui, session: Option<&Session>, note: Option<&str>) {
+pub fn status_bar(ui: &mut Ui, session: Option<&Session>, note: Option<&str>) -> Option<Action> {
+    let mut action = None;
     ui.horizontal(|ui| {
         let Some(session) = session else {
             status::muted(ui, None, note.unwrap_or("Not connected.").to_owned());
             return;
         };
+        let now = ui.input(|i| i.time);
+        if let Some((attempt, seconds)) = session.reconnecting(now) {
+            // R-SSH-51: the count down, Restart now and Stop.
+            let text = format!("Connection lost. Reconnecting in {seconds} s (try {attempt})…");
+            status::muted(ui, Some(icons::ARROWS_CLOCKWISE), text);
+            if ui.add(theme::ghost_button("Restart now")).clicked() {
+                action = Some(Action::Restart);
+            }
+            if ui.add(theme::ghost_button("Stop")).clicked() {
+                action = Some(Action::StopReconnect);
+            }
+            return;
+        }
         let text = match &session.state {
             State::Connecting => format!("Connecting to {}…", session.target.label()),
             State::SigningOn => format!("Signing on to {}…", session.target.label()),
@@ -220,4 +315,5 @@ pub fn status_bar(ui: &mut Ui, session: Option<&Session>, note: Option<&str>) {
             }
         });
     });
+    action
 }

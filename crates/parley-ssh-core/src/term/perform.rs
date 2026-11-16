@@ -541,10 +541,12 @@ impl Terminal {
         }
     }
 
-    /// DECSCUSR: 0 and 1 blinking block, 2 steady block, 3/4 underline, 5/6 bar.
+    /// DECSCUSR: 0 the user's cursor (R-SSH-20; xterm: its configured one), 1 blinking block, 2 steady block,
+    /// 3/4 underline, 5/6 bar.
     fn set_cursor_style(&mut self, style: usize) {
         let (shape, blink) = match style {
-            0 | 1 => (CursorShape::Block, true),
+            0 => self.default_cursor,
+            1 => (CursorShape::Block, true),
             2 => (CursorShape::Block, false),
             3 => (CursorShape::Underline, true),
             4 => (CursorShape::Underline, false),

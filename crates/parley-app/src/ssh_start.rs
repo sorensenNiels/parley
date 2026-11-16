@@ -6,10 +6,10 @@ use parley_ssh_ui::StartRequest;
 
 /// The usage text of `parley-ssh`.
 pub const USAGE: &str = "\
-Usage: parley-ssh [OPTION]... [[USER@]HOST[:PORT]]
+Usage: parley-ssh [OPTION]... [[USER@]HOST[:PORT] [COMMAND...]]
 
 Opens Parley SSH, an SSH client. With HOST, connects to it at once, signing on as the
-default settings say unless told otherwise.
+default settings say unless told otherwise; with COMMAND, runs it instead of the shell.
 
 Options:
   -load NAME           Open the saved session NAME
@@ -39,7 +39,7 @@ pub enum Command {
 /// Reads `parley-ssh`'s arguments (without the program's name).
 ///
 /// # Errors
-/// An unknown option, a missing or wrong value, or a second host, said for the terminal.
+/// An unknown option, a missing or wrong value, said for the terminal.
 pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> {
     let mut request = StartRequest::default();
     let mut screenshot = None;
@@ -67,7 +67,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
                 request.proxy_jump = Some(jumps);
             }
             _ if !arg.starts_with('-') && request.host.is_none() => request.host = Some(arg),
-            _ if !arg.starts_with('-') => return Err(format!("a second host '{arg}'")),
+            // As `ssh host command…`: the rest of the line is the command (R-SSH-28).
+            _ if !arg.starts_with('-') => {
+                let rest: Vec<String> = std::iter::once(arg).chain(args.by_ref()).collect();
+                request.command = Some(rest.join(" "));
+            }
             _ => return Err(format!("unknown option '{arg}'")),
         }
     }
@@ -146,6 +150,18 @@ mod tests {
     }
 
     #[test]
+    fn what_follows_the_host_is_a_command_as_ssh_takes_it_r_ssh_28() {
+        let request = run("-p 2200 box tail -f /var/log/syslog -n 5").expect("valid");
+        assert_eq!(request.host.as_deref(), Some("box"));
+        assert_eq!(request.port, Some(2200));
+        assert_eq!(
+            request.command.as_deref(),
+            Some("tail -f /var/log/syslog -n 5")
+        );
+        assert_eq!(run("box").expect("valid").command, None);
+    }
+
+    #[test]
     fn jump_hosts_on_the_command_line_as_ssh_takes_them_r_ssh_43() {
         let request = run("-J gw,ops@inner:2200 box").expect("valid");
         assert_eq!(request.proxy_jump.as_deref(), Some("gw,ops@inner:2200"));
@@ -198,7 +214,7 @@ mod tests {
         assert!(run("-p 0 box").is_err());
         assert!(run("-p http box").is_err());
         assert!(run("-x box").is_err());
-        assert!(run("a b").is_err());
+        assert!(run("box -x").is_err(), "an unknown option after the host");
         assert!(run("-load P box").is_err());
         assert_eq!(parse(["--version".to_owned()]), Ok(Command::Version));
         assert_eq!(parse(["-h".to_owned()]), Ok(Command::Help));

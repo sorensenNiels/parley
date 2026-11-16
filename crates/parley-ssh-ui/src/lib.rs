@@ -4,13 +4,18 @@
 //! the command line (R-SSH-14) and opens other windows (R-SSH-41).
 
 mod bars;
+mod broadcast;
 mod dialogs;
+mod fonts;
 mod openssh;
 mod panes;
+mod reconnect;
+pub mod restore;
 pub mod screen;
 mod session;
 pub mod sessions;
 pub mod settings;
+pub mod snippets;
 mod start;
 mod tabs;
 mod window;
@@ -29,9 +34,6 @@ use session::Session;
 use sessions::{Edited, Editor, SavedSession};
 pub use settings::Settings;
 use tabs::{Pane, Tab};
-
-/// The smallest and largest text size View offers, in percent, and its step.
-const TEXT_SIZES: (u16, u16, u16) = (60, 250, 10);
 
 /// Starts another Parley SSH window with these arguments (R-SSH-41); the launcher's, as the UI keeps no platform
 /// code.
@@ -54,6 +56,8 @@ pub struct StartRequest {
     pub agent_forwarding: Option<bool>,
     /// `-J [user@]host[:port],…` (R-SSH-43); `none` for no jump host.
     pub proxy_jump: Option<String>,
+    /// What follows the host: run instead of the shell, as `ssh host command` (R-SSH-28).
+    pub command: Option<String>,
 }
 
 /// What is about to close, waiting for the user's yes (R-SSH-10).
@@ -68,6 +72,8 @@ enum Closing {
 pub struct ParleySshUi {
     settings: Settings,
     applied: Option<Settings>,
+    /// Said on the Appearance page when the chosen terminal font is not installed (R-SSH-20).
+    font_note: Option<String>,
     settings_dialog: Option<settings::Dialog>,
     logo: Logo,
     updates: updates::Updates,
@@ -87,9 +93,19 @@ pub struct ParleySshUi {
     spawner: Option<Spawner>,
     /// What could not be done, or why a session closed, for the status bar.
     note: Option<String>,
-    shortcuts_open: bool,
+    /// The shortcut sheet is open, with its rows' last height.
+    shortcuts: Option<f32>,
     closing: Option<Closing>,
     close_confirmed: bool,
+    /// Export and import of snippets through the system's file window (R-SSH-49).
+    snippet_files: Option<Box<dyn snippets::SnippetFiles>>,
+    picker: Option<snippets::Picker>,
+    /// A snippet's placeholders being asked for.
+    fill: Option<snippets::Fill>,
+    /// Broadcast to every tab (R-SSH-50); a tab's own switch is `Tab::broadcast`.
+    broadcast_all: bool,
+    /// When Escape was last pressed while broadcasting, for Escape twice.
+    last_escape: Option<f64>,
 }
 
 impl std::fmt::Debug for ParleySshUi {
@@ -109,6 +125,7 @@ impl ParleySshUi {
         Self {
             settings,
             applied: None,
+            font_note: None,
             settings_dialog: None,
             logo: Logo::default(),
             updates: updates::Updates::default(),
@@ -122,10 +139,20 @@ impl ParleySshUi {
             event_log: None,
             spawner: None,
             note: None,
-            shortcuts_open: false,
+            shortcuts: None,
             closing: None,
             close_confirmed: false,
+            snippet_files: None,
+            picker: None,
+            fill: None,
+            broadcast_all: false,
+            last_escape: None,
         }
+    }
+
+    /// Export and import of snippets (R-SSH-49).
+    pub fn set_snippet_files(&mut self, files: Box<dyn snippets::SnippetFiles>) {
+        self.snippet_files = Some(files);
     }
 
     pub fn settings(&self) -> &Settings {
@@ -183,7 +210,7 @@ impl ParleySshUi {
                 let active = self.tabs[self.current].active;
                 self.connect_pane(ctx, active, source, saved);
             }
-            Ok(None) => {}
+            Ok(None) => self.restore_last_tabs(),
             Err(e) => match (typed, self.tabs[self.current].active_pane_mut()) {
                 (Some((host, port)), Some(Pane::Start(form))) => {
                     form.host = host;
@@ -220,6 +247,9 @@ impl ParleySshUi {
         source.key_files.extend(request.key_files);
         if let Some(forwarding) = request.agent_forwarding {
             source.agent_forwarding = forwarding;
+        }
+        if let Some(command) = request.command {
+            source.remote_command = command;
         }
         if let Some(jumps) = request.proxy_jump {
             source.proxy_jump = if jumps.trim().eq_ignore_ascii_case("none") {
@@ -269,6 +299,10 @@ impl ParleySshUi {
             for key in keys {
                 self.window_key(ui.ctx(), key);
             }
+            if let Some(i) = self.snippet_key(ui.ctx()) {
+                self.send_snippet(i);
+            }
+            self.watch_double_escape(ui);
         }
         let menu_frame = theme::bar(ui, Margin::symmetric(8, 3));
         let status_frame = theme::bar(ui, Margin::symmetric(8, 5));
@@ -281,16 +315,25 @@ impl ParleySshUi {
             logo: logo.as_ref(),
             session: self.active_session(),
             newer: newer.as_ref().map(|(v, p)| (v.as_str(), p.as_str())),
+            snippets: &self.settings.snippets,
+            broadcast: self.broadcast_scope(),
         };
         let action = Panel::top("ssh-menu")
             .frame(menu_frame)
             .show(ui, |ui| bars::menu_bar(ui, &header))
             .inner;
-        Panel::bottom("ssh-status")
+        let status_action = Panel::bottom("ssh-status")
             .frame(status_frame)
             .show(ui, |ui| {
-                bars::status_bar(ui, self.active_session(), self.note.as_deref());
-            });
+                let broadcast = match self.receivers() {
+                    0 => None,
+                    n => Some(format!("Broadcasting to {n} panes (Escape twice to stop)")),
+                };
+                let note = broadcast.as_deref().or(self.note.as_deref());
+                bars::status_bar(ui, self.active_session(), note)
+            })
+            .inner;
+        let action = action.or(status_action);
         self.drop_failed_panes();
         self.tab_bar(ui);
         self.central(ui);
@@ -302,6 +345,7 @@ impl ParleySshUi {
             }
         }
         self.show_dialogs(ui.ctx());
+        self.snippet_dialogs(ui.ctx());
     }
 
     /// A dialog of the window's own is open: the window's shortcuts wait.
@@ -309,18 +353,31 @@ impl ParleySshUi {
         self.editor.is_some()
             || self.settings_dialog.is_some()
             || self.closing.is_some()
-            || self.shortcuts_open
+            || self.shortcuts.is_some()
+            || self.picker.is_some()
+            || self.fill.is_some()
     }
 
     fn apply_settings(&mut self, ctx: &egui::Context) {
+        if self.applied.is_none() {
+            // Ctrl+= and Ctrl+- size the screen's text instead (R-SSH-20).
+            ctx.options_mut(|o| o.zoom_with_keyboard = false);
+        }
         if self.applied.is_none() && self.settings.check_for_updates {
             self.updates.start(ctx, updates::Check::AtStart);
         }
         self.updates.collect();
         if self.applied.as_ref() != Some(&self.settings) {
             let old = self.applied.as_ref().map(Settings::look);
-            // Parley SSH uses the bundled default terminal font, which always loads: there is no note.
+            // The fonts are set up below with the screen's faces, which replaces what this sets and its note.
             let _ = settings::apply(ctx, old.as_ref(), &self.settings.look());
+            let font = &self.settings.terminal_font;
+            if old.as_ref().is_none_or(|o| &o.terminal_font != font) {
+                self.font_note = fonts::install(ctx, font);
+            }
+            if let Some(dialog) = &mut self.settings_dialog {
+                dialog.font_note.clone_from(&self.font_note);
+            }
             self.applied = Some(self.settings.clone());
         }
     }
@@ -433,28 +490,36 @@ impl ParleySshUi {
                     session.reset_terminal();
                 }
             }
-            Action::TextLarger => {
-                self.settings.text_size =
-                    (self.settings.text_size + TEXT_SIZES.2).min(TEXT_SIZES.1);
+            // The screen's text, as Ctrl+= / Ctrl+- / Ctrl+0 (R-SSH-20); Settings ▸ Appearance sizes everything.
+            Action::TextLarger => self.settings.step_font_size(1),
+            Action::TextSmaller => self.settings.step_font_size(-1),
+            Action::TextActualSize => self.settings.step_font_size(0),
+            Action::Shortcuts => self.shortcuts = Some(0.0),
+            Action::SendSnippet(i) => self.send_snippet(i),
+            Action::PickSnippet => self.open_picker(),
+            Action::EditSnippets => {
+                self.settings_dialog =
+                    Some(settings::Dialog::open(ctx, &self.settings).on(settings::Page::Snippets));
             }
-            Action::TextSmaller => {
-                self.settings.text_size = self
-                    .settings
-                    .text_size
-                    .saturating_sub(TEXT_SIZES.2)
-                    .max(TEXT_SIZES.0);
+            Action::BroadcastTab => self.toggle_broadcast_tab(),
+            Action::BroadcastAll => self.toggle_broadcast_all(),
+            Action::StopReconnect => {
+                if let Some(session) = self.active_session_mut() {
+                    session.stop_reconnecting();
+                }
             }
-            Action::TextActualSize => self.settings.text_size = 100,
-            Action::Shortcuts => self.shortcuts_open = true,
-            Action::Settings => self.settings_dialog = Some(settings::Dialog::open(&self.settings)),
+            Action::Settings => {
+                self.settings_dialog = Some(settings::Dialog::open(ctx, &self.settings));
+            }
         }
     }
 
     fn show_dialogs(&mut self, ctx: &egui::Context) {
-        if self.shortcuts_open
-            && dialogs::shortcut_sheet(ctx, ctx.os() == egui::os::OperatingSystem::Mac)
+        let mac = ctx.os() == egui::os::OperatingSystem::Mac;
+        if let Some(height) = &mut self.shortcuts
+            && dialogs::shortcut_sheet(ctx, mac, height)
         {
-            self.shortcuts_open = false;
+            self.shortcuts = None;
         }
         self.show_closing(ctx);
         self.show_event_log(ctx);
@@ -504,11 +569,11 @@ impl ParleySshUi {
                 self.settings.defaults = SavedSession {
                     name: String::new(),
                     host: String::new(),
-                    ..session
+                    ..*session
                 };
             }
-            (Edited::Save(session), Some(i)) if i < sessions.len() => sessions[i] = session,
-            (Edited::Save(session), _) => sessions.push(session),
+            (Edited::Save(session), Some(i)) if i < sessions.len() => sessions[i] = *session,
+            (Edited::Save(session), _) => sessions.push(*session),
             (Edited::Delete, Some(i)) if i < sessions.len() => {
                 sessions.remove(i);
             }
@@ -521,7 +586,12 @@ impl ParleySshUi {
         let Some(dialog) = &mut self.settings_dialog else {
             return;
         };
-        let closed = dialog.show(ctx, &mut self.settings, self.updates.status());
+        let closed = dialog.show(
+            ctx,
+            &mut self.settings,
+            self.updates.status(),
+            self.snippet_files.as_deref(),
+        );
         if dialog.take_check_request() {
             self.updates.start(ctx, updates::Check::Now);
         }

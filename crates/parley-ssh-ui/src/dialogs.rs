@@ -346,7 +346,8 @@ pub fn event_log(
 }
 
 /// Parley SSH's shortcuts (R-SSH-7); true when closed.
-pub fn shortcut_sheet(ctx: &Context, mac: bool) -> bool {
+/// `last_height` is its rows' height last frame, for a window too small for them all.
+pub fn shortcut_sheet(ctx: &Context, mac: bool, last_height: &mut f32) -> bool {
     let command = if mac { "Cmd" } else { "Ctrl+Shift" };
     let rows = [
         ("Copy", format!("{command}+C")),
@@ -372,6 +373,17 @@ pub fn shortcut_sheet(ctx: &Context, mac: bool) -> bool {
         ("Duplicate session", format!("{command}+D")),
         ("New window", format!("{command}+Alt+N")),
         ("Restart session", format!("{command}+R")),
+        ("Send a snippet", format!("{command}+S")),
+        ("Broadcast to this tab, or stop", format!("{command}+B")),
+        ("Stop broadcasting", "Escape twice".to_owned()),
+        (
+            "Text larger, smaller, as before",
+            if mac {
+                "Cmd+=, Cmd+-, Cmd+0".to_owned()
+            } else {
+                "Ctrl+=, Ctrl+-, Ctrl+0".to_owned()
+            },
+        ),
         ("Scroll back a page", "Shift+Page Up".to_owned()),
         ("Scroll forward a page", "Shift+Page Down".to_owned()),
     ];
@@ -381,16 +393,18 @@ pub fn shortcut_sheet(ctx: &Context, mac: bool) -> bool {
             "Every other key goes to the host as xterm sends it, Ctrl+C and Ctrl+V too.",
         );
         ui.add_space(8.0);
-        egui::Grid::new("ssh-shortcut-rows")
-            .num_columns(2)
-            .spacing([24.0, 6.0])
-            .show(ui, |ui| {
-                for (what, keys) in &rows {
-                    ui.label(*what);
-                    theme::kbd(ui, keys);
-                    ui.end_row();
-                }
-            });
+        dialog::fitting_scroll_area(ui, "ssh-shortcut-scroll", 200.0, last_height, |ui| {
+            egui::Grid::new("ssh-shortcut-rows")
+                .num_columns(2)
+                .spacing([24.0, 6.0])
+                .show(ui, |ui| {
+                    for (what, keys) in &rows {
+                        ui.label(*what);
+                        theme::kbd(ui, keys);
+                        ui.end_row();
+                    }
+                });
+        });
         ui.add_space(12.0);
         theme::button_row(ui, |ui| {
             ui.add(theme::primary_button(ui, "Close")).clicked()
@@ -605,8 +619,8 @@ mod tests {
 
     #[test]
     fn the_shortcut_sheet_stays_put_and_closes_r_ssh_7() {
-        let mut h = harness(false, |ui, closed: &mut bool| {
-            *closed |= shortcut_sheet(ui.ctx(), false);
+        let mut h = harness((false, 0.0), |ui, (closed, height): &mut (bool, f32)| {
+            *closed |= shortcut_sheet(ui.ctx(), false, height);
         });
         h.run_steps(3);
         let first = h.get_all_by_label("Close").last().expect("button").rect();
@@ -617,6 +631,6 @@ mod tests {
         );
         h.get_all_by_label("Close").last().expect("button").click();
         h.run_steps(2);
-        assert!(*h.state());
+        assert!(h.state().0);
     }
 }

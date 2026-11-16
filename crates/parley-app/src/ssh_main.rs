@@ -50,7 +50,8 @@ impl eframe::App for App {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         // A screenshot run is for development: it must not replace the user's settings.
         if self.screenshot.is_none() {
-            eframe::set_value(storage, SETTINGS_KEY, self.ui.settings());
+            // With the tabs open now, when restore is on (R-SSH-52).
+            eframe::set_value(storage, SETTINGS_KEY, &self.ui.settings_to_save());
         }
     }
 }
@@ -101,6 +102,7 @@ fn main() -> eframe::Result {
             let mut ui = ParleySshUi::new(settings, known_hosts);
             ui.set_update_checker(parley_app::update_checker());
             ui.set_spawner(std::sync::Arc::new(ssh_start::spawn));
+            ui.set_snippet_files(Box::new(parley_app::helpers::SnippetFileWindow));
             // The hosts of ~/.ssh/config (R-SSH-42); none without a home folder.
             if let Some(config) = parley_ssh_core::openssh_config::Config::from_home() {
                 ui.set_openssh_config(config);

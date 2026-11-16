@@ -10,6 +10,7 @@ use parley_ssh_core::net::{self, Algorithms, Command, Connection, Ending, Event,
 use parley_ssh_core::term::Terminal;
 
 use crate::dialogs;
+use crate::reconnect::{self, Reconnect};
 use crate::screen::{self, Out};
 use crate::sessions::SavedSession;
 
@@ -41,6 +42,10 @@ pub enum State {
 
 /// The open session.
 #[derive(Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent facts about the session, not one state"
+)]
 pub struct Session {
     pub target: Target,
     /// What the session was opened from: a saved session, or the defaults with the quick connect's target.
@@ -67,6 +72,22 @@ pub struct Session {
     /// Take the keyboard on the next frame (after a dialog closed).
     grab_focus: bool,
     known_hosts: KnownHosts,
+    /// Keys and pastes sent from this pane, for broadcast (R-SSH-50).
+    shared: Vec<Shared>,
+    /// Reconnecting after a lost connection, between tries (R-SSH-51).
+    reconnect: Option<Reconnect>,
+    /// How long to try reconnecting, in minutes; 0 for never (the settings', set each frame).
+    pub reconnect_minutes: u8,
+    /// The connection ended since the last frame: whether to reconnect is decided in `show`.
+    just_ended: bool,
+}
+
+/// What one pane sends that others may get too (R-SSH-50).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Shared {
+    Keys(Vec<u8>),
+    /// Text to paste, encoded by each pane for its own modes.
+    Paste(String),
 }
 
 impl Session {
@@ -125,14 +146,28 @@ impl Session {
             paste: None,
             grab_focus: true,
             known_hosts,
+            shared: Vec::new(),
+            reconnect: None,
+            reconnect_minutes: 0,
+            just_ended: false,
         }
     }
 
-    /// Connects again with the same settings, on the same screen, as `PuTTY`'s Restart Session (R-SSH-5).
+    /// Connects again with the same settings, on the same screen, as `PuTTY`'s Restart Session (R-SSH-5); also
+    /// Restart now while reconnecting.
     pub fn restart(&mut self, repaint: impl Fn() + Send + Sync + 'static) {
+        self.reconnect = None;
+        self.reopen(repaint);
+    }
+
+    /// A new connection on the same screen, keeping the event log and any reconnecting.
+    fn reopen(&mut self, repaint: impl Fn() + Send + Sync + 'static) {
         let terminal = Arc::clone(&self.terminal);
         net::lock(&terminal).feed(b"\r\n");
         let zoom = self.view.zoom;
+        let log = std::mem::take(&mut self.log);
+        let reconnect = self.reconnect.take();
+        let minutes = self.reconnect_minutes;
         *self = Self::open_on(
             self.source.clone(),
             self.saved,
@@ -141,6 +176,73 @@ impl Session {
             repaint,
         );
         self.view.zoom = zoom;
+        self.log = log;
+        self.reconnect = reconnect;
+        self.reconnect_minutes = minutes;
+    }
+
+    /// Stops reconnecting (the status bar's Stop).
+    pub fn stop_reconnecting(&mut self) {
+        if self.reconnect.take().is_some() {
+            self.say("Stopped reconnecting.");
+        }
+    }
+
+    /// Reconnecting: the next try's number and the seconds until it.
+    pub fn reconnecting(&self, now: f64) -> Option<(u32, u64)> {
+        self.reconnect
+            .as_ref()
+            .map(|r| (r.attempt + 1, r.seconds_left(now)))
+    }
+
+    /// A line on the screen, faint, and in the event log.
+    fn say(&mut self, text: &str) {
+        net::lock(&self.terminal).feed(format!("\r\n\x1b[2m[{text}]\x1b[0m\r\n").as_bytes());
+        self.log.push(LogLine::now(text.to_owned()));
+    }
+
+    /// After the connection ended: starts, goes on with or gives up reconnecting (R-SSH-51); and starts a try
+    /// when it is due.
+    fn follow_up(&mut self, ctx: &egui::Context, now: f64) {
+        if std::mem::take(&mut self.just_ended)
+            && let State::Ended(ending) = self.state.clone()
+        {
+            match &mut self.reconnect {
+                Some(r) if matches!(ending, Ending::Failed(_)) => {
+                    let (attempt, more) = (r.attempt + 1, r.failed(now));
+                    if more {
+                        let wait = r.seconds_left(now);
+                        self.say(&format!("Try {attempt} failed. Trying again in {wait} s."));
+                    } else {
+                        self.reconnect = None;
+                        let minutes = self.reconnect_minutes;
+                        self.say(&format!("Gave up reconnecting after {minutes} minutes."));
+                    }
+                }
+                Some(_) => self.stop_reconnecting(),
+                None if self.reconnect_minutes > 0 && reconnect::is_lost(&ending, self.started) => {
+                    self.reconnect = Some(Reconnect::start(now, self.reconnect_minutes));
+                    let why = match &ending {
+                        Ending::Failed(why) => why.as_str(),
+                        _ => "",
+                    };
+                    self.say(&format!("The connection was lost ({why}). Reconnecting…"));
+                }
+                None => {}
+            }
+        }
+        if let Some(r) = &self.reconnect
+            && matches!(self.state, State::Ended(_))
+        {
+            if r.due(now) {
+                let ctx = ctx.clone();
+                self.reopen(move || ctx.request_repaint());
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+                    (r.next - now).max(0.05),
+                ));
+            }
+        }
     }
 
     pub fn is_connected(&self) -> bool {
@@ -212,6 +314,9 @@ impl Session {
                     }
                 }
                 Event::Started => {
+                    if self.reconnect.take().is_some() {
+                        self.say("Reconnected: this is a new shell.");
+                    }
                     self.state = State::Running;
                     self.started = true;
                     self.problem = None;
@@ -222,6 +327,7 @@ impl Session {
                     self.host_key = None;
                     self.prompt = None;
                     self.state = State::Ended(ending);
+                    self.just_ended = true;
                 }
             }
         }
@@ -231,18 +337,24 @@ impl Session {
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
-        palette: &screen::Palette,
+        look: &screen::Look,
         confirm_paste: bool,
         active: bool,
     ) {
         self.poll();
+        let now = ui.input(|i| i.time);
+        self.follow_up(ui.ctx(), now);
         self.view.mouse_reporting = self.source.mouse_reporting;
         let asking = self.host_key.is_some() || self.prompt.is_some() || self.paste.is_some();
         let grab = active && !asking && std::mem::take(&mut self.grab_focus);
         let area = ui.max_rect();
-        for out in screen::show(ui, &self.terminal, &mut self.view, palette, grab) {
+        for out in screen::show(ui, &self.terminal, &mut self.view, look, grab) {
             match out {
                 Out::Send(bytes) => self.send(bytes),
+                Out::Typed(bytes) => {
+                    self.shared.push(Shared::Keys(bytes.clone()));
+                    self.send(bytes);
+                }
                 Out::Resized { columns, rows } => {
                     self.connection.send(Command::Resize { columns, rows });
                 }
@@ -270,7 +382,25 @@ impl Session {
         if confirm && keys::paste_needs_confirmation(text, &modes) {
             self.paste = Some(text.to_owned());
         } else {
+            self.shared.push(Shared::Paste(text.to_owned()));
             self.send(keys::paste(text, &modes));
+        }
+    }
+
+    /// Keys and pastes sent from this pane since the last call, for broadcast (R-SSH-50).
+    pub fn take_shared(&mut self) -> Vec<Shared> {
+        std::mem::take(&mut self.shared)
+    }
+
+    /// What another pane sent while broadcasting, or a snippet (R-SSH-49, R-SSH-50): a paste is encoded for this
+    /// pane's own modes, and never asks.
+    pub fn receive(&self, shared: &Shared) {
+        match shared {
+            Shared::Keys(bytes) => self.send(bytes.clone()),
+            Shared::Paste(text) => {
+                let modes = *net::lock(&self.terminal).modes();
+                self.send(keys::paste(text, &modes));
+            }
         }
     }
 
@@ -321,6 +451,7 @@ impl Session {
         {
             if go {
                 let modes = *net::lock(&self.terminal).modes();
+                self.shared.push(Shared::Paste(text.clone()));
                 self.send(keys::paste(text, &modes));
             }
             self.paste = None;
@@ -341,7 +472,7 @@ pub fn ending_text(ending: &Ending) -> String {
         Ending::Signal(signal) => format!("The shell was ended by signal {signal}."),
         Ending::Closed => "The server closed the connection.".to_owned(),
         Ending::Disconnected => "Disconnected.".to_owned(),
-        Ending::Failed(why) => format!("Could not connect: {why}."),
+        Ending::Failed(why) | Ending::Refused(why) => format!("Could not connect: {why}."),
     }
 }
 
@@ -366,5 +497,74 @@ mod tests {
             )),
             "Could not connect: could not reach x: connection refused."
         );
+    }
+
+    /// A session whose jump hosts cannot be read: each connection fails at once, as a lost network would.
+    fn failing() -> Session {
+        let source = SavedSession {
+            host: "box".into(),
+            user: "me".into(),
+            proxy_jump: "@".into(),
+            ..SavedSession::default()
+        };
+        let known = KnownHosts::new(
+            std::env::temp_dir()
+                .join("parley-ssh-reconnect")
+                .join("known_hosts"),
+            None,
+        );
+        Session::open(source, false, known, || {})
+    }
+
+    fn screen(s: &Session) -> String {
+        net::lock(&s.terminal).all_text()
+    }
+
+    #[test]
+    fn a_lost_connection_is_tried_again_with_waits_until_stopped_r_ssh_51() {
+        let ctx = egui::Context::default();
+        let mut s = failing();
+        s.reconnect_minutes = 10;
+        s.poll();
+        // As if the shell had run: the failure is a lost connection.
+        s.started = true;
+        s.follow_up(&ctx, 0.0);
+        assert!(
+            screen(&s).contains("The connection was lost"),
+            "{}",
+            screen(&s)
+        );
+        assert_eq!(s.reconnecting(0.0), Some((1, 1)));
+        s.follow_up(&ctx, 1.0);
+        s.poll();
+        s.follow_up(&ctx, 1.0);
+        assert!(
+            screen(&s).contains("Try 1 failed. Trying again in 2 s."),
+            "{}",
+            screen(&s)
+        );
+        assert_eq!(s.reconnecting(1.0), Some((2, 2)));
+        assert!(
+            s.log.iter().any(|l| l.text.contains("lost")),
+            "the log is kept across tries"
+        );
+        s.stop_reconnecting();
+        assert_eq!(s.reconnecting(1.0), None);
+        assert!(screen(&s).contains("Stopped reconnecting."));
+    }
+
+    #[test]
+    fn nothing_reconnects_when_the_setting_is_off_or_the_shell_never_ran_r_ssh_51() {
+        let ctx = egui::Context::default();
+        let mut never_ran = failing();
+        never_ran.reconnect_minutes = 10;
+        never_ran.poll();
+        never_ran.follow_up(&ctx, 0.0);
+        assert_eq!(never_ran.reconnecting(0.0), None);
+        let mut off = failing();
+        off.poll();
+        off.started = true;
+        off.follow_up(&ctx, 0.0);
+        assert_eq!(off.reconnecting(0.0), None);
     }
 }

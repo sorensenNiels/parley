@@ -412,8 +412,9 @@ impl Dialog {
     }
 }
 
-/// The bundled fonts, then the installed monospace ones (`None` while still looking).
-fn font_choice(ui: &mut Ui, font: &mut String, installed: Option<&[String]>) -> egui::Response {
+/// The bundled fonts, then the installed monospace ones (`None` while still looking). Parley SSH's Appearance page
+/// uses it too (R-SSH-20).
+pub fn font_choice(ui: &mut Ui, font: &mut String, installed: Option<&[String]>) -> egui::Response {
     ComboBox::from_id_salt("terminal_font")
         .selected_text(font.as_str())
         .width(240.0)

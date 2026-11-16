@@ -1,6 +1,8 @@
 //! Saved sessions (R-SSH-11, `PuTTY`'s Session page): a name, where to connect and how to sign on, kept in Parley
 //! SSH's settings; "Default Settings" is what a new session starts with. Never a password or passphrase (D16, D44).
 
+pub mod connection;
+
 use egui::Context;
 use parley_ssh_core::net::agent::AgentAddress;
 use parley_ssh_core::net::jump;
@@ -13,6 +15,10 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_SETTINGS: &str = "Default Settings";
 
 /// One saved session.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent switches of a session, as the settings file keeps them"
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SavedSession {
@@ -32,6 +38,24 @@ pub struct SavedSession {
     pub mouse_reporting: bool,
     /// Jump hosts as OpenSSH's `ProxyJump` writes them, `[user@]host[:port]` separated by commas (R-SSH-43).
     pub proxy_jump: String,
+    /// Seconds without a word from the server before a keepalive; 0 for none (R-SSH-26).
+    pub keepalive: u16,
+    pub address_family: connection::Family,
+    /// New keys after this many minutes and megabytes (R-SSH-27).
+    pub rekey_minutes: u16,
+    pub rekey_mb: u16,
+    pub compression: bool,
+    /// Run instead of the shell; empty for the shell (R-SSH-28).
+    pub remote_command: String,
+    /// `NAME=value` lines.
+    pub environment: String,
+    pub terminal_type: String,
+    /// A proxy before the first hop (R-SSH-29); its password is never kept.
+    pub proxy: connection::ProxyKind,
+    pub proxy_host: String,
+    pub proxy_port: u16,
+    pub proxy_user: String,
+    pub proxy_command: String,
 }
 
 impl Default for SavedSession {
@@ -47,6 +71,19 @@ impl Default for SavedSession {
             agent_forwarding: false,
             mouse_reporting: true,
             proxy_jump: String::new(),
+            keepalive: 30,
+            address_family: connection::Family::Any,
+            rekey_minutes: 60,
+            rekey_mb: 1024,
+            compression: false,
+            remote_command: String::new(),
+            environment: String::new(),
+            terminal_type: "xterm-256color".to_owned(),
+            proxy: connection::ProxyKind::None,
+            proxy_host: String::new(),
+            proxy_port: 1080,
+            proxy_user: String::new(),
+            proxy_command: String::new(),
         }
     }
 }
@@ -108,6 +145,8 @@ impl SavedSession {
             agent_key: Some(self.agent_key.trim().to_owned()).filter(|k| !k.is_empty()),
             agent_forwarding: self.use_agent && self.agent_forwarding,
             jumps,
+            transport: connection::transport(self),
+            shell: connection::shell(self).map_err(|e| format!("Environment: {e}."))?,
         })
     }
 
@@ -140,7 +179,7 @@ impl SavedSession {
 /// What the editor closed with.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Edited {
-    Save(SavedSession),
+    Save(Box<SavedSession>),
     Delete,
     Cancel,
 }
@@ -156,6 +195,20 @@ pub struct Editor {
     defaults: bool,
     error: Option<String>,
     confirm_delete: bool,
+    page: EditorPage,
+    /// The page's height last frame, for a window too small for it.
+    height: f32,
+}
+
+/// The height the editor's pages take, the tallest one's.
+const PAGE_HEIGHT: f32 = 480.0;
+
+/// The editor's pages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorPage {
+    Session,
+    Connection,
+    Server,
 }
 
 impl Editor {
@@ -169,6 +222,8 @@ impl Editor {
             defaults,
             error: None,
             confirm_delete: false,
+            page: EditorPage::Session,
+            height: 0.0,
         }
     }
 
@@ -210,7 +265,7 @@ impl Editor {
                 None
             }
             Clicked::Save => match self.checked(taken) {
-                Ok(session) => Some(Edited::Save(session)),
+                Ok(session) => Some(Edited::Save(Box::new(session))),
                 Err(e) => {
                     self.error = Some(e);
                     None
@@ -227,6 +282,33 @@ impl Editor {
             );
             ui.add_space(8.0);
         }
+        theme::segmented(
+            ui,
+            &mut self.page,
+            &[
+                (EditorPage::Session, "Session"),
+                (EditorPage::Connection, "Connection"),
+                (EditorPage::Server, "On the server"),
+            ],
+        );
+        ui.add_space(10.0);
+        let page = self.page;
+        let mut height = self.height;
+        dialog::fitting_scroll_area(ui, "ssh-session-page", 260.0, &mut height, |ui| {
+            // One height for every page, so the buttons stay put when the page changes.
+            ui.set_min_height(PAGE_HEIGHT);
+            match page {
+                EditorPage::Session => self.session_page(ui),
+                EditorPage::Connection => connection::connection_page(ui, &mut self.session),
+                EditorPage::Server => connection::server_page(ui, &mut self.session),
+            }
+        });
+        self.height = height;
+        self.footer(ui)
+    }
+
+    /// The first page: where, as whom, the agent and the mouse.
+    fn session_page(&mut self, ui: &mut egui::Ui) {
         egui::Grid::new("ssh-session-fields")
             .num_columns(2)
             .spacing([12.0, 8.0])
@@ -280,6 +362,10 @@ impl Editor {
             "Programs that ask get the mouse (Shift+drag still selects)",
             &mut self.session.mouse_reporting,
         );
+    }
+
+    /// The error, the delete question and the buttons, under every page.
+    fn footer(&self, ui: &mut egui::Ui) -> Option<Clicked> {
         if let Some(error) = &self.error {
             ui.add_space(6.0);
             theme::error(ui, error);
@@ -333,6 +419,8 @@ impl Editor {
             .trim()
             .clone_into(&mut session.proxy_jump);
         jump::check(&session.proxy_jump).map_err(|e| format!("Jump hosts: {e}."))?;
+        connection::environment(&session.environment).map_err(|e| format!("Environment: {e}."))?;
+        connection::check_proxy(&session)?;
         if self.defaults {
             return Ok(session);
         }
@@ -541,6 +629,58 @@ mod tests {
         h.run_steps(2);
         h.get_by_label("Save").click();
         h.run_steps(2);
-        assert_eq!(h.state().1, Some(Edited::Save(prod())));
+        assert_eq!(h.state().1, Some(Edited::Save(Box::new(prod()))));
+    }
+
+    #[test]
+    fn the_editors_pages_set_the_connection_and_the_buttons_stay_put_r_ssh_26_to_29() {
+        let state = (Editor::new(prod(), Some(0)), None::<Edited>);
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(900.0, 900.0))
+            .build_ui_state(
+                |ui, (editor, out): &mut (Editor, Option<Edited>)| {
+                    parley_ui_egui::test_support::install_fonts(ui);
+                    if let Some(done) = editor.show(ui.ctx(), &[]) {
+                        *out = Some(done);
+                    }
+                },
+                state,
+            );
+        h.run_steps(4);
+        let before = h.get_by_label("Save").rect();
+        h.get_by_label("Connection").click();
+        h.run_steps(4);
+        assert_eq!(
+            h.get_by_label("Save").rect(),
+            before,
+            "same place on another page"
+        );
+        h.get_by_label("HTTP").click();
+        h.run_steps(3);
+        h.get_by_label("Save").click();
+        h.run_steps(2);
+        h.get_by_label("Name the proxy's host.");
+        // The error line under the page makes the dialog taller; then it stays put again.
+        h.run_steps(3);
+        let with_error = h.get_by_label("Save").rect();
+        h.get_by_label("Proxy host").click();
+        h.run_steps(2);
+        h.get_by_label("Proxy host").type_text("px.lan");
+        h.run_steps(2);
+        h.get_by_label("On the server").click();
+        h.run_steps(4);
+        assert_eq!(h.get_by_label("Save").rect(), with_error);
+        h.get_by_label("Environment").click();
+        h.run_steps(2);
+        h.get_by_label("Environment").type_text("LANG=da_DK.UTF-8");
+        h.run_steps(2);
+        h.get_by_label("Save").click();
+        h.run_steps(2);
+        let Some(Edited::Save(saved)) = &h.state().1 else {
+            panic!("saved: {:?}", h.state().0.error)
+        };
+        assert_eq!(saved.proxy, connection::ProxyKind::Http);
+        assert_eq!(saved.proxy_host, "px.lan");
+        assert_eq!(saved.environment, "LANG=da_DK.UTF-8");
     }
 }

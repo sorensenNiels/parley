@@ -182,6 +182,8 @@ pub struct Terminal {
     bells: usize,
     /// The last character printed, for REP.
     last_printed: Option<char>,
+    /// The user's cursor (R-SSH-20): what DECSCUSR 0, RIS and a new terminal give.
+    default_cursor: (CursorShape, bool),
 }
 
 impl std::fmt::Debug for Terminal {
@@ -224,7 +226,18 @@ impl Terminal {
             replies: Vec::new(),
             bells: 0,
             last_printed: None,
+            default_cursor: (CursorShape::Block, true),
         }
+    }
+
+    /// The user's cursor shape and blinking (R-SSH-20), used until the host asks for another (DECSCUSR) and again
+    /// when it asks for the default (`CSI 0 SP q`) or resets. A cursor the host chose stays.
+    pub fn set_default_cursor(&mut self, shape: CursorShape, blink: bool) {
+        if (self.modes.cursor_shape, self.modes.cursor_blink) == self.default_cursor {
+            self.modes.cursor_shape = shape;
+            self.modes.cursor_blink = blink;
+        }
+        self.default_cursor = (shape, blink);
     }
 
     /// Carries out what the host sent. Sequences cut in two by the network are completed by the next call.
@@ -426,6 +439,7 @@ impl Terminal {
         fresh.history = std::mem::take(&mut self.history);
         fresh.history_limit = self.history_limit;
         fresh.dropped = self.dropped;
+        fresh.set_default_cursor(self.default_cursor.0, self.default_cursor.1);
         *self = fresh;
     }
 

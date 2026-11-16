@@ -4,7 +4,7 @@
 use egui::{CentralPanel, CursorIcon, Panel, Sense, Stroke, Ui, UiBuilder, ViewportCommand};
 use parley_ui_egui::theme;
 
-use super::{Closing, ParleySshUi, dialogs, screen, start};
+use super::{Closing, ParleySshUi, dialogs, start};
 use crate::panes::{self, Axis, PaneId};
 use crate::session::Session;
 use crate::sessions::SavedSession;
@@ -116,6 +116,9 @@ impl ParleySshUi {
             WindowKey::Duplicate => self.duplicate(ctx),
             WindowKey::NewWindow => self.spawn(&[]),
             WindowKey::Restart => self.carry_out(ctx, crate::bars::Action::Restart),
+            WindowKey::FontSize(step) => self.settings.step_font_size(step),
+            WindowKey::Snippets => self.open_picker(),
+            WindowKey::Broadcast => self.toggle_broadcast_tab(),
         }
     }
 
@@ -277,9 +280,16 @@ impl ParleySshUi {
 
     /// The tab in front: its panes, each in its own part of the space, and the dividers between them (R-SSH-40).
     pub(super) fn central(&mut self, ui: &mut Ui) {
-        let palette = screen::Palette::for_theme(ui.visuals().dark_mode);
+        self.connect_restored(ui.ctx());
+        let look = self.settings.screen_look(ui.visuals().dark_mode);
+        let palette = look.palette;
         let confirm_paste = self.settings.confirm_paste;
         let zoom = self.settings.text_size;
+        let reconnect_minutes = if self.settings.reconnect {
+            self.settings.reconnect_minutes.max(1)
+        } else {
+            0
+        };
         let accent = theme::palette(ui).accent;
         let start_fill = theme::palette(ui).bg;
         let frame = egui::Frame::NONE.fill(palette.background);
@@ -289,11 +299,14 @@ impl ParleySshUi {
         if self.tabs.get(current).is_some_and(Tab::shows_start) {
             self.openssh.refresh();
         }
+        let broadcast_all = self.broadcast_all;
+        let mut shared = Vec::new();
         let sessions = &self.settings.sessions;
         let openssh = &self.openssh;
         let Some(tab) = self.tabs.get_mut(current) else {
             return;
         };
+        let broadcasting = broadcast_all || tab.broadcast;
         CentralPanel::default().frame(frame).show(ui, |ui| {
             let area = ui.max_rect();
             self.area = area;
@@ -322,9 +335,18 @@ impl ParleySshUi {
                     }
                     Some(Pane::Session(session)) => {
                         session.view.zoom = zoom;
-                        session.show(&mut child, &palette, confirm_paste, active);
+                        session.reconnect_minutes = reconnect_minutes;
+                        session.show(&mut child, &look, confirm_paste, active);
+                        // Only the pane in front is typed in; what others sent is theirs alone (R-SSH-50).
+                        let sent = session.take_shared();
+                        if active {
+                            shared = sent;
+                        }
                     }
                     None => {}
+                }
+                if broadcasting && tab.pane(id).is_some_and(crate::broadcast::receives) {
+                    crate::broadcast::mark(ui, rect, id);
                 }
                 if split && active {
                     let border = Stroke::new(1.5, accent);
@@ -340,6 +362,9 @@ impl ParleySshUi {
                 }
             }
         });
+        if broadcasting {
+            self.deliver(&shared);
+        }
         for (pane, choice) in choices {
             self.chosen(ui.ctx(), pane, choice);
         }
