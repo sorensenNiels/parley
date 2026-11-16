@@ -38,8 +38,8 @@ pub(super) struct Page {
     shown: String,
     /// The macros a key can run; `None` while the Macros add-on is off.
     macros: Option<Vec<String>>,
-    /// The SQL add-on is on: its function can have a key (R-SQL-6).
-    sql: bool,
+    /// The functions of the add-ons that are on, which can have a key (R-SQL-6, R-SSH-59).
+    tools: Vec<Function>,
     /// The function and slot waiting for a key.
     recording: Option<(Function, Slot)>,
     ctrl_alone: CtrlAlone,
@@ -51,11 +51,11 @@ pub(super) struct Page {
 }
 
 impl Page {
-    pub(super) fn new(shown: &str, macros: Option<Vec<String>>, sql: bool) -> Self {
+    pub(super) fn new(shown: &str, macros: Option<Vec<String>>, tools: Vec<Function>) -> Self {
         Self {
             shown: shown.to_owned(),
             macros,
-            sql,
+            tools,
             ..Self::default()
         }
     }
@@ -128,7 +128,7 @@ impl Page {
                 }
             }
         }
-        groups(macros.as_deref(), self.sql)
+        groups(macros.as_deref(), &self.tools)
     }
 
     /// The map shown, and Copy…, Rename… and Delete.

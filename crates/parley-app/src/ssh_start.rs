@@ -1,5 +1,6 @@
 //! Parley SSH's command line (R-SSH-14), as `PuTTY`'s and OpenSSH's: `parley-ssh [user@]host[:port]`, `-p`, `-l`,
-//! `-i`, `-load`, `-A`/`-a`; and starting another Parley SSH window (R-SSH-15).
+//! `-i`, `-load`, `-A`/`-a`; starting another Parley SSH window (R-SSH-15); and starting Parley SSH from Parley
+//! 5250's Tools ▸ SSH… (R-SSH-59).
 
 use parley_ssh_ui::StartRequest;
 
@@ -89,6 +90,29 @@ pub fn spawn(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// The arguments that open Parley SSH on a Parley 5250 session's host (R-SSH-59): the host alone, on SSH's port,
+/// as the user Parley SSH's defaults name. Parley 5250 knows no user and passes no password (D16).
+fn args_for(config: &parley_core::SessionConfig) -> Vec<String> {
+    vec![config.host.trim().to_owned()]
+}
+
+/// Starts Parley SSH, installed beside Parley 5250, on the host of Parley 5250's session (R-SSH-59). The
+/// session's name is not passed: Parley SSH's saved sessions are its own.
+///
+/// # Errors
+/// When Parley SSH is not beside Parley or cannot be started, said for the user.
+pub fn start(_name: &str, config: &parley_core::SessionConfig) -> Result<(), String> {
+    let program = crate::siblings::Sibling::Ssh.beside()?;
+    let mut child = std::process::Command::new(&program)
+        .args(args_for(config))
+        .spawn()
+        .map_err(|e| format!("Parley SSH could not be started: {e}"))?;
+    // Parley SSH runs on its own; waiting on a thread only collects its exit status, so it leaves no zombie
+    // process behind on Unix. What it returns is of no use to Parley 5250.
+    std::thread::spawn(move || child.wait().ok());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,6 +143,26 @@ mod tests {
         let request = run("-load Prod").expect("valid");
         assert_eq!(request.load.as_deref(), Some("Prod"));
         assert_eq!(run(""), Ok(StartRequest::default()));
+    }
+
+    /// R-SSH-59: what Parley 5250 passes reads back as its session's host, with no user or port.
+    #[test]
+    fn parley_5250_passes_the_sessions_host_alone_r_ssh_59() {
+        let config = parley_core::SessionConfig {
+            host: " ibmi.æøå.lan ".to_owned(),
+            ..parley_core::SessionConfig::default()
+        };
+        let request = match parse(args_for(&config)) {
+            Ok(Command::Run { request, .. }) => request,
+            other => panic!("not a run: {other:?}"),
+        };
+        assert_eq!(
+            request,
+            StartRequest {
+                host: Some("ibmi.æøå.lan".to_owned()),
+                ..StartRequest::default()
+            }
+        );
     }
 
     #[test]

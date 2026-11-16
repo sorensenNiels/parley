@@ -54,6 +54,9 @@ pub struct Tab {
     pub layout: Layout,
     pub panes: Vec<(PaneId, Pane)>,
     pub active: PaneId,
+    /// Panes added to a split whose sessions have not started yet, each with the pane in front before it: one
+    /// whose sign-on fails is taken out again (R-SSH-58).
+    pending: Vec<(PaneId, Option<PaneId>)>,
 }
 
 impl Tab {
@@ -62,6 +65,7 @@ impl Tab {
             layout: Layout::Pane(id),
             panes: vec![(id, pane)],
             active: id,
+            pending: Vec::new(),
         }
     }
 
@@ -85,13 +89,22 @@ impl Tab {
         self.pane_mut(active)
     }
 
+    /// One of its panes is a start screen.
+    pub fn shows_start(&self) -> bool {
+        self.panes.iter().any(|(_, p)| matches!(p, Pane::Start(_)))
+    }
+
     pub fn is_split(&self) -> bool {
         self.panes.len() > 1
     }
 
     /// Adds `pane` beside or below the one in front, and brings it to the front.
     pub fn split(&mut self, id: PaneId, pane: Pane, axis: crate::panes::Axis) {
-        if self.layout.split(self.active, id, axis) {
+        let from = self.active;
+        if self.layout.split(from, id, axis) {
+            if matches!(pane, Pane::Session(_)) {
+                self.pending.push((id, Some(from)));
+            }
             self.panes.push((id, pane));
             self.active = id;
         }
@@ -108,6 +121,44 @@ impl Tab {
             self.active = self.layout.panes().first().copied().unwrap_or(id);
         }
         Some(pane)
+    }
+
+    /// Watches the session just connected in pane `id` of a split tab: it is taken out if it fails to start
+    /// (R-SSH-58). A tab's only pane stays, to show why.
+    pub fn watch(&mut self, id: PaneId) {
+        if self.is_split() && !self.pending.iter().any(|(p, _)| *p == id) {
+            self.pending.push((id, None));
+        }
+    }
+
+    /// Takes out the watched panes whose sessions failed to start (R-SSH-58), bringing back the pane that was in
+    /// front before each; returns why each one failed.
+    pub fn drop_failed(&mut self) -> Vec<String> {
+        let mut why = Vec::new();
+        for (id, from) in std::mem::take(&mut self.pending) {
+            // A pane closed meanwhile, or no longer a session, needs no more watching.
+            let Some(session) = self.pane_mut(id).and_then(Pane::session_mut) else {
+                continue;
+            };
+            session.poll();
+            if !session.failed_to_start() {
+                if !session.is_started() && session.is_connected() {
+                    self.pending.push((id, from));
+                }
+                continue;
+            }
+            let reason = match &session.state {
+                State::Ended(ending) => crate::session::ending_text(ending),
+                State::Connecting | State::SigningOn | State::Running => String::new(),
+            };
+            if self.remove(id).is_some() {
+                if let Some(from) = from.filter(|f| self.pane(*f).is_some()) {
+                    self.active = from;
+                }
+                why.push(reason);
+            }
+        }
+        why
     }
 
     /// The title: what the host set in the pane in front, else `user@host`, else "New tab".
@@ -161,29 +212,46 @@ pub fn bar(ui: &mut Ui, tabs: &[Tab], current: usize) -> Option<BarAction> {
                     se: 0,
                 })
                 .fill(if front { p.bg } else { Color32::TRANSPARENT });
-            let shown = frame.show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let (dot, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
-                    ui.painter()
-                        .circle_filled(dot.center(), 3.5, dot_color(ui, tab.state()));
-                    let title = cut(&tab.title());
-                    let text = if front {
-                        theme::semibold(title)
-                    } else {
-                        RichText::new(title).color(p.muted)
-                    };
-                    ui.label(text);
-                    let close = ui
-                        .add(theme::icon_button(ui, "🗙").small())
-                        .on_hover_text("Close tab");
-                    close.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::accesskit::Role::Button, true, "Close tab")
-                    });
-                    close.clicked()
-                })
-                .inner
+            // The tab senses clicks and drags behind what it holds, so its close button stays on top and gets
+            // its own clicks (a sense added after the button would take them).
+            let tab_ui = egui::UiBuilder::new()
+                .id_salt(("ssh-tab", i))
+                .sense(Sense::click_and_drag());
+            let shown = ui.scope_builder(tab_ui, |ui| {
+                frame
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let (dot, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+                            ui.painter().circle_filled(
+                                dot.center(),
+                                3.5,
+                                dot_color(ui, tab.state()),
+                            );
+                            let title = cut(&tab.title());
+                            let text = if front {
+                                theme::semibold(title)
+                            } else {
+                                RichText::new(title).color(p.muted)
+                            };
+                            ui.label(text);
+                            let close = ui
+                                .add(theme::icon_button(ui, "🗙").small())
+                                .on_hover_text("Close tab");
+                            close.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::accesskit::Role::Button,
+                                    true,
+                                    "Close tab",
+                                )
+                            });
+                            close.clicked()
+                        })
+                        .inner
+                    })
+                    .inner
             });
-            let rect = shown.response.rect;
+            let response = shown.response;
+            let rect = response.rect;
             if front {
                 ui.painter().hline(
                     rect.x_range(),
@@ -191,11 +259,6 @@ pub fn bar(ui: &mut Ui, tabs: &[Tab], current: usize) -> Option<BarAction> {
                     Stroke::new(2.0, p.accent),
                 );
             }
-            let response = ui.interact(
-                rect,
-                ui.scope_id().with(("ssh-tab", i)),
-                Sense::click_and_drag(),
-            );
             if shown.inner || response.middle_clicked() {
                 action = Some(BarAction::Close(i));
             } else if response.clicked() || response.drag_started() {

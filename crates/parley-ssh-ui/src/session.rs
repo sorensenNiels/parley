@@ -52,6 +52,8 @@ pub struct Session {
     connection: Connection,
     terminal: Arc<Mutex<Terminal>>,
     pub state: State,
+    /// The shell started once: signing on worked (R-SSH-58 keeps a split pane only then).
+    started: bool,
     pub algorithms: Option<Algorithms>,
     pub fingerprint: Option<String>,
     /// What happened, for the event log (R-SSH-16).
@@ -108,6 +110,7 @@ impl Session {
             connection,
             terminal,
             state: State::Connecting,
+            started: false,
             algorithms: None,
             fingerprint: None,
             log: Vec::new(),
@@ -138,6 +141,16 @@ impl Session {
 
     pub fn is_connected(&self) -> bool {
         !matches!(self.state, State::Ended(_))
+    }
+
+    /// Its shell has started: signing on worked.
+    pub fn is_started(&self) -> bool {
+        self.started
+    }
+
+    /// It ended before its shell started: it could not connect, or signing on failed or was cancelled.
+    pub fn failed_to_start(&self) -> bool {
+        !self.started && matches!(self.state, State::Ended(_))
     }
 
     /// The terminal's size, columns × rows.
@@ -196,6 +209,7 @@ impl Session {
                 }
                 Event::Started => {
                     self.state = State::Running;
+                    self.started = true;
                     self.problem = None;
                     self.grab_focus = true;
                 }
@@ -218,6 +232,7 @@ impl Session {
         active: bool,
     ) {
         self.poll();
+        self.view.mouse_reporting = self.source.mouse_reporting;
         let asking = self.host_key.is_some() || self.prompt.is_some() || self.paste.is_some();
         let grab = active && !asking && std::mem::take(&mut self.grab_focus);
         let area = ui.max_rect();

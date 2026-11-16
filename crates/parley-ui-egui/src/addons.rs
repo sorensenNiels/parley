@@ -13,6 +13,8 @@ pub enum AddOn {
     Macros,
     /// Tools ▸ SQL… starts Parley SQL on the session's host (R-SQL-10, R-SQL-70). Off by default.
     Sql,
+    /// Tools ▸ SSH… starts Parley SSH on the session's host (R-SSH-59). Off by default.
+    Ssh,
 }
 
 /// Something turned on or off and kept in [`AddOnSettings`] by its id: Parley's add-ons, and
@@ -26,13 +28,14 @@ pub trait Toggle: Copy {
 
 impl AddOn {
     /// Every add-on.
-    pub const ALL: [Self; 2] = [Self::Macros, Self::Sql];
+    pub const ALL: [Self; 3] = [Self::Macros, Self::Sql, Self::Ssh];
 
     /// The name Settings shows.
     pub const fn name(self) -> &'static str {
         match self {
             Self::Macros => "Macros",
             Self::Sql => "SQL",
+            Self::Ssh => "SSH",
         }
     }
 
@@ -41,6 +44,7 @@ impl AddOn {
         match self {
             Self::Macros => "Record keystrokes and play them back, also when a session connects.",
             Self::Sql => "SQL… in the Tools menu opens Parley SQL on the session's host.",
+            Self::Ssh => "SSH… in the Tools menu opens Parley SSH on the session's host.",
         }
     }
 }
@@ -50,13 +54,14 @@ impl Toggle for AddOn {
         match self {
             Self::Macros => "macros",
             Self::Sql => "sql",
+            Self::Ssh => "ssh",
         }
     }
 
     fn on_by_default(self) -> bool {
         match self {
             Self::Macros => true,
-            Self::Sql => false,
+            Self::Sql | Self::Ssh => false,
         }
     }
 }
@@ -112,6 +117,10 @@ mod tests {
         assert!(
             !settings.enabled(AddOn::Sql),
             "SQL is off until turned on (R-SQL-10)"
+        );
+        assert!(
+            !settings.enabled(AddOn::Ssh),
+            "SSH is off until turned on (R-SSH-59)"
         );
     }
 

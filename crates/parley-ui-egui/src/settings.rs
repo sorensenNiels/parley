@@ -180,6 +180,10 @@ const SECTIONS: Sections<Page> = &[
 pub(crate) const SQL_SETTINGS_ELSEWHERE: &str = "SQL… in the Tools menu starts Parley SQL \
      on the session's host. Its settings, such as Java and the SQL assistant, are in Parley SQL.";
 
+/// Said under Parley's add-ons while SSH is on (R-SSH-59).
+pub(crate) const SSH_SETTINGS_ELSEWHERE: &str = "SSH… in the Tools menu starts Parley SSH \
+     on the session's host, port 22. Its settings, saved sessions and keys are in Parley SSH.";
+
 /// The open settings dialog.
 #[derive(Debug)]
 pub struct Dialog {
@@ -198,16 +202,21 @@ impl Dialog {
             original: settings.clone(),
             installed: Installed::search(move || ctx.request_repaint()),
             page: Page::Appearance,
-            keyboard: keyboard::Page::new(crate::keymap::DEFAULT_MAP, None, false),
+            keyboard: keyboard::Page::new(crate::keymap::DEFAULT_MAP, None, Vec::new()),
             about: about::About::default(),
         }
     }
 
     /// Shows the keyboard map `map` on the Keyboard page, with a key for each of `macros`
-    /// (`None` while the Macros add-on is off).
+    /// (`None` while the Macros add-on is off) and for `tools`, the functions of the add-ons that are on.
     #[must_use]
-    pub fn with_keyboard(mut self, map: &str, macros: Option<Vec<String>>, sql: bool) -> Self {
-        self.keyboard = keyboard::Page::new(map, macros, sql);
+    pub fn with_keyboard(
+        mut self,
+        map: &str,
+        macros: Option<Vec<String>>,
+        tools: Vec<crate::keymap::Function>,
+    ) -> Self {
+        self.keyboard = keyboard::Page::new(map, macros, tools);
         self
     }
 
@@ -287,8 +296,8 @@ impl Dialog {
         }
     }
 
-    /// A switch per add-on (R-ADD-1), as Tortuga's Settings → Add-ons; while SQL is on, where
-    /// its settings are (R-SQL-69).
+    /// A switch per add-on (R-ADD-1), as Tortuga's Settings → Add-ons; while SQL or SSH is on,
+    /// where its settings are (R-SQL-69, R-SSH-59).
     fn addons_page(ui: &mut Ui, settings: &mut Settings) {
         let note = (
             "An add-on that is off is not loaded. Changes take effect when you save.",
@@ -304,6 +313,9 @@ impl Dialog {
         });
         if settings.addons.enabled(AddOn::Sql) {
             theme::hint(ui, SQL_SETTINGS_ELSEWHERE);
+        }
+        if settings.addons.enabled(AddOn::Ssh) {
+            theme::hint(ui, SSH_SETTINGS_ELSEWHERE);
         }
     }
 

@@ -199,7 +199,7 @@ pub fn status_bar(ui: &mut Ui, session: Option<&Session>, note: Option<&str>) {
             State::Ended(ending) => session::ending_text(ending),
         };
         status::muted(ui, Some(icons::TERMINAL), text);
-        if let Some(problem) = &session.problem {
+        if let Some(problem) = session.problem.as_deref().or(note) {
             ui.add_space(8.0);
             theme::warning(ui, problem);
         }

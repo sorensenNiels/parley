@@ -5,6 +5,7 @@
 
 mod bars;
 mod dialogs;
+mod openssh;
 mod panes;
 pub mod screen;
 mod session;
@@ -69,6 +70,8 @@ pub struct ParleySshUi {
     logo: Logo,
     updates: updates::Updates,
     known_hosts: KnownHosts,
+    /// The hosts of `~/.ssh/config` (R-SSH-42).
+    openssh: openssh::Hosts,
     /// Always at least one.
     tabs: Vec<Tab>,
     /// The tab in front.
@@ -108,6 +111,7 @@ impl ParleySshUi {
             logo: Logo::default(),
             updates: updates::Updates::default(),
             known_hosts,
+            openssh: openssh::Hosts::default(),
             tabs: vec![first],
             current: 0,
             next_pane: 1,
@@ -138,6 +142,11 @@ impl ParleySshUi {
         self.spawner = Some(spawner);
     }
 
+    /// OpenSSH's config, for the start screen and the command line (R-SSH-42).
+    pub fn set_openssh_config(&mut self, config: parley_ssh_core::openssh_config::Config) {
+        self.openssh = openssh::Hosts::new(config);
+    }
+
     /// The title bar: the tab in front's title, then the program.
     pub fn title(&self) -> String {
         let name = Program::ParleySsh.name();
@@ -160,15 +169,29 @@ impl ParleySshUi {
     }
 
     /// Opens what the command line asked for (R-SSH-14) in the first tab; what cannot be opened is said in the
-    /// status bar.
+    /// status bar. A host that cannot be opened as asked, such as one without a user when the defaults have none
+    /// (Parley 5250's Tools ▸ SSH…, R-SSH-59), is put in the start screen's quick connect with what is missing.
     pub fn start(&mut self, ctx: &egui::Context, request: StartRequest) {
+        let typed = match (&request.load, &request.host) {
+            (None, Some(host)) => Some((host.clone(), request.port)),
+            _ => None,
+        };
         match self.source_for(request) {
             Ok(Some((source, saved))) => {
                 let active = self.tabs[self.current].active;
                 self.connect_pane(ctx, active, source, saved);
             }
             Ok(None) => {}
-            Err(e) => self.note = Some(e),
+            Err(e) => match (typed, self.tabs[self.current].active_pane_mut()) {
+                (Some((host, port)), Some(Pane::Start(form))) => {
+                    form.host = host;
+                    if let Some(port) = port {
+                        form.port = port.to_string();
+                    }
+                    form.error = Some(e);
+                }
+                _ => self.note = Some(e),
+            },
         }
     }
 
@@ -180,16 +203,7 @@ impl ParleySshUi {
                 found.ok_or_else(|| format!("There is no saved session called \"{name}\"."))?;
             (found.clone(), true)
         } else if let Some(host) = &request.host {
-            let user = request
-                .user
-                .clone()
-                .unwrap_or_else(|| self.settings.defaults.user.clone());
-            let port = request.port.map_or_else(String::new, |p| p.to_string());
-            let target = start::parse(host, &port, &user)?;
-            (
-                SavedSession::from_defaults(&self.settings.defaults, "", &target),
-                false,
-            )
+            (self.host_source(host, &request)?, false)
         } else {
             return Ok(None);
         };
@@ -206,6 +220,32 @@ impl ParleySshUi {
             source.agent_forwarding = forwarding;
         }
         Ok(Some((source, saved)))
+    }
+
+    /// The session for `[user@]host[:port]` from the command line: the defaults, then what `~/.ssh/config` says
+    /// for the host as `ssh host` reads it, then what was typed (R-SSH-14, R-SSH-42).
+    fn host_source(&self, host: &str, request: &StartRequest) -> Result<SavedSession, String> {
+        let (typed_user, name, typed_port) = start::split(host)?;
+        let mut source = SavedSession {
+            name: String::new(),
+            host: name.clone(),
+            ..self.settings.defaults.clone()
+        };
+        if let Some(found) = self.openssh.lookup(&name) {
+            openssh::apply(&mut source, &found);
+        }
+        if let Some(user) = typed_user.or_else(|| request.user.clone()) {
+            source.user = user;
+        }
+        // With no user anywhere, quick connect asks for one (R-SSH-59).
+        let port = typed_port
+            .or_else(|| request.port.map(|p| p.to_string()))
+            .unwrap_or_else(|| source.port.to_string());
+        let target = start::parse(&source.host, &port, &source.user)?;
+        source.host = target.host;
+        source.port = target.port;
+        source.user = target.user;
+        Ok(source)
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
@@ -242,6 +282,7 @@ impl ParleySshUi {
             .show(ui, |ui| {
                 bars::status_bar(ui, self.active_session(), self.note.as_deref());
             });
+        self.drop_failed_panes();
         self.tab_bar(ui);
         self.central(ui);
         if let Some(action) = action {
@@ -309,6 +350,18 @@ impl ParleySshUi {
                 self.settings.last_user.clone_from(&target.user);
                 let source = SavedSession::from_defaults(&self.settings.defaults, "", &target);
                 self.connect_pane(ctx, pane, source, false);
+            }
+            start::Choice::ConfigConnect(i) => {
+                if let Some(host) = self.openssh.hosts().get(i) {
+                    let source = openssh::session(&self.settings.defaults, host);
+                    self.connect_pane(ctx, pane, source, false);
+                }
+            }
+            start::Choice::ConfigSave(i) => {
+                if let Some(host) = self.openssh.hosts().get(i) {
+                    let session = openssh::session(&self.settings.defaults, host);
+                    self.editor = Some(Editor::new(session, None));
+                }
             }
         }
     }

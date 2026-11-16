@@ -3,6 +3,7 @@
 
 pub mod colors;
 pub mod input;
+mod mouse;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -69,6 +70,9 @@ pub struct View {
     wheel: f32,
     awaiting_paste: bool,
     focused: bool,
+    mouse: mouse::State,
+    /// The session lets programs on the host have the mouse when they ask (R-SSH-18).
+    pub mouse_reporting: bool,
     /// A text size other than 100 %, in percent (the settings' text size).
     pub zoom: u16,
 }
@@ -220,12 +224,19 @@ pub fn show(
             out.push(Out::Paste(text));
         }
     }
-    if response.hovered() {
-        scroll_with_wheel(ui, &mut t, view, cell.y);
-    }
-    select(&response, &grid, &t, view);
-    if context_menu(&response, &t, view) {
-        response.request_focus();
+    if mouse::reporting(ui, &t, &view.mouse, view.mouse_reporting) {
+        let bytes = mouse::report(ui, &response, &grid, &t, &mut view.mouse);
+        if !bytes.is_empty() {
+            out.push(Out::Send(bytes));
+        }
+    } else {
+        if response.hovered() {
+            scroll_with_wheel(ui, &mut t, view, cell.y);
+        }
+        select(&response, &grid, &t, view);
+        if context_menu(&response, &t, view) {
+            response.request_focus();
+        }
     }
 
     let now = ui.input(|i| i.time);
@@ -316,8 +327,16 @@ fn select(response: &egui::Response, grid: &Grid, t: &Terminal, view: &mut View)
             dropped,
         });
     } else if response.drag_started() {
+        // egui starts a drag only once the pointer has moved: the selection starts where the button went down.
+        let anchor = response
+            .ctx
+            .input(|i| i.pointer.press_origin())
+            .map_or(point, |origin| {
+                let (row, column) = grid.nearest(origin, t.rows(), t.columns());
+                t.point_in_view(row, column)
+            });
         view.selection = Some(Selection {
-            anchor: point,
+            anchor,
             head: point,
             dropped,
         });
@@ -679,6 +698,104 @@ mod tests {
             }
         }
         h.step();
+    }
+
+    fn sent(h: &Harness<'static, Shown>) -> Vec<u8> {
+        h.state()
+            .out
+            .iter()
+            .filter_map(|o| match o {
+                Out::Send(b) => Some(b.clone()),
+                Out::Resized { .. } | Out::Paste(_) => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// A drag with the left button from one cell to another, with `modifiers` held.
+    fn drag(
+        h: &mut Harness<'static, Shown>,
+        from: egui::Pos2,
+        to: egui::Pos2,
+        modifiers: egui::Modifiers,
+    ) {
+        // Held through the whole drag, as a window reports it.
+        h.event(egui::Event::ModifiersChanged(modifiers));
+        h.event(egui::Event::PointerMoved(from));
+        h.step();
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers,
+        };
+        h.event(button(from, true));
+        h.step();
+        h.event(egui::Event::PointerMoved(to));
+        h.step();
+        h.event(button(to, false));
+        h.event(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        h.step();
+    }
+
+    fn reporting(set: &[u8], allowed: bool) -> Harness<'static, Shown> {
+        let mut h = shown(set);
+        h.state_mut().view.mouse_reporting = allowed;
+        h.run_steps(2);
+        h.state_mut().out.clear();
+        h
+    }
+
+    #[test]
+    fn clicks_and_drags_go_to_a_host_that_asked_for_the_mouse_r_ssh_18() {
+        let mut h = reporting(b"\x1b[?1002h\x1b[?1006h", true);
+        let (from, to) = (cell_centre(&h, 1, 4), cell_centre(&h, 1, 6));
+        drag(&mut h, from, to, egui::Modifiers::NONE);
+        assert_eq!(
+            String::from_utf8_lossy(&sent(&h)),
+            "\x1b[<0;5;2M\x1b[<32;7;2M\x1b[<0;7;2m",
+            "press, drag to another cell, release (as mc's column headers need)"
+        );
+        assert_eq!(
+            h.state().view.selected_text(&lock(&h.state().terminal)),
+            None
+        );
+        h.state_mut().out.clear();
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, -2.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.step();
+        assert_eq!(
+            String::from_utf8_lossy(&sent(&h)),
+            "\x1b[<65;7;2M\x1b[<65;7;2M",
+            "two lines down"
+        );
+    }
+
+    #[test]
+    fn shift_or_the_session_setting_keeps_the_mouse_for_selecting_r_ssh_18() {
+        let shift = egui::Modifiers {
+            shift: true,
+            ..egui::Modifiers::NONE
+        };
+        for (allowed, modifiers) in [(true, shift), (false, egui::Modifiers::NONE)] {
+            let mut h = reporting(b"\x1b[?1000hecho hello", allowed);
+            let (from, to) = (cell_centre(&h, 0, 0), cell_centre(&h, 0, 3));
+            drag(&mut h, from, to, modifiers);
+            assert_eq!(sent(&h), b"", "nothing for the host");
+            assert_eq!(
+                h.state()
+                    .view
+                    .selected_text(&lock(&h.state().terminal))
+                    .as_deref(),
+                Some("echo"),
+                "selected locally, from the cell where the button went down"
+            );
+        }
     }
 
     #[test]

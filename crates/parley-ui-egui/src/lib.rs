@@ -36,9 +36,10 @@ pub use settings::{Settings, Theme};
 pub use theme::Density;
 pub use updates::Checker;
 
-/// How the launcher starts Parley SQL on the session named so, on its config's host
-/// (R-SQL-70); `Err` says why it could not. Parley knows no user and passes no password (D16).
-pub type StartSql = Box<dyn Fn(&str, &parley_core::SessionConfig) -> Result<(), String>>;
+/// How the launcher starts Parley SQL (R-SQL-70) or Parley SSH (R-SSH-59) on the session named
+/// so, on its config's host; `Err` says why it could not. Parley knows no user and passes no
+/// password (D16).
+pub type StartProgram = Box<dyn Fn(&str, &parley_core::SessionConfig) -> Result<(), String>>;
 
 /// Plays the alarm's beep (R-UI-25, D37): given by the launcher, since the UI has no platform
 /// code. Never fails: without a sound output it does nothing.
@@ -52,12 +53,38 @@ impl std::fmt::Debug for AlarmSound {
     }
 }
 
-/// Starts Parley SQL on a host (R-SQL-70): given by the launcher, which knows where it is.
-struct SqlStarter(StartSql);
+/// Starts Parley SQL or Parley SSH on a host (R-SQL-70, R-SSH-59): given by the launcher,
+/// which knows where they are.
+struct Starter(StartProgram);
 
-impl std::fmt::Debug for SqlStarter {
+impl std::fmt::Debug for Starter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("SqlStarter")
+        f.write_str("Starter")
+    }
+}
+
+/// A program installed beside Parley that a Tools item starts on the session's host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sibling {
+    /// Tools ▸ SQL… (R-SQL-70).
+    Sql,
+    /// Tools ▸ SSH… (R-SSH-59).
+    Ssh,
+}
+
+impl Sibling {
+    const fn addon(self) -> AddOn {
+        match self {
+            Self::Sql => AddOn::Sql,
+            Self::Ssh => AddOn::Ssh,
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Sql => "Parley SQL",
+            Self::Ssh => "Parley SSH",
+        }
     }
 }
 
@@ -112,7 +139,11 @@ pub struct ParleyUi {
     /// Why Parley SQL could not be started, while that is shown (R-SQL-70).
     sql_notice: Option<String>,
     /// Starts Parley SQL on a host (R-SQL-70); without one (tests), Tools ▸ SQL… says so.
-    sql_starter: Option<SqlStarter>,
+    sql_starter: Option<Starter>,
+    /// Why Parley SSH could not be started, while that is shown (R-SSH-59).
+    ssh_notice: Option<String>,
+    /// Starts Parley SSH on a host (R-SSH-59); without one (tests), Tools ▸ SSH… says so.
+    ssh_starter: Option<Starter>,
     /// Plays the alarm's beep (R-UI-25); without one (tests), the alarm only flashes.
     beep: Option<AlarmSound>,
 }
@@ -154,6 +185,8 @@ impl ParleyUi {
             macro_manager: None,
             sql_notice: None,
             sql_starter: None,
+            ssh_notice: None,
+            ssh_starter: None,
             beep: None,
         }
     }
@@ -174,8 +207,13 @@ impl ParleyUi {
     }
 
     /// How to start Parley SQL on a host, the program `parley-sql` beside Parley (R-SQL-70).
-    pub fn set_sql_starter(&mut self, start: StartSql) {
-        self.sql_starter = Some(SqlStarter(start));
+    pub fn set_sql_starter(&mut self, start: StartProgram) {
+        self.sql_starter = Some(Starter(start));
+    }
+
+    /// How to start Parley SSH on a host, the program `parley-ssh` beside Parley (R-SSH-59).
+    pub fn set_ssh_starter(&mut self, start: StartProgram) {
+        self.ssh_starter = Some(Starter(start));
     }
 
     /// How to play the alarm's beep (R-UI-25, D37).
@@ -366,8 +404,17 @@ impl ParleyUi {
         settings::Dialog::open(ctx, &self.settings).with_keyboard(
             &self.keyboard_map().name,
             macros,
-            self.addon_on(AddOn::Sql),
+            self.tool_functions(),
         )
+    }
+
+    /// The functions of the Tools add-ons that are on, which can have a key (R-SQL-6, R-SSH-59).
+    fn tool_functions(&self) -> Vec<Function> {
+        [(AddOn::Sql, Function::Sql), (AddOn::Ssh, Function::Ssh)]
+            .into_iter()
+            .filter(|(addon, _)| self.addon_on(*addon))
+            .map(|(_, function)| function)
+            .collect()
     }
 
     /// Sessions that used the map `old` use it under its new name.
@@ -567,6 +614,13 @@ impl ParleyUi {
             &mut self.sql_notice,
             |_| {},
         );
+        dialog::notice(
+            ctx,
+            "ssh-notice",
+            "Parley SSH cannot start",
+            &mut self.ssh_notice,
+            |_| {},
+        );
         self.show_shortcut_sheet(ctx);
         self.show_macro_dialogs(ctx);
         self.show_exit_question(ctx);
@@ -594,6 +648,7 @@ impl ParleyUi {
             newer: self.updates.available(),
             macros: self.addon_on(AddOn::Macros).then_some(&macro_menu),
             sql: self.addon_on(AddOn::Sql),
+            ssh: self.addon_on(AddOn::Ssh),
             map: self.keyboard_map(),
             mac: is_mac(ui.ctx()),
         };
@@ -646,7 +701,8 @@ impl ParleyUi {
                     self.focus_terminal = true;
                 }
                 Action::Settings => self.settings_dialog = Some(self.open_settings(ctx)),
-                Action::Sql => self.start_parley_sql(connected),
+                Action::Sql => self.start_sibling(Sibling::Sql, connected),
+                Action::Ssh => self.start_sibling(Sibling::Ssh, connected),
                 Action::Key(key) => {
                     if let Some(s) = session.as_deref_mut() {
                         s.key(key);
@@ -779,21 +835,26 @@ impl ParleyUi {
         }
     }
 
-    /// Tools ▸ SQL… (R-SQL-70): starts Parley SQL on the session's host, or says why not.
-    /// `connected` comes from the caller: during a frame the connection is out of its field.
-    fn start_parley_sql(&mut self, connected: bool) {
-        if !connected || !self.addon_on(AddOn::Sql) {
+    /// Tools ▸ SQL… (R-SQL-70) and Tools ▸ SSH… (R-SSH-59): starts the program on the
+    /// session's host, or says why not. `connected` comes from the caller: during a frame the
+    /// connection is out of its field.
+    fn start_sibling(&mut self, sibling: Sibling, connected: bool) {
+        if !connected || !self.addon_on(sibling.addon()) {
             return;
         }
         let Some(profile) = self.current.as_ref() else {
             return;
         };
-        let started = match &self.sql_starter {
-            Some(starter) => (starter.0)(&profile.name, &profile.config),
-            None => Err("This Parley cannot start Parley SQL.".to_owned()),
+        let (starter, notice) = match sibling {
+            Sibling::Sql => (&self.sql_starter, &mut self.sql_notice),
+            Sibling::Ssh => (&self.ssh_starter, &mut self.ssh_notice),
         };
-        if let Err(e) = started {
-            self.sql_notice = Some(e);
+        let outcome = match starter {
+            Some(starter) => (starter.0)(&profile.name, &profile.config),
+            None => Err(format!("This Parley cannot start {}.", sibling.name())),
+        };
+        if let Err(e) = outcome {
+            *notice = Some(e);
         }
     }
 
@@ -804,12 +865,8 @@ impl ParleyUi {
         }
         let macros = self.addon_on(AddOn::Macros).then(|| self.macro_names());
         let map = self.keyboard_map();
-        let groups = shortcuts::groups(
-            map,
-            macros.as_deref(),
-            self.addon_on(AddOn::Sql),
-            is_mac(ctx),
-        );
+        let tools = self.tool_functions();
+        let groups = shortcuts::groups(map, macros.as_deref(), &tools, is_mac(ctx));
         let close_keys = map.chords_for(&Function::Shortcuts);
         let Some(sheet) = &mut self.shortcut_sheet else {
             return;
@@ -903,7 +960,7 @@ impl ParleyUi {
 impl ParleyUi {
     /// The keys of a map that do more than type (R-KEY-2): Record macro starts or stops a
     /// recording and a macro's key runs it, only while the Macros add-on is on (R-ADD-2);
-    /// the shortcut sheet's and Parley SQL's keys work either way.
+    /// the shortcut sheet's and Parley SQL's and Parley SSH's keys work either way.
     fn carry_out_keys(&mut self, asked: Vec<Function>, session: &mut parley_core::Session) {
         let macros = self.addon_on(AddOn::Macros);
         for function in asked {
@@ -919,7 +976,8 @@ impl ParleyUi {
                 Function::RunMacro(name) => self.play(session, &name),
                 Function::Shortcuts => self.shortcut_sheet = Some(shortcuts::Sheet::default()),
                 // The terminal took the key, so a session is connected.
-                Function::Sql => self.start_parley_sql(true),
+                Function::Sql => self.start_sibling(Sibling::Sql, true),
+                Function::Ssh => self.start_sibling(Sibling::Ssh, true),
                 // The terminal does these itself.
                 Function::Key(_)
                 | Function::CopyScreen
@@ -2908,7 +2966,7 @@ mod tests {
         harness.state_mut().set_sql_starter(Box::new(|_, _| {
             Err("Parley SQL is not installed beside Parley.".into())
         }));
-        harness.state_mut().start_parley_sql(true);
+        harness.state_mut().start_sibling(Sibling::Sql, true);
         harness.run();
         harness.get_by_label_contains("not installed beside Parley");
         harness.get_by_label("OK").click();
@@ -2916,11 +2974,96 @@ mod tests {
         assert!(harness.query_by_label_contains("not installed").is_none());
     }
 
+    /// Settings with the SSH add-on on, and a starter that keeps the hosts it was asked to open.
+    fn with_ssh_starter(
+        harness: &mut Harness<'static, ParleyUi>,
+    ) -> std::sync::Arc<std::sync::Mutex<Vec<String>>> {
+        let mut settings = Settings::default();
+        settings.addons.set_enabled(AddOn::Ssh, true);
+        harness.state_mut().set_settings(settings);
+        let started = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let kept = std::sync::Arc::clone(&started);
+        harness
+            .state_mut()
+            .set_ssh_starter(Box::new(move |_, config| {
+                kept.lock().expect("not poisoned").push(config.host.clone());
+                Ok(())
+            }));
+        started
+    }
+
+    #[test]
+    fn tools_ssh_is_there_only_while_the_add_on_is_on_r_ssh_59() {
+        let (mut harness, _host) = connected_app();
+        harness.get_by_label("Tools").click();
+        harness.run();
+        assert!(harness.query_by_label("SSH…").is_none());
+        harness.get_by_label("Tools").click(); // closes the menu again
+        harness.run();
+        with_ssh_starter(&mut harness);
+        harness.run();
+        harness.get_by_label("Tools").click();
+        harness.run();
+        assert!(harness.query_by_label("SQL…").is_none(), "only SSH is on");
+        harness.get_by_label("SSH…");
+    }
+
+    #[test]
+    fn tools_ssh_starts_parley_ssh_on_the_sessions_host_r_ssh_59() {
+        let (mut harness, _host) = connected_app();
+        let started = with_ssh_starter(&mut harness);
+        harness.run();
+        harness.get_by_label("Tools").click();
+        harness.run();
+        harness.get_by_label("SSH…").click();
+        harness.run();
+        let profile = harness.state().current.clone().expect("a session in use");
+        let started = started.lock().expect("not poisoned").clone();
+        assert_eq!(started, [profile.config.host], "one Parley SSH");
+    }
+
+    #[test]
+    fn the_ssh_key_starts_parley_ssh_and_not_without_the_add_on_r_ssh_59() {
+        let (mut harness, _host) = connected_app();
+        let started = with_ssh_starter(&mut harness);
+        harness.run();
+        let app = harness.state_mut();
+        let connection = app.connection.take().expect("connected");
+        app.carry_out_keys(vec![Function::Ssh], &mut connection.session());
+        app.set_settings(Settings::default());
+        app.carry_out_keys(vec![Function::Ssh], &mut connection.session());
+        app.connection = Some(connection);
+        assert_eq!(started.lock().expect("not poisoned").len(), 1);
+    }
+
+    #[test]
+    fn when_parley_ssh_cannot_start_parley_says_why_r_ssh_59() {
+        let (mut harness, _host) = connected_app();
+        with_ssh_starter(&mut harness);
+        harness.state_mut().ssh_starter = None;
+        harness.state_mut().start_sibling(Sibling::Ssh, true);
+        harness.run();
+        harness.get_by_label("Parley SSH cannot start");
+        harness.get_by_label_contains("cannot start Parley SSH");
+        harness.get_by_label("OK").click();
+        harness.run();
+        assert!(harness.query_by_label("Parley SSH cannot start").is_none());
+    }
+
+    #[test]
+    fn without_a_connection_tools_ssh_starts_nothing_r_ssh_59() {
+        let mut harness = app_with(Vec::new());
+        let started = with_ssh_starter(&mut harness);
+        harness.state_mut().start_sibling(Sibling::Ssh, false);
+        harness.run();
+        assert!(started.lock().expect("not poisoned").is_empty());
+    }
+
     #[test]
     fn without_a_connection_tools_sql_starts_nothing_r_sql_70() {
         let mut harness = app_with(Vec::new());
         let started = with_sql_starter(&mut harness);
-        harness.state_mut().start_parley_sql(false);
+        harness.state_mut().start_sibling(Sibling::Sql, false);
         harness.run();
         assert!(started.lock().expect("not poisoned").is_empty());
     }

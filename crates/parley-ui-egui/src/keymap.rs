@@ -202,6 +202,8 @@ pub enum Function {
     Shortcuts,
     /// Open the SQL window (R-SQL-6), while the SQL add-on is on.
     Sql,
+    /// Start Parley SSH on the session's host (R-SSH-59), while the SSH add-on is on.
+    Ssh,
 }
 
 /// The 5250 keys that go to the host, beside F1–F24, in the order Settings lists them.
@@ -254,6 +256,7 @@ impl Function {
             Self::RunMacro(name) => format!("{RUN_MACRO}{name}"),
             Self::Shortcuts => "shortcuts".to_owned(),
             Self::Sql => "sql".to_owned(),
+            Self::Ssh => "ssh".to_owned(),
         }
     }
 
@@ -266,6 +269,7 @@ impl Function {
             "record-macro" => Self::RecordMacro,
             "shortcuts" => Self::Shortcuts,
             "sql" => Self::Sql,
+            "ssh" => Self::Ssh,
             _ => match id.strip_prefix(RUN_MACRO) {
                 Some(name) => Self::RunMacro(name.to_owned()),
                 None => Self::Key(key_named(id)?),
@@ -295,6 +299,7 @@ impl Function {
             Self::RunMacro(name) => format!("Run macro {name}"),
             Self::Shortcuts => "Keyboard shortcuts".to_owned(),
             Self::Sql => "SQL window".to_owned(),
+            Self::Ssh => "Parley SSH on the session's host".to_owned(),
         }
     }
 
@@ -314,7 +319,8 @@ impl Function {
                 | Self::RecordMacro
                 | Self::RunMacro(_)
                 | Self::Shortcuts
-                | Self::Sql,
+                | Self::Sql
+                | Self::Ssh,
                 _,
             ) => None,
         }
@@ -323,8 +329,9 @@ impl Function {
 
 /// Every function under its heading, in the order Settings lists them. The Macros group
 /// holds Record macro and a Run macro for each of `macros`; `None` leaves it out (the
-/// Macros add-on is off). `sql` adds the SQL window's function (the SQL add-on is on).
-pub fn groups(macros: Option<&[String]>, sql: bool) -> Vec<(&'static str, Vec<Function>)> {
+/// Macros add-on is off). `tools` are the functions of the add-ons that are on, such as the SQL
+/// window's (R-SQL-6) and Parley SSH's (R-SSH-59), listed under Parley 5250.
+pub fn groups(macros: Option<&[String]>, tools: &[Function]) -> Vec<(&'static str, Vec<Function>)> {
     let keys = |list: &[(Key, &str)]| list.iter().map(|(k, _)| Function::Key(*k)).collect();
     let mut host: Vec<Function> = keys(&HOST_KEYS[..1]);
     host.extend(
@@ -347,8 +354,8 @@ pub fn groups(macros: Option<&[String]>, sql: bool) -> Vec<(&'static str, Vec<Fu
             ],
         ),
     ];
-    if sql && let Some((_, parley)) = groups.last_mut() {
-        parley.push(Function::Sql);
+    if let Some((_, parley)) = groups.last_mut() {
+        parley.extend_from_slice(tools);
     }
     if let Some(macros) = macros {
         let mut list = vec![Function::RecordMacro];
@@ -491,7 +498,7 @@ impl KeyMap {
     /// The keys of every bound function, for the shortcuts panel: (keys, function) in the
     /// order of [`groups`]. `mac` names the system's copy and paste keys as macOS does.
     pub fn shortcuts(&self, macros: Option<&[String]>, mac: bool) -> Vec<(String, String)> {
-        groups(macros, false)
+        groups(macros, &[])
             .into_iter()
             .flat_map(|(_, functions)| functions)
             .filter_map(|f| {
@@ -841,7 +848,7 @@ mod tests {
     #[test]
     fn every_function_has_a_name_and_reads_back_r_key_2() {
         let macros = ["æøå".to_owned()];
-        for (_, functions) in groups(Some(&macros), true) {
+        for (_, functions) in groups(Some(&macros), &[Function::Sql, Function::Ssh]) {
             for function in functions {
                 assert!(!function.name().is_empty(), "{function:?}");
                 assert_eq!(Function::from_id(&function.id()), Some(function));

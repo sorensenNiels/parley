@@ -78,7 +78,7 @@ pub fn show(
         ui.vertical(|ui| {
             ui.set_width(width);
             for (i, entry) in entries.iter().enumerate() {
-                if let Some(chosen) = card(ui, entry) {
+                if let Some(chosen) = card(ui, entry, "Edit…") {
                     choice = Some(match chosen {
                         Card::Connect => Choice::Connect(i),
                         Card::Edit => Choice::Edit(i),
@@ -98,13 +98,38 @@ pub fn show(
     choice
 }
 
+/// A second list of cards under `show`'s, as wide and centred, below a section label; `second` names each card's
+/// button beside Connect, chosen as [`Choice::Edit`]. Parley SSH's hosts from `~/.ssh/config` (R-SSH-42).
+pub fn group(ui: &mut Ui, label: &str, entries: &[Entry<'_>], second: &str) -> Option<Choice> {
+    let mut choice = None;
+    let width = 460.0_f32.min(ui.available_width());
+    let margin = (ui.available_width() - width) / 2.0;
+    ui.horizontal(|ui| {
+        ui.add_space(margin);
+        ui.vertical(|ui| {
+            ui.set_width(width);
+            theme::section_label(ui, label);
+            for (i, entry) in entries.iter().enumerate() {
+                if let Some(chosen) = card(ui, entry, second) {
+                    choice = Some(match chosen {
+                        Card::Connect => Choice::Connect(i),
+                        Card::Edit => Choice::Edit(i),
+                    });
+                }
+                ui.add_space(4.0);
+            }
+        });
+    });
+    choice
+}
+
 enum Card {
     Connect,
     Edit,
 }
 
-/// One saved session or connection: its name and address, with Edit… and Connect.
-fn card(ui: &mut Ui, entry: &Entry<'_>) -> Option<Card> {
+/// One saved session or connection: its name and address, with `second` (Edit…) and Connect.
+fn card(ui: &mut Ui, entry: &Entry<'_>, second: &str) -> Option<Card> {
     let muted = theme::palette(ui).muted;
     theme::card(ui)
         .inner_margin(egui::Margin::symmetric(14, 10))
@@ -119,7 +144,7 @@ fn card(ui: &mut Ui, entry: &Entry<'_>) -> Option<Card> {
                 theme::button_row(ui, |ui| {
                     if ui.add(connect).clicked() {
                         Some(Card::Connect)
-                    } else if ui.button("Edit…").clicked() {
+                    } else if ui.button(second).clicked() {
                         Some(Card::Edit)
                     } else {
                         None

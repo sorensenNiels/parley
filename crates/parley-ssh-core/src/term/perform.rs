@@ -4,7 +4,7 @@
 use unicode_width::UnicodeWidthChar;
 
 use super::cell::{Cell, Width};
-use super::{Charset, CursorShape, KeyMode, Modes, Terminal, sgr};
+use super::{Charset, CursorShape, KeyMode, Modes, MouseEncoding, MouseTracking, Terminal, sgr};
 
 /// The longest window title kept; hosts can send any length.
 const TITLE_LIMIT: usize = 256;
@@ -517,7 +517,27 @@ impl Terminal {
             1049 => self.use_alternate(on, true, true),
             1004 => self.modes.focus_events = on,
             2004 => self.modes.bracketed_paste = on,
+            9 => self.set_mouse_tracking(MouseTracking::X10, on),
+            1000 => self.set_mouse_tracking(MouseTracking::Normal, on),
+            1002 => self.set_mouse_tracking(MouseTracking::ButtonEvent, on),
+            1003 => self.set_mouse_tracking(MouseTracking::AnyEvent, on),
+            1005 => self.set_mouse_encoding(MouseEncoding::Utf8, on),
+            1006 => self.set_mouse_encoding(MouseEncoding::Sgr, on),
             _ => {}
+        }
+    }
+
+    /// Modes 9, 1000, 1002 and 1003: setting one replaces the others; resetting any turns tracking off, as xterm.
+    fn set_mouse_tracking(&mut self, tracking: MouseTracking, on: bool) {
+        self.modes.mouse = if on { tracking } else { MouseTracking::Off };
+    }
+
+    /// Modes 1005 and 1006: resetting the one in use goes back to the default encoding.
+    fn set_mouse_encoding(&mut self, encoding: MouseEncoding, on: bool) {
+        if on {
+            self.modes.mouse_encoding = encoding;
+        } else if self.modes.mouse_encoding == encoding {
+            self.modes.mouse_encoding = MouseEncoding::Default;
         }
     }
 

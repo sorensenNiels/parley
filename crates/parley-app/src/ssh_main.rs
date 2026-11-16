@@ -101,6 +101,10 @@ fn main() -> eframe::Result {
             let mut ui = ParleySshUi::new(settings, known_hosts);
             ui.set_update_checker(parley_app::update_checker());
             ui.set_spawner(std::sync::Arc::new(ssh_start::spawn));
+            // The hosts of ~/.ssh/config (R-SSH-42); none without a home folder.
+            if let Some(config) = parley_ssh_core::openssh_config::Config::from_home() {
+                ui.set_openssh_config(config);
+            }
             match parley_app::logo() {
                 Ok(logo) => ui.set_logo(logo),
                 Err(e) => eprintln!("parley-ssh: could not load the menu bar icon: {e}"),

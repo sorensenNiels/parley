@@ -33,6 +33,33 @@ pub enum CursorShape {
     Bar,
 }
 
+/// Which mouse events the host asked for (xterm ctlseqs "Mouse Tracking"; R-SSH-18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MouseTracking {
+    #[default]
+    Off,
+    /// Mode 9: presses only, without modifiers.
+    X10,
+    /// Mode 1000: presses, releases and the wheel.
+    Normal,
+    /// Mode 1002: also moves while a button is held.
+    ButtonEvent,
+    /// Mode 1003: also moves without a button.
+    AnyEvent,
+}
+
+/// How mouse events are written (R-SSH-18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MouseEncoding {
+    /// `CSI M` and three bytes, each value plus 32: columns and rows up to 223.
+    #[default]
+    Default,
+    /// Mode 1005: as the default, each value a UTF-8 character: up to 2015.
+    Utf8,
+    /// Mode 1006: `CSI <` button `;` column `;` row, then `M` for a press or `m` for a release.
+    Sgr,
+}
+
 /// The modes the host can set (SM/RM, DECSET/DECRST).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[expect(
@@ -58,6 +85,8 @@ pub struct Modes {
     pub bracketed_paste: bool,
     /// Mode 1004: the host is told when the window gains or loses focus.
     pub focus_events: bool,
+    pub mouse: MouseTracking,
+    pub mouse_encoding: MouseEncoding,
 }
 
 impl Default for Modes {
@@ -74,6 +103,8 @@ impl Default for Modes {
             cursor_blink: true,
             bracketed_paste: false,
             focus_events: false,
+            mouse: MouseTracking::Off,
+            mouse_encoding: MouseEncoding::Default,
         }
     }
 }

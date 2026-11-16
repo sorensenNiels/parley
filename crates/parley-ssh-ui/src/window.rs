@@ -46,12 +46,11 @@ impl ParleySshUi {
         saved: bool,
     ) {
         let new = self.session_pane(ctx, source, saved);
-        if let Some(slot) = self
-            .tabs
-            .get_mut(self.current)
-            .and_then(|t| t.pane_mut(pane))
+        if let Some(tab) = self.tabs.get_mut(self.current)
+            && let Some(slot) = tab.pane_mut(pane)
         {
             *slot = new;
+            tab.watch(pane);
         }
         self.note = None;
     }
@@ -76,6 +75,21 @@ impl ParleySshUi {
         let id = self.new_pane_id();
         if let Some(tab) = self.tabs.get_mut(self.current) {
             tab.split(id, pane, axis);
+        }
+        self.note = None;
+    }
+
+    /// Takes out the split panes whose sessions failed to start, and says why in the status bar (R-SSH-58).
+    pub(super) fn drop_failed_panes(&mut self) {
+        let mut dropped = false;
+        for tab in &mut self.tabs {
+            for why in tab.drop_failed() {
+                self.note = Some(format!("The new pane was closed. {why}"));
+                dropped = true;
+            }
+        }
+        if dropped {
+            self.focus_active();
         }
     }
 
@@ -108,6 +122,7 @@ impl ParleySshUi {
     fn select(&mut self, tab: usize) {
         if tab < self.tabs.len() {
             self.current = tab;
+            self.note = None;
             self.focus_active();
         }
     }
@@ -269,8 +284,13 @@ impl ParleySshUi {
         let start_fill = theme::palette(ui).bg;
         let frame = egui::Frame::NONE.fill(palette.background);
         let mut choices = Vec::new();
+        let mut close = None;
         let current = self.current;
+        if self.tabs.get(current).is_some_and(Tab::shows_start) {
+            self.openssh.refresh();
+        }
         let sessions = &self.settings.sessions;
+        let openssh = &self.openssh;
         let Some(tab) = self.tabs.get_mut(current) else {
             return;
         };
@@ -296,7 +316,7 @@ impl ParleySshUi {
                 match tab.pane_mut(id) {
                     Some(Pane::Start(form)) => {
                         child.painter().rect_filled(rect, 0.0, start_fill);
-                        if let Some(choice) = form.show(&mut child, sessions) {
+                        if let Some(choice) = form.show(&mut child, sessions, openssh) {
                             choices.push((id, choice));
                         }
                     }
@@ -315,12 +335,37 @@ impl ParleySshUi {
                         egui::StrokeKind::Inside,
                     );
                 }
+                if split && close_pane_button(ui, rect, id) {
+                    close = Some(id);
+                }
             }
         });
         for (pane, choice) in choices {
             self.chosen(ui.ctx(), pane, choice);
         }
+        if let Some(pane) = close {
+            if let Some(tab) = self.tabs.get_mut(current) {
+                // The question names the session in front: this one.
+                tab.active = pane;
+            }
+            self.ask_or_close(Closing::Pane(current, pane));
+        }
     }
+}
+
+/// The close button in the top right corner of a pane of a split tab (R-SSH-58); true when clicked.
+fn close_pane_button(ui: &mut Ui, pane: egui::Rect, id: PaneId) -> bool {
+    let size = egui::vec2(20.0, 20.0);
+    let at = egui::Rect::from_min_size(pane.right_top() + egui::vec2(-size.x - 4.0, 4.0), size);
+    let button = theme::icon_button(ui, "🗙").small();
+    let response = ui
+        .push_id(("ssh-close-pane", id), |ui| ui.put(at, button))
+        .inner
+        .on_hover_text("Close pane");
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::accesskit::Role::Button, true, "Close pane")
+    });
+    response.clicked()
 }
 
 /// The dividers of the tab's splits, dragged to resize the panes on either side.

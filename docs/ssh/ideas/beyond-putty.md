@@ -4,7 +4,6 @@
 
 | ID | Idea |
 |---|---|
-| IDEA-37 | *(Picked 2026-11-16 for Phase 33: → R-SSH-39..41, D47.)* **Tabs and split panes** (2026-11-16): several sessions in one window, as tabs and side by side, with keys to move between them. Changes R-SSH-10 and R-SSH-15 (one window per session, as PuTTY). |
 | IDEA-38 | *(Picked 2026-11-16 for Phase 34: → R-SSH-42, R-SSH-43.)* **OpenSSH's config** (2026-11-16): read `~/.ssh/config` (`Host`, `HostName`, `User`, `Port`, `IdentityFile`, `ProxyJump`) and offer its hosts on the start screen beside the saved sessions, or import them as sessions. |
 | IDEA-39 | *(Picked 2026-11-16 for Phase 38: → R-SSH-50.)* **Type into several sessions at once** (2026-11-16): broadcast keys to the sessions chosen, with a clear mark on each. Needs IDEA-37. |
 | IDEA-40 | *(Picked 2026-11-16 for Phase 38: → R-SSH-49.)* **Snippets and macros** (2026-11-16): commands kept by name and sent with a click or a key, and recorded macros, as Parley 5250's (D14) and Parley SQL's snippets, with a `password` step that asks each time (D16). |

@@ -210,7 +210,8 @@ pub fn show(
                 other @ (Function::RecordMacro
                 | Function::RunMacro(_)
                 | Function::Shortcuts
-                | Function::Sql) => {
+                | Function::Sql
+                | Function::Ssh) => {
                     asked.push(other);
                 }
             }

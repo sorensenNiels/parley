@@ -49,6 +49,8 @@ pub enum Action {
     Find,
     /// Tools ▸ SQL… (R-SQL-6).
     Sql,
+    /// Tools ▸ SSH… (R-SSH-59).
+    Ssh,
     /// The gear (R-UI-18).
     Settings,
     Key(Key),
@@ -83,6 +85,8 @@ pub struct Header<'a> {
     pub macros: Option<&'a MacroMenu<'a>>,
     /// The SQL add-on is on (R-SQL-10).
     pub sql: bool,
+    /// The SSH add-on is on (R-SSH-59).
+    pub ssh: bool,
     /// The keyboard map in use, for the keys the menus show.
     pub map: &'a KeyMap,
     pub mac: bool,
@@ -114,7 +118,7 @@ pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
     let mut action = None;
     MenuBar::new().ui(ui, |ui| {
         brand(ui, header.logo, Program::Parley);
-        let tools = header.macros.is_some() || header.sql;
+        let tools = header.macros.is_some() || header.sql || header.ssh;
         // Tools, last, only while it has items.
         let menus = [file_menu, edit_menu, tools_menu];
         for menu in menus.into_iter().take(menus.len() - usize::from(!tools)) {
@@ -250,14 +254,20 @@ fn tools_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
         if let Some(macros) = header.macros {
             action = macro_items(ui, header, macros);
         }
-        // R-SQL-6: for the connected session's host.
+        // R-SQL-6, R-SSH-59: for the connected session's host.
+        if (header.sql || header.ssh) && header.macros.is_some() {
+            ui.separator();
+        }
         if header.sql {
-            if header.macros.is_some() {
-                ui.separator();
-            }
             let sql = (icons::DATABASE, "SQL…");
             if item(ui, header, header.connected(), sql, Some(&Function::Sql)) {
                 action = Some(Action::Sql);
+            }
+        }
+        if header.ssh {
+            let ssh = (icons::TERMINAL, "SSH…");
+            if item(ui, header, header.connected(), ssh, Some(&Function::Ssh)) {
+                action = Some(Action::Ssh);
             }
         }
     });

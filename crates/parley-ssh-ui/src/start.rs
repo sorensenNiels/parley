@@ -1,10 +1,12 @@
 //! The start screen (R-SSH-2, R-SSH-11): the saved sessions with a search, the defaults, and a quick connect to a
-//! host, port and user name that is not saved.
+//! host, port and user name that is not saved; the hosts of `~/.ssh/config` below the saved sessions (R-SSH-42).
 
 use egui::{Key, Ui};
 use parley_ssh_core::net::Target;
+use parley_ssh_core::openssh_config::Host;
 use parley_ui_egui::{connect, theme};
 
+use crate::openssh;
 use crate::sessions::{DEFAULT_SETTINGS, SavedSession};
 use crate::settings::Settings;
 
@@ -27,7 +29,14 @@ pub enum Choice {
     Defaults,
     /// Quick connect, with the defaults' keys and agent.
     Quick(Target),
+    /// The host of `~/.ssh/config` at this index (R-SSH-42).
+    ConfigConnect(usize),
+    /// Keep the host of `~/.ssh/config` at this index as a saved session.
+    ConfigSave(usize),
 }
+
+/// The heading of the hosts from OpenSSH's config.
+const CONFIG_GROUP: &str = "From ~/.ssh/config";
 
 /// The start screen's fields, as typed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,12 +60,18 @@ impl Form {
         }
     }
 
-    pub fn show(&mut self, ui: &mut Ui, sessions: &[SavedSession]) -> Option<Choice> {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        sessions: &[SavedSession],
+        openssh: &openssh::Hosts,
+    ) -> Option<Choice> {
         let mut choice = None;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let shown = matching(sessions, &self.search);
+                let config_shown = matching_hosts(openssh.hosts(), &self.search);
                 let entries: Vec<connect::Entry<'_>> = shown
                     .iter()
                     .filter_map(|&i| sessions.get(i))
@@ -70,14 +85,19 @@ impl Form {
                     connect::Choice::Edit(i) => Choice::Edit(shown[i]),
                     connect::Choice::New => Choice::New,
                 });
+                if let Some(c) = config_group(ui, openssh, &config_shown) {
+                    choice = Some(c);
+                }
                 ui.add_space(8.0);
                 ui.vertical_centered(|ui| {
-                    if sessions.len() >= SEARCH_FROM {
+                    if sessions.len() + openssh.hosts().len() >= SEARCH_FROM {
                         let edit = egui::TextEdit::singleline(&mut self.search)
                             .hint_text("Find a session");
                         let response = theme::sized_edit(ui, 300.0, edit);
                         if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                            choice = shown.first().map(|&i| Choice::Connect(i));
+                            choice = shown.first().map(|&i| Choice::Connect(i)).or_else(|| {
+                                config_shown.first().map(|&i| Choice::ConfigConnect(i))
+                            });
                         }
                     }
                     if ui
@@ -147,6 +167,73 @@ impl Form {
     }
 }
 
+/// The hosts of `~/.ssh/config` that `shown` picks, with a hint for the lines that were skipped.
+fn config_group(ui: &mut Ui, openssh: &openssh::Hosts, shown: &[usize]) -> Option<Choice> {
+    let problems = openssh.problems();
+    if shown.is_empty() && problems.is_empty() {
+        return None;
+    }
+    let entries: Vec<connect::Entry<'_>> = shown
+        .iter()
+        .filter_map(|&i| openssh.hosts().get(i))
+        .map(|h| connect::Entry {
+            name: &h.alias,
+            address: address(h),
+        })
+        .collect();
+    ui.add_space(16.0);
+    let choice = connect::group(ui, CONFIG_GROUP, &entries, "Save as session…").and_then(|c| {
+        match c {
+            connect::Choice::Connect(i) => Some(Choice::ConfigConnect(shown[i])),
+            connect::Choice::Edit(i) => Some(Choice::ConfigSave(shown[i])),
+            // A group has no New button.
+            connect::Choice::New => None,
+        }
+    });
+    if let Some(first) = problems.first() {
+        ui.vertical_centered(|ui| {
+            let more = match problems.len() {
+                1 => String::new(),
+                n => format!(" (and {} more)", n - 1),
+            };
+            theme::warning(ui, format!("Skipped: {first}{more}"));
+        });
+    }
+    choice
+}
+
+/// A config host's line under its name: `user@` and `:port` when the config sets them, and its jump host.
+fn address(host: &Host) -> String {
+    let user = host
+        .user
+        .as_ref()
+        .map_or_else(String::new, |u| format!("{u}@"));
+    let port = host
+        .port
+        .filter(|&p| p != 22)
+        .map_or_else(String::new, |p| format!(":{p}"));
+    let jump = host
+        .proxy_jump
+        .as_ref()
+        .map_or_else(String::new, |j| format!("  ·  via {j}"));
+    format!("{user}{}{port}{jump}", host.host_name)
+}
+
+/// The indexes of the config hosts whose alias or address holds `search`, ignoring case; all when it is empty.
+fn matching_hosts(hosts: &[Host], search: &str) -> Vec<usize> {
+    let search = search.trim().to_lowercase();
+    hosts
+        .iter()
+        .enumerate()
+        .filter(|(_, h)| {
+            search.is_empty()
+                || h.alias.to_lowercase().contains(&search)
+                || address(h).to_lowercase().contains(&search)
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+
 /// The indexes of the sessions whose name or address holds `search`, ignoring case; all when it is empty.
 fn matching(sessions: &[SavedSession], search: &str) -> Vec<usize> {
     let search = search.trim().to_lowercase();
@@ -162,30 +249,38 @@ fn matching(sessions: &[SavedSession], search: &str) -> Vec<usize> {
         .collect()
 }
 
-/// The fields as a [`Target`]. The host may carry the user and port, as `ssh` takes them: `user@host:port`;
-/// `[::1]:2222` for an IPv6 address with a port.
-pub fn parse(host: &str, port: &str, user: &str) -> Result<Target, String> {
+/// `[user@]host[:port]` as `ssh` takes it, `[::1]:2222` for an IPv6 address with a port: the user and the port
+/// when they are in it, and the host.
+pub fn split(host: &str) -> Result<(Option<String>, String, Option<String>), String> {
     let mut host = host.trim();
-    let mut user = user.trim().to_owned();
+    let mut user = None;
     if let Some((name, rest)) = host.rsplit_once('@') {
-        name.trim().clone_into(&mut user);
+        user = Some(name.trim().to_owned());
         host = rest.trim();
     }
-    let mut port = port.trim().to_owned();
+    let mut port = None;
     if let Some(rest) = host.strip_prefix('[') {
         let (address, after) = rest
             .split_once(']')
             .ok_or("An IPv6 address in brackets needs its ]")?;
-        if let Some(p) = after.strip_prefix(':') {
-            p.clone_into(&mut port);
-        }
+        port = after.strip_prefix(':').map(str::to_owned);
         host = address;
     } else if host.matches(':').count() == 1
         && let Some((name, p)) = host.split_once(':')
     {
         host = name;
-        p.clone_into(&mut port);
+        port = Some(p.to_owned());
     }
+    Ok((user, host.to_owned(), port))
+}
+
+/// The fields as a [`Target`]. The host may carry the user and port ([`split`]), which win over the fields.
+pub fn parse(host: &str, port: &str, user: &str) -> Result<Target, String> {
+    let (typed_user, host, typed_port) = split(host)?;
+    let user = typed_user.unwrap_or_else(|| user.trim().to_owned());
+    let port = typed_port.unwrap_or_else(|| port.trim().to_owned());
+    let port = port.trim();
+    let host = host.as_str();
     if host.is_empty() {
         return Err("Name the server to connect to.".to_owned());
     }

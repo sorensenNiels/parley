@@ -79,6 +79,28 @@ fn quick_connect_keeps_the_last_host_and_says_what_is_missing_r_ssh_2() {
     assert_eq!(h.state().title(), "Parley SSH");
 }
 
+/// R-SSH-59: a host without a user, as Parley 5250's Tools ▸ SSH… sends it, waits in the quick connect.
+#[test]
+fn a_host_without_a_user_waits_in_quick_connect_r_ssh_59() {
+    let mut h = app(Settings::default());
+    h.run_steps(2);
+    let request = StartRequest {
+        host: Some("ibmi.æøå.lan".into()),
+        port: Some(2222),
+        ..StartRequest::default()
+    };
+    let ctx = h.ctx.clone();
+    h.state_mut().start(&ctx, request);
+    h.run_steps(3);
+    assert_eq!(
+        h.get_by_label("Host").value().as_deref(),
+        Some("ibmi.æøå.lan")
+    );
+    assert_eq!(h.get_by_label("Port").value().as_deref(), Some("2222"));
+    h.get_by_label("Fill in the user name to sign on as.");
+    assert!(h.state().active_session().is_none(), "nothing is opened");
+}
+
 #[test]
 fn the_header_has_parley_sshs_menus() {
     let mut h = app(Settings::default());
@@ -326,6 +348,78 @@ fn panes_split_move_and_close_with_the_keys_r_ssh_40() {
     );
 }
 
+/// A session that fails at once: nothing listens on the port any more.
+fn refused() -> SavedSession {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("address").port();
+    drop(listener);
+    SavedSession {
+        name: "Refused".into(),
+        host: "127.0.0.1".into(),
+        port,
+        user: "me".into(),
+        ..SavedSession::default()
+    }
+}
+
+#[test]
+fn a_split_pane_whose_session_fails_to_start_is_taken_out_r_ssh_58() {
+    let mut h = app(Settings::default());
+    h.run_steps(1);
+    let ctx = h.ctx.clone();
+    let first = h.state().tabs[0].active;
+    h.state_mut().connect_pane(&ctx, first, refused(), true);
+    press(&mut h, egui::Key::Equals, ALT_SHIFT);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while h.state().tabs[0].panes.len() > 1 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        h.run_steps(1);
+    }
+    let tab = &h.state().tabs[0];
+    assert_eq!(
+        (tab.panes.len(), tab.active),
+        (1, first),
+        "the failed pane is gone and the first is in front again"
+    );
+    assert!(
+        h.state()
+            .note
+            .as_deref()
+            .is_some_and(|n| n.starts_with("The new pane was closed. Could not connect")),
+        "the status bar says why: {:?}",
+        h.state().note
+    );
+    let ended = h.state().active_session().map(Session::failed_to_start);
+    assert_eq!(ended, Some(true), "a tab's only pane stays, to show why");
+}
+
+#[test]
+fn a_waiting_split_pane_stays_and_each_pane_has_a_close_button_r_ssh_58() {
+    let mut h = app(Settings::default());
+    h.run_steps(1);
+    let ctx = h.ctx.clone();
+    let first = h.state().tabs[0].active;
+    h.state_mut().connect_pane(&ctx, first, waiting(), true);
+    h.run_steps(1);
+    assert!(
+        h.query_by_label("Close pane").is_none(),
+        "no pane button without a split"
+    );
+    press(&mut h, egui::Key::Equals, ALT_SHIFT);
+    h.run_steps(2);
+    assert_eq!(h.state().tabs[0].panes.len(), 2, "still connecting: kept");
+    assert_eq!(h.get_all_by_label("Close pane").count(), 2);
+    h.state_mut().settings.confirm_close = false;
+    h.get_all_by_label("Close pane")
+        .next()
+        .expect("the first pane's button")
+        .click();
+    h.run_steps(2);
+    let tab = &h.state().tabs[0];
+    assert_eq!(tab.panes.len(), 1, "the button closed its pane");
+    assert_ne!(tab.active, first, "the first pane was the one closed");
+}
+
 #[test]
 fn closing_a_connected_tab_asks_first_r_ssh_39() {
     let mut h = app(Settings::default());
@@ -373,4 +467,150 @@ fn without_a_spawner_a_new_window_says_why_not() {
     let mut app = ParleySshUi::new(Settings::default(), known());
     app.carry_out(&egui::Context::default(), Action::NewWindow);
     assert!(app.note.is_some());
+}
+
+/// A home folder of the test's own whose `~/.ssh/config` holds `text`, read as OpenSSH's config (R-SSH-42).
+fn openssh_config(
+    name: &str,
+    text: &str,
+) -> (std::path::PathBuf, parley_ssh_core::openssh_config::Config) {
+    let home = std::env::temp_dir().join(format!(
+        "parley-ssh-ui-config-{name}-{}",
+        std::process::id()
+    ));
+    let ssh = home.join(".ssh");
+    std::fs::create_dir_all(&ssh).expect("the temp folder is writable");
+    std::fs::write(ssh.join("config"), text).expect("the temp folder is writable");
+    let config = parley_ssh_core::openssh_config::Config::read(&ssh.join("config"), &home);
+    (home, config)
+}
+
+const CONFIG: &str = "Host web\n  HostName web1.lan\n  User cfg\n  Port 2200\n  IdentityFile ~/.ssh/web\n  \
+                      ForwardAgent yes\nHost *.lan\n  User lanuser\nMatch all\n";
+
+#[test]
+fn the_command_line_reads_the_config_as_ssh_does_r_ssh_42() {
+    let (home, config) = openssh_config("cli", CONFIG);
+    let mut app = ParleySshUi::new(Settings::default(), known());
+    app.set_openssh_config(config);
+    let request = |host: &str| StartRequest {
+        host: Some(host.into()),
+        ..StartRequest::default()
+    };
+    let (web, saved) = app
+        .source_for(request("web"))
+        .expect("valid")
+        .expect("named");
+    assert!(!saved);
+    assert_eq!(
+        (
+            web.host.as_str(),
+            web.user.as_str(),
+            web.port,
+            web.agent_forwarding
+        ),
+        ("web1.lan", "cfg", 2200, true)
+    );
+    assert_eq!(web.key_files, [home.join(".ssh/web").to_string_lossy()]);
+
+    let typed = StartRequest {
+        port: Some(22),
+        agent_forwarding: Some(false),
+        ..request("root@web")
+    };
+    let (typed, _) = app.source_for(typed).expect("valid").expect("named");
+    assert_eq!(
+        (typed.user.as_str(), typed.port, typed.agent_forwarding),
+        ("root", 22, false),
+        "what is typed wins"
+    );
+    let (lan, _) = app
+        .source_for(request("box.LAN"))
+        .expect("valid")
+        .expect("named");
+    assert_eq!(
+        lan.user, "lanuser",
+        "a pattern applies to a host not listed"
+    );
+    assert!(
+        app.source_for(request("other")).is_err(),
+        "no user anywhere: quick connect asks (R-SSH-59)"
+    );
+}
+
+#[test]
+fn config_hosts_are_listed_and_saved_as_sessions_r_ssh_42() {
+    let (_home, config) = openssh_config("start", CONFIG);
+    let mut app = ParleySshUi::new(Settings::default(), known());
+    app.set_openssh_config(config);
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(900.0, 900.0))
+        .build_ui_state(|ui, app: &mut ParleySshUi| app.ui(ui), app);
+    h.run_steps(2);
+    h.get_by_label("FROM ~/.SSH/CONFIG");
+    h.get_by_label("cfg@web1.lan:2200");
+    assert!(
+        h.query_by_label_contains("Match blocks are not used")
+            .is_some(),
+        "the skipped line is said"
+    );
+    h.get_by_label("Save as session…").click();
+    h.run_steps(2);
+    h.get_by_label("Save").click();
+    h.run_steps(3);
+    let saved = &h.state().settings.sessions;
+    assert_eq!(saved.len(), 1);
+    assert_eq!(
+        (
+            saved[0].name.as_str(),
+            saved[0].host.as_str(),
+            saved[0].port,
+            saved[0].user.as_str()
+        ),
+        ("web", "web1.lan", 2200, "cfg")
+    );
+}
+
+/// A real click with the pointer at the centre of the widget `label` (`n`-th of that name): it goes through egui's
+/// hit test, as a mouse click does, where kittest's `click()` does not.
+fn pointer_click(h: &mut Harness<'static, ParleySshUi>, label: &str, n: usize) {
+    let at = h
+        .get_all_by_label(label)
+        .nth(n)
+        .expect("the widget")
+        .rect()
+        .center();
+    h.event(egui::Event::PointerMoved(at));
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(1);
+    }
+    h.run_steps(2);
+}
+
+#[test]
+fn the_close_button_on_a_tab_closes_it_and_asks_first_while_connected_r_ssh_39() {
+    let mut h = app(Settings::default());
+    h.run_steps(2);
+    press(&mut h, egui::Key::T, CTRL_SHIFT);
+    pointer_click(&mut h, "Close tab", 0);
+    assert_eq!(h.state().tabs.len(), 1, "the start screen's tab closed");
+
+    let ctx = h.ctx.clone();
+    h.state_mut().new_tab(&ctx, None);
+    let pane = h.state().tabs[1].active;
+    h.state_mut().connect_pane(&ctx, pane, waiting(), false);
+    h.run_steps(2);
+    pointer_click(&mut h, "Close tab", 1);
+    assert!(
+        h.state().closing.is_some(),
+        "a connected tab asks before it closes"
+    );
+    assert_eq!(h.state().tabs.len(), 2);
 }

@@ -124,6 +124,8 @@ pub fn run() -> eframe::Result {
             }
             // R-SQL-70: Tools ▸ SQL… starts Parley SQL, installed beside Parley.
             ui.set_sql_starter(Box::new(parley_app::sql_start::start));
+            // R-SSH-59: Tools ▸ SSH… starts Parley SSH, installed beside Parley.
+            ui.set_ssh_starter(Box::new(parley_app::ssh_start::start));
             ui.set_beep(Box::new(parley_app::beep::beep));
             match parley_app::macros::MacroFolder::beside_settings() {
                 Some(folder) => ui.set_macro_store(Box::new(folder)),

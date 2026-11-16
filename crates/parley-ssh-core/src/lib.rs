@@ -3,7 +3,9 @@
 pub mod error;
 pub mod keys;
 pub mod known_hosts;
+pub mod mouse;
 pub mod net;
+pub mod openssh_config;
 pub mod secret;
 pub mod term;
 

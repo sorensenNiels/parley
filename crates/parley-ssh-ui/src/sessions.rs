@@ -26,6 +26,8 @@ pub struct SavedSession {
     pub agent_key: String,
     /// Let the server use the agent while connected; off by default (R-SSH-13).
     pub agent_forwarding: bool,
+    /// Programs on the host that ask for the mouse get it (R-SSH-18); Shift still selects.
+    pub mouse_reporting: bool,
 }
 
 impl Default for SavedSession {
@@ -39,6 +41,7 @@ impl Default for SavedSession {
             use_agent: true,
             agent_key: String::new(),
             agent_forwarding: false,
+            mouse_reporting: true,
         }
     }
 }
@@ -234,6 +237,13 @@ impl Editor {
                 theme::warning(ui, "The server's administrators can then sign on elsewhere with your keys while you are connected.");
             }
         });
+        ui.add_space(10.0);
+        theme::section_label(ui, "Terminal");
+        theme::switch_row(
+            ui,
+            "Programs that ask get the mouse (Shift+drag still selects)",
+            &mut self.session.mouse_reporting,
+        );
         if let Some(error) = &self.error {
             ui.add_space(6.0);
             theme::error(ui, error);
