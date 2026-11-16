@@ -107,7 +107,7 @@ pub fn run() -> eframe::Result {
         viewport,
         ..Default::default()
     };
-    // The name shown (D39). The settings folder comes from the app id `parley` above, so saved
+    // The name shown (D40). The settings folder comes from the app id `parley` above, so saved
     // sessions stay where they were.
     eframe::run_native(
         "Parley 5250",

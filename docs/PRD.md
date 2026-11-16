@@ -12,7 +12,7 @@
 
 ## 1. Summary
 
-Parley 5250 (called Parley until 2026-11-16, D39) is a TN5250 terminal emulator for IBM i: a desktop app for Windows, macOS and Linux, written in Rust. It
+Parley 5250 (called Parley until 2026-11-16, D40) is a TN5250 terminal emulator for IBM i: a desktop app for Windows, macOS and Linux, written in Rust. It
 connects to an IBM i over telnet or TLS, shows the 5250 "green screen" and sends what the user types, as IBM's own
 emulators do. It aims to be fast, small and correct, with a modern take on everything around the screen: saved
 sessions, keyboard maps, macros and, as an add-on, SQL against the host ([sql/PRD.md](sql/PRD.md)) — and no password

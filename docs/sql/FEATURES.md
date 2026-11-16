@@ -12,33 +12,7 @@
 
 ## In progress
 
-- **R-SQL-101** (2026-11-16): Open and Show in folder for a finished download. **Automated** (`make test`): a
-  finished tab download keeps its file (`æøå.csv`); the Messages tab's card opens it and its folder through the
-  launcher and goes when closed. **Left:** Open a CSV and an Excel download in the running app (Excel or the
-  system's program starts), then move to REQUIREMENTS.md.
-
-- **Phase 25: connection settings** (2026-11-16), built; `make verify` on Linux under WSL. **Automated** (`make test`):
-  the defaults are the JTOpen properties Parley SQL always sent (naming sql, ISO dates and times, a period); chosen
-  options become `naming`, `libraries` (upper case, commas or blanks, `æøå`), `transaction isolation` (each level by
-  its JDBC name), `date format`, `time format` and `decimal separator`, sent in the connect line with how
-  autocommit starts; old saved connections read with the defaults; the connection dialog saves naming, libraries and
-  auto-commit, and keeps its place; a window starts Autocommit as its connection says; the helper puts the
-  properties over its defaults (`make helper`). The CSV delimiter: a semicolon separates and quotes by the
-  semicolon, in downloads and Export, chosen on the SQL page. **Left:** a sign-on with System naming and a library
-  list, auto-commit off, and a semicolon CSV opened in Excel, on the owner's IBM i; then move to REQUIREMENTS.md.
-
-- **R-SQL-93..96** (2026-11-15): a library's SQL, a table with its indexes and views, rows as `INSERT` statements, a
-  library backed up as SQL (Phase 23, D39). Built; **automated** (`make test`): the `GENERATE_SQL` calls and catalog
-  queries, the order of a library's parts, failures kept as comments, a table's indexes and views, the backup's file
-  (its SQL, each table's rows with `OVERRIDING SYSTEM VALUE` where needed, the rest), Cancel and a busy connection,
-  and the dialogs keeping their buttons in place. Not yet checked on the owner's IBM i (in particular `'%'` for
-  `CONSTRAINT` and `TRIGGER`, and `QSYS2.SYSVIEWDEP` on 7.3) or in the running app. First try by the owner (7.3): SQL0104 at
-  `EXISTS` in the contents query, rewritten without `EXISTS`; a download now clears an earlier error line.
-
-- **R-SQL-87, R-SQL-88** (2026-11-15): Explorer and Current library; Snippets as a tree. Built; **automated**
-  (`make test`): the side panel's tests fold and open "Explorer", the top bar's test clicks "Current library MSGSUDTA",
-  a snippet's Run shows only while the pointer is on its line, and a starter's right-click menu inserts it and has no
-  Edit or Delete. Not yet checked in the running app.
+Nothing at the moment.
 
 ## Implemented
 
@@ -331,3 +305,31 @@
 - **R-NET-8** (2026-11-13): `make probe-sql`, built and run against the owner's IBM i and PUB400 (WSL2): the port
   mapper, the sign-on server's attributes (release, password level), the database host server, DRDA's EXCSAT, Mapepire
   and SSH were each identified or reported unreachable, with no sign-on. **Checked in the running app** by the owner, Linux under WSL (2026-11-14).
+
+### Checked 2026-11-16 — R-SQL-87, R-SQL-88, R-SQL-93..96, Phase 25 (R-SQL-97..100), R-SQL-101
+
+- **R-SQL-101** (2026-11-16): Open and Show in folder for a finished download. **Automated** (`make test`): a
+  finished tab download keeps its file (`æøå.csv`); the Messages tab's card opens it and its folder through the
+  launcher and goes when closed. **Checked in the running app** by the owner on Windows, macOS, Linux and Linux under WSL (2026-11-16).
+
+- **Phase 25: connection settings** (2026-11-16), built; `make verify` on Linux under WSL. **Automated** (`make test`):
+  the defaults are the JTOpen properties Parley SQL always sent (naming sql, ISO dates and times, a period); chosen
+  options become `naming`, `libraries` (upper case, commas or blanks, `æøå`), `transaction isolation` (each level by
+  its JDBC name), `date format`, `time format` and `decimal separator`, sent in the connect line with how
+  autocommit starts; old saved connections read with the defaults; the connection dialog saves naming, libraries and
+  auto-commit, and keeps its place; a window starts Autocommit as its connection says; the helper puts the
+  properties over its defaults (`make helper`). The CSV delimiter: a semicolon separates and quotes by the
+  semicolon, in downloads and Export, chosen on the SQL page. **Checked in the running app** by the owner on Windows, macOS, Linux and Linux under WSL (2026-11-16).
+
+- **R-SQL-93..96** (2026-11-15): a library's SQL, a table with its indexes and views, rows as `INSERT` statements, a
+  library backed up as SQL (Phase 23, D39). Built; **automated** (`make test`): the `GENERATE_SQL` calls and catalog
+  queries, the order of a library's parts, failures kept as comments, a table's indexes and views, the backup's file
+  (its SQL, each table's rows with `OVERRIDING SYSTEM VALUE` where needed, the rest), Cancel and a busy connection,
+  and the dialogs keeping their buttons in place. Not yet checked on the owner's IBM i (in particular `'%'` for
+  `CONSTRAINT` and `TRIGGER`, and `QSYS2.SYSVIEWDEP` on 7.3) or in the running app. First try by the owner (7.3): SQL0104 at
+  `EXISTS` in the contents query, rewritten without `EXISTS`; a download now clears an earlier error line. **Checked in the running app** by the owner on Windows, macOS, Linux and Linux under WSL (2026-11-16).
+
+- **R-SQL-87, R-SQL-88** (2026-11-15): Explorer and Current library; Snippets as a tree. Built; **automated**
+  (`make test`): the side panel's tests fold and open "Explorer", the top bar's test clicks "Current library MSGSUDTA",
+  a snippet's Run shows only while the pointer is on its line, and a starter's right-click menu inserts it and has no
+  Edit or Delete. Not yet checked in the running app. **Checked in the running app** by the owner on Windows, macOS, Linux and Linux under WSL (2026-11-16).

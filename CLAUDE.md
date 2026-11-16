@@ -1,6 +1,6 @@
 # Parley 5250
 
-A TN5250 terminal emulator for IBM i, written in Rust. Shown as "Parley 5250" since 2026-11-16 (D39); crates, the
+A TN5250 terminal emulator for IBM i, written in Rust. Shown as "Parley 5250" since 2026-11-16 (D40); crates, the
 `parley` command, folders, the app id and the keychain service keep the name Parley, and so do the releases.
 Targets: Windows, Linux and macOS desktop only (roadmap D5).
 

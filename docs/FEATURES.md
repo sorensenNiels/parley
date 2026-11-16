@@ -14,22 +14,6 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
-- **Phase 24: more settings** (2026-11-16), built; `make verify` on Linux under WSL. **Automated** (`make test`):
-  - **R-NET-11** the keep-alive interval defaults to 60 s, is kept within 10–3600 s, and old sessions read with
-    60 s; the session dialog shows "Keep-alive every" only while keep-alive is on and saves it.
-  - **R-UI-28** insert mode always looks different (block or underline → bar, bar → block); a blinking cursor stays
-    on for a second after a key, then blinks; the Terminal page saves the shape and the blink.
-  - **R-KEY-12** pasted text: CR, LF and CR LF are one line break, a tab is Field Exit; "Next field" puts the
-    cursor in the next field, "Next row" one row down at the column the paste began in.
-  - **R-EBC-2** the new pages have their national letters (ß, £, é, ç, Þ) and the euro variants the euro sign;
-    character set 695 for the euro pages; keyboard types; the bundled terminal font has every character of every
-    page; Parley SQL's `--ccsid` takes them.
-  **Left:** seen in the running app (the cursor, a paste of several lines, a session on a new code page), then
-  move to REQUIREMENTS.md.
-- **R-UI-27** (2026-11-16): no View menu. **Automated** (`make test`): the header has File, Edit, Tools and no View
-  menu or Keyboard shortcuts item; Tools still goes when it has no items; Ctrl+/ still opens the sheet (R-UI-17's
-  tests). **Left:** seen in the running app, then move to REQUIREMENTS.md.
-
 - **R-DS-10** (2026-11-15): GUI windows behind the session switch "GUI elements (beta)" (D38). **Automated** (`make
   test`): a window is written as the 5494 writes it (border attribute and characters, centred title `Æble`, cleared
   inside) and kept; removing it puts back what it covered and frees the cursor; Remove All and Clear Unit take every
@@ -292,3 +276,21 @@ Checked by the owner in the running app (2026-11-15); `make verify` on Linux und
   row without a top are not; a GUI window's border is found as the same frame and drawn once; the frame leaves the
   title alone; Window frames is on by default and the Terminal page turns it off. **Checked in the running app** by the
   owner on DKSOFT00 (help and F4 list windows), Linux under WSL (2026-11-15).
+
+### Phase 24: more settings, and no View menu (2026-11-16) — R-NET-11, R-UI-28, R-KEY-12, R-EBC-2, R-UI-27
+
+- **Phase 24: more settings** (2026-11-16), built; `make verify` on Linux under WSL. **Automated** (`make test`):
+  - **R-NET-11** the keep-alive interval defaults to 60 s, is kept within 10–3600 s, and old sessions read with
+    60 s; the session dialog shows "Keep-alive every" only while keep-alive is on and saves it.
+  - **R-UI-28** insert mode always looks different (block or underline → bar, bar → block); a blinking cursor stays
+    on for a second after a key, then blinks; the Terminal page saves the shape and the blink.
+  - **R-KEY-12** pasted text: CR, LF and CR LF are one line break, a tab is Field Exit; "Next field" puts the
+    cursor in the next field, "Next row" one row down at the column the paste began in.
+  - **R-EBC-2** the new pages have their national letters (ß, £, é, ç, Þ) and the euro variants the euro sign;
+    character set 695 for the euro pages; keyboard types; the bundled terminal font has every character of every
+    page; Parley SQL's `--ccsid` takes them.
+  **Checked in the running app** by the owner on Windows, macOS, Linux and Linux under WSL (2026-11-16).
+
+- **R-UI-27** (2026-11-16): no View menu. **Automated** (`make test`): the header has File, Edit, Tools and no View
+  menu or Keyboard shortcuts item; Tools still goes when it has no items; Ctrl+/ still opens the sheet (R-UI-17's
+  tests). **Checked in the running app** by the owner on Windows, macOS, Linux and Linux under WSL (2026-11-16).
