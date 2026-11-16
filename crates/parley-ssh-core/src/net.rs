@@ -1,0 +1,367 @@
+//! A connection on a thread of its own (D42): russh on a current-thread tokio runtime, so nothing outside this
+//! module is async. The UI sends [`Command`]s and reads [`Event`]s; output goes straight into the shared
+//! [`Terminal`], whose replies go back to the host from here.
+
+mod client;
+mod sign_on;
+
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
+use std::time::Duration;
+
+use russh::{ChannelMsg, Pty, client as ssh};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+
+use crate::known_hosts::{HostKeyStatus, KnownHosts};
+use crate::term::Terminal;
+use crate::{Error, Secret};
+
+/// How long connecting may take before it is given up.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+/// What the shell is told the terminal is (R-SSH-5).
+const TERMINAL_TYPE: &str = "xterm-256color";
+
+/// Where to connect and as whom.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Target {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+}
+
+impl Target {
+    /// `user@host`, with `:port` when it is not 22.
+    pub fn label(&self) -> String {
+        if self.port == 22 {
+            format!("{}@{}", self.user, self.host)
+        } else {
+            format!("{}@{}:{}", self.user, self.host, self.port)
+        }
+    }
+}
+
+/// What the UI tells the connection.
+#[derive(Debug)]
+pub enum Command {
+    /// Bytes typed or pasted, already encoded (`keys`).
+    Input(Vec<u8>),
+    /// The window's new size in cells.
+    Resize {
+        columns: usize,
+        rows: usize,
+    },
+    /// The answer to [`Event::HostKey`].
+    HostKey(HostKeyAnswer),
+    /// The answers to [`Event::Prompt`], one per field; `None` cancels signing on.
+    Answers(Option<Vec<Secret>>),
+    Disconnect,
+}
+
+/// What the user chose for a host key that was not known (R-SSH-3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostKeyAnswer {
+    AcceptAndSave,
+    ConnectOnce,
+    Cancel,
+}
+
+/// A host key the user must decide on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostKeyQuestion {
+    pub host: String,
+    pub port: u16,
+    pub key_type: String,
+    pub fingerprint: String,
+    /// [`HostKeyStatus::Unknown`] or [`HostKeyStatus::Changed`].
+    pub status: HostKeyStatus,
+}
+
+/// A request for secret answers: the password, or a keyboard-interactive round (RFC 4256 §3.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prompt {
+    pub name: String,
+    pub instructions: String,
+    pub fields: Vec<PromptField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptField {
+    pub label: String,
+    /// Show what is typed (a user name), or hide it (a password, a code).
+    pub echo: bool,
+}
+
+/// The algorithms in use, for the status bar (R-SSH-10).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Algorithms {
+    pub kex: String,
+    pub host_key: String,
+    pub cipher: String,
+    pub mac: String,
+}
+
+/// What the connection tells the UI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Event {
+    /// A line for the event log (R-SSH-16): never a password or a key.
+    Log(String),
+    HostKey(HostKeyQuestion),
+    /// The server's banner, shown before signing on (R-SSH-4).
+    Banner(String),
+    Prompt(Prompt),
+    /// Key exchange is done.
+    Secured {
+        algorithms: Algorithms,
+        fingerprint: String,
+    },
+    /// Signed on and the shell is running.
+    Started,
+    Ended(Ending),
+}
+
+/// How a connection ended (R-SSH-5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ending {
+    /// The shell ended with this exit status.
+    Exited(u32),
+    /// The shell was ended by this signal.
+    Signal(String),
+    /// The server closed the channel or the connection without saying why.
+    Closed,
+    /// The user disconnected.
+    Disconnected,
+    /// Something went wrong, in plain words.
+    Failed(String),
+}
+
+/// A connection running on its own thread. Dropping it disconnects.
+#[derive(Debug)]
+pub struct Connection {
+    commands: UnboundedSender<Command>,
+    events: mpsc::Receiver<Event>,
+    terminal: Arc<Mutex<Terminal>>,
+}
+
+impl Connection {
+    /// Starts connecting to `target`, drawing into `terminal`. `repaint` is called whenever there is something
+    /// new to show or an event to read.
+    pub fn open(
+        target: Target,
+        known_hosts: KnownHosts,
+        terminal: Arc<Mutex<Terminal>>,
+        repaint: impl Fn() + Send + Sync + 'static,
+    ) -> Self {
+        let (commands, command_rx) = unbounded_channel();
+        let (event_tx, events) = mpsc::channel();
+        let link = Link {
+            events: event_tx,
+            repaint: Arc::new(repaint),
+        };
+        let shared = Arc::clone(&terminal);
+        let started = std::thread::Builder::new()
+            .name("parley-ssh".into())
+            .spawn({
+                let link = link.clone();
+                move || {
+                    let ending = match tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        Ok(runtime) => runtime.block_on(run(
+                            target,
+                            known_hosts,
+                            shared,
+                            command_rx,
+                            link.clone(),
+                        )),
+                        Err(e) => Ending::Failed(Error::Runtime(e).to_string()),
+                    };
+                    link.send(Event::Ended(ending));
+                }
+            });
+        if let Err(e) = started {
+            link.send(Event::Ended(Ending::Failed(Error::Runtime(e).to_string())));
+        }
+        Self {
+            commands,
+            events,
+            terminal,
+        }
+    }
+
+    /// Sends a command. After the connection ended there is no one to tell, which is harmless.
+    pub fn send(&self, command: Command) {
+        let _ = self.commands.send(command);
+    }
+
+    /// The events since the last call.
+    pub fn events(&self) -> impl Iterator<Item = Event> + '_ {
+        self.events.try_iter()
+    }
+
+    pub fn terminal(&self) -> &Arc<Mutex<Terminal>> {
+        &self.terminal
+    }
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        self.send(Command::Disconnect);
+    }
+}
+
+/// The way back to the UI: events, and a nudge to draw them.
+#[derive(Clone)]
+struct Link {
+    events: mpsc::Sender<Event>,
+    repaint: Arc<dyn Fn() + Send + Sync>,
+}
+
+impl Link {
+    fn send(&self, event: Event) {
+        // The UI may be gone while the thread still ends; nothing is waiting for the event then.
+        let _ = self.events.send(event);
+        (self.repaint)();
+    }
+
+    fn log(&self, line: impl Into<String>) {
+        self.send(Event::Log(line.into()));
+    }
+}
+
+/// The commands, shared between the handler (host key questions during key exchange) and the session loop.
+type Commands = Arc<tokio::sync::Mutex<UnboundedReceiver<Command>>>;
+
+async fn run(
+    target: Target,
+    known_hosts: KnownHosts,
+    terminal: Arc<Mutex<Terminal>>,
+    commands: UnboundedReceiver<Command>,
+    link: Link,
+) -> Ending {
+    let commands: Commands = Arc::new(tokio::sync::Mutex::new(commands));
+    match session(&target, known_hosts, &terminal, &commands, &link).await {
+        Ok(ending) => ending,
+        Err(Error::Cancelled) => Ending::Disconnected,
+        Err(e) => Ending::Failed(e.to_string()),
+    }
+}
+
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "the commands are held for the whole session on purpose"
+)]
+async fn session(
+    target: &Target,
+    known_hosts: KnownHosts,
+    terminal: &Arc<Mutex<Terminal>>,
+    commands: &Commands,
+    link: &Link,
+) -> Result<Ending, Error> {
+    link.log(format!(
+        "Connecting to {} port {}",
+        target.host, target.port
+    ));
+    let handler = client::Client::new(target, known_hosts, Arc::clone(commands), link.clone());
+    let config = Arc::new(client::config());
+    let connecting = ssh::connect(config, (target.host.as_str(), target.port), handler);
+    let mut handle = match tokio::time::timeout(CONNECT_TIMEOUT, connecting).await {
+        Ok(result) => result?,
+        Err(_) => {
+            return Err(Error::Timeout(
+                target.host.clone(),
+                CONNECT_TIMEOUT.as_secs(),
+            ));
+        }
+    };
+    sign_on::sign_on(&mut handle, target, commands, link).await?;
+
+    let (columns, rows) = {
+        let t = lock(terminal);
+        (t.columns(), t.rows())
+    };
+    let mut channel = handle.channel_open_session().await?;
+    let modes = [(Pty::IUTF8, 1)];
+    channel
+        .request_pty(
+            false,
+            TERMINAL_TYPE,
+            cells(columns),
+            cells(rows),
+            0,
+            0,
+            &modes,
+        )
+        .await?;
+    channel.request_shell(true).await?;
+    link.log("Shell requested");
+
+    let mut started = false;
+    let mut ending = Ending::Closed;
+    // The handler no longer needs the commands once signed on: the session loop keeps them to the end.
+    let mut commands = commands.lock().await;
+    loop {
+        tokio::select! {
+            message = channel.wait() => match message {
+                Some(ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, .. }) => {
+                    let replies = {
+                        let mut t = lock(terminal);
+                        t.feed(&data);
+                        t.take_replies()
+                    };
+                    if !replies.is_empty() {
+                        channel.data_bytes(replies).await?;
+                    }
+                    (link.repaint)();
+                }
+                Some(ChannelMsg::Success) if !started => {
+                    started = true;
+                    link.send(Event::Started);
+                }
+                Some(ChannelMsg::Failure) if !started => return Err(Error::ShellRefused),
+                Some(ChannelMsg::ExitStatus { exit_status }) => ending = Ending::Exited(exit_status),
+                Some(ChannelMsg::ExitSignal { signal_name, .. }) => ending = Ending::Signal(format!("{signal_name:?}")),
+                Some(ChannelMsg::Close) | None => break,
+                Some(_) => {}
+            },
+            command = commands.recv() => match command {
+                Some(Command::Input(bytes)) => channel.data_bytes(bytes).await?,
+                Some(Command::Resize { columns, rows }) => channel.window_change(cells(columns), cells(rows), 0, 0).await?,
+                Some(Command::Disconnect) | None => {
+                    // Leaving anyway: a failure to say goodbye changes nothing.
+                    let _ = handle.disconnect(russh::Disconnect::ByApplication, "", "en").await;
+                    return Ok(Ending::Disconnected);
+                }
+                Some(Command::HostKey(_) | Command::Answers(_)) => {}
+            },
+        }
+    }
+    Ok(ending)
+}
+
+/// A size in cells as the protocol's `uint32`.
+fn cells(n: usize) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+/// The terminal, also after a panic elsewhere left the lock poisoned: its data is still a screen.
+pub fn lock(terminal: &Mutex<Terminal>) -> std::sync::MutexGuard<'_, Terminal> {
+    terminal.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Waits for the next command of one of the wanted kinds; `Disconnect` or a closed channel cancels.
+async fn wait_for<T>(
+    commands: &Commands,
+    mut wanted: impl FnMut(Command) -> Option<T>,
+) -> Result<T, Error> {
+    let mut commands = commands.lock().await;
+    loop {
+        match commands.recv().await {
+            Some(Command::Disconnect) | None => return Err(Error::Cancelled),
+            Some(command) => {
+                if let Some(answer) = wanted(command) {
+                    return Ok(answer);
+                }
+            }
+        }
+    }
+}

@@ -112,7 +112,7 @@ pub fn args_for(connection: &SqlConnection) -> Vec<String> {
 /// When Parley SQL is not beside Parley or cannot be started, said for the operator.
 pub fn start(name: &str, config: &parley_core::SessionConfig) -> Result<(), String> {
     let connection = SqlConnection::for_session(name, config);
-    let program = beside()?;
+    let program = crate::siblings::Sibling::Sql.beside()?;
     let mut child = std::process::Command::new(&program)
         .args(args_for(&connection))
         .spawn()
@@ -123,71 +123,12 @@ pub fn start(name: &str, config: &parley_core::SessionConfig) -> Result<(), Stri
     Ok(())
 }
 
-/// Parley SQL's program, installed beside this one.
-fn beside() -> Result<std::path::PathBuf, String> {
-    let program = std::env::current_exe()
-        .map_err(|e| format!("Parley 5250 could not find its own folder: {e}"))?
-        .with_file_name(format!("parley-sql{}", std::env::consts::EXE_SUFFIX));
-    if program.is_file() {
-        Ok(program)
-    } else {
-        Err(format!(
-            "Parley SQL is not installed beside Parley (looked for {}).",
-            program.display()
-        ))
-    }
-}
-
-/// The arguments for Parley SQL when `parley` was asked to be Parley SQL (R-NF-2): `args`
-/// start with `--sql`, or it was started by the name `parley-sql`, which an app image gives in
-/// `argv0` (`$ARGV0`) when started through a link of that name. `None`: run Parley.
-pub fn sql_args(args: &[String], argv0: Option<&str>) -> Option<Vec<String>> {
-    if args.first().is_some_and(|a| a == "--sql") {
-        return Some(args.get(1..).unwrap_or_default().to_vec());
-    }
-    let name = argv0
-        .map(std::path::Path::new)
-        .and_then(std::path::Path::file_stem)
-        .and_then(std::ffi::OsStr::to_str);
-    (name == Some("parley-sql")).then(|| args.to_vec())
-}
-
-/// Runs Parley SQL beside this program with `args` and waits for it (R-NF-2); its exit code.
-///
-/// # Errors
-/// When Parley SQL is not beside Parley or cannot be started, said for the operator.
-pub fn hand_over(args: &[String]) -> Result<i32, String> {
-    let status = std::process::Command::new(beside()?)
-        .args(args)
-        .status()
-        .map_err(|e| format!("Parley SQL could not be started: {e}"))?;
-    Ok(status.code().unwrap_or(1))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn args(text: &str) -> Vec<String> {
         text.split_whitespace().map(str::to_owned).collect()
-    }
-
-    /// R-NF-2: `parley --sql …` and a link named `parley-sql` to the app image start Parley
-    /// SQL with the rest of the arguments; anything else is Parley.
-    #[test]
-    fn parley_hands_over_to_parley_sql_when_asked_r_nf_2() {
-        assert_eq!(sql_args(&args("--sql Prod"), None), Some(args("Prod")));
-        assert_eq!(sql_args(&args("--sql"), None), Some(Vec::new()));
-        assert_eq!(
-            sql_args(
-                &args("--host ibmi"),
-                Some("/home/æøå/.local/bin/parley-sql")
-            ),
-            Some(args("--host ibmi"))
-        );
-        assert_eq!(sql_args(&args("ibmi"), Some("/opt/Parley.AppImage")), None);
-        assert_eq!(sql_args(&args("ibmi --sql"), None), None, "only first");
-        assert_eq!(sql_args(&[], Some("parley")), None);
     }
 
     #[test]

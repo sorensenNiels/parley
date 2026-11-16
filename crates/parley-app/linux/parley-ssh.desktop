@@ -1,0 +1,9 @@
+[Desktop Entry]
+Categories=Utility;Network;RemoteAccess;
+Comment=An SSH client
+Exec=parley-ssh
+Icon=parley
+Name=Parley SSH
+StartupWMClass=parley-ssh
+Terminal=false
+Type=Application

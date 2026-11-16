@@ -8,6 +8,8 @@ CORE := parley-core
 UI := parley-ui-egui
 SQL_CORE := parley-sql-core
 SQL_UI := parley-sql-ui
+SSH_CORE := parley-ssh-core
+SSH_UI := parley-ssh-ui
 
 ifeq ($(OS),Windows_NT)
   PLATFORM := windows
@@ -25,7 +27,7 @@ endif
 RUN_ENV := $(if $(IS_WSL),GALLIUM_DRIVER=$${GALLIUM_DRIVER:-d3d12} ,)
 
 .DEFAULT_GOAL := help
-.PHONY: help setup run run-sql probe probe-sql jt400 helper llama build release package icons test test-core test-ui test-sql coverage lint \
+.PHONY: help setup run run-sql run-ssh probe probe-sql jt400 helper llama build release package icons test test-core test-ui test-sql test-ssh coverage lint \
         fmt fmt-check deny verify doc clean outdated update upgrade \
         release-patch release-minor release-major
 
@@ -36,6 +38,7 @@ help:
 	@echo "    setup         Install system libraries, Rust toolchain and cargo tools (once per machine)"
 	@echo "    run           Run the desktop app (HOST=name connects at once)"
 	@echo "    run-sql       Run Parley SQL, the SQL window on its own (CONNECTION=name signs on at once)"
+	@echo "    run-ssh       Run Parley SSH, the SSH client"
 	@echo "    probe         Connect to HOST without the UI, press KEYS, print each screen"
 	@echo "    probe-sql     Ask HOST which SQL routes it offers, without signing on (R-NET-8)"
 	@echo "    jt400         Fetch JTOpen (pinned, checked) for the SQL helper into target/helpers"
@@ -49,6 +52,7 @@ help:
 	@echo "    test-core     Engine tests only (Parley's and Parley SQL's)"
 	@echo "    test-ui       UI tests only (no window needed)"
 	@echo "    test-sql      Parley SQL's tests only (engine and UI)"
+	@echo "    test-ssh      Parley SSH's tests only (engine and UI)"
 	@echo "    coverage      Line coverage of all tests (cargo-llvm-cov) into target/coverage"
 	@echo "    lint          Clippy with warnings as errors"
 	@echo "    fmt           Format all code"
@@ -95,6 +99,9 @@ run:
 # Parley SQL, the SQL window on its own (R-SQL-45); CONNECTION= opens a saved connection's sign-on
 run-sql:
 	$(RUN_ENV)cargo run -p $(APP) --bin parley-sql -- $(CONNECTION)
+
+run-ssh:
+	$(RUN_ENV)cargo run -p $(APP) --bin parley-ssh
 
 # make probe HOST=pub400.com [KEYS=help,reset,enter] [ARGS="--tls --ccsid 277"]
 probe:
@@ -185,13 +192,16 @@ test:
 	cargo test --workspace
 
 test-core:
-	cargo test -p $(CORE) -p $(SQL_CORE)
+	cargo test -p $(CORE) -p $(SQL_CORE) -p $(SSH_CORE)
 
 test-ui:
-	cargo test -p $(UI) -p $(SQL_UI)
+	cargo test -p $(UI) -p $(SQL_UI) -p $(SSH_UI)
 
 test-sql:
 	cargo test -p $(SQL_CORE) -p $(SQL_UI)
+
+test-ssh:
+	cargo test -p $(SSH_CORE) -p $(SSH_UI)
 
 # Line coverage of every test (needs: cargo install cargo-llvm-cov; rustup component add
 # llvm-tools-preview). A summary per file, and an HTML report in target/coverage/html.

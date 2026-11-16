@@ -16,6 +16,7 @@ Without HOST, connects to the session marked \"connect on program start\", if an
 Options:
   --tls                Connect with TLS
   --sql [ARGS]         Start Parley SQL instead, with ARGS (see parley-sql --help)
+  --ssh [ARGS]         Start Parley SSH instead, with ARGS (see parley-ssh --help)
   --screenshot FILE    After a few seconds, save the window as a PPM image and quit
                        (for development)
   --version            Print the version and quit
@@ -37,8 +38,8 @@ struct Args {
     screenshot: Option<String>,
 }
 
-/// Reads Parley's arguments (without the program's name and without `--sql`, which hands
-/// the rest to Parley SQL first).
+/// Reads Parley's arguments (without the program's name and without `--sql` or `--ssh`, which
+/// hand the rest to Parley SQL or Parley SSH first).
 ///
 /// # Errors
 /// An unknown option, a second host, or an option without its value, said for the terminal.
@@ -66,11 +67,12 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> {
 }
 
 pub fn run() -> eframe::Result {
-    // R-NF-2: `parley --sql`, or a link named parley-sql to the AppImage, is Parley SQL.
+    // R-NF-2, R-SSH-1: `parley --sql` or `--ssh`, or a link named parley-sql or parley-ssh to
+    // the AppImage, is Parley SQL or Parley SSH.
     let all: Vec<String> = std::env::args().skip(1).collect();
     let argv0 = std::env::var("ARGV0").ok();
-    if let Some(sql) = parley_app::sql_start::sql_args(&all, argv0.as_deref()) {
-        match parley_app::sql_start::hand_over(&sql) {
+    if let Some((sibling, args)) = parley_app::siblings::handed_over(&all, argv0.as_deref()) {
+        match sibling.hand_over(&args) {
             Ok(code) => std::process::exit(code),
             Err(e) => {
                 eprintln!("parley: {e}");

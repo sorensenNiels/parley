@@ -28,6 +28,7 @@ parley                      # the connection form: host, port, TLS, code page, s
 parley ibmi.example.com     # connect at once (port 23); --tls for port 992
 parley-sql                  # Parley SQL: SQL for IBM i, its saved connections (also: parley --sql)
 parley-sql Production       # sign on to the saved connection "Production"
+parley-ssh                  # Parley SSH: an SSH client (also: parley --ssh)
 ```
 
 The last settings are remembered. Keys: Enter is Enter, Shift+Enter is Field Exit, a Ctrl key on its own is Reset,
@@ -52,12 +53,14 @@ GNU make, rustup). Under WSL2 the app needs WSLg; `make run` selects the GPU dri
 | `crates/parley-sql-core` | Parley SQL's engine: the IBM i host servers, the SQL helper's protocol, SQL text, transfers and the assistant. No UI code. |
 | `crates/parley-ui-egui` | Parley's user interface, built with [egui](https://github.com/emilk/egui), and the look Parley SQL shares. |
 | `crates/parley-sql-ui` | Parley SQL's user interface: the SQL window. |
-| `crates/parley-app` | The `parley` and `parley-sql` binaries: open the window and run the UI. |
+| `crates/parley-ssh-core` | Parley SSH's engine: the SSH client (russh), host keys and the xterm terminal emulation. No UI code. |
+| `crates/parley-ssh-ui` | Parley SSH's user interface. |
+| `crates/parley-app` | The `parley`, `parley-sql` and `parley-ssh` binaries: open the window and run the UI. |
 
 ## Releases
 
 Installers for Windows, macOS and Linux are attached to each [GitHub release](https://github.com/sorensenNiels/parley/releases).
-Each holds both programs, `parley` and `parley-sql`; how to install them and have both commands in a terminal on
+Each holds all three programs, `parley`, `parley-sql` and `parley-ssh`; how to install them and have the commands in a terminal on
 each OS is in [.github/release-install.md](.github/release-install.md), which heads every release's notes.
 `make release-patch` (or `-minor`, `-major`) makes one; see [docs/RELEASING.md](docs/RELEASING.md).
 

@@ -1,0 +1,23 @@
+[package]
+name = "parley-ssh-ui"
+description = "Parley SSH's UI (D41): the SSH window in Parley's look, on parley-ssh-core."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+parley-ssh-core.workspace = true
+parley-ui-egui.workspace = true
+egui.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+egui_kittest.workspace = true
+# The fonts for the UI tests (`test_support`).
+parley-ui-egui = { workspace = true, features = ["testing"] }
+
+[lints]
+workspace = true

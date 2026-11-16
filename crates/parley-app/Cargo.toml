@@ -1,6 +1,6 @@
 [package]
 name = "parley-app"
-description = "Parley 5250 and Parley SQL desktop applications: launch the egui UIs."
+description = "Parley 5250, Parley SQL and Parley SSH desktop applications: launch the egui UIs."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,12 +19,19 @@ path = "src/main.rs"
 name = "parley-sql"
 path = "src/sql_main.rs"
 
+# Parley SSH: the SSH client (R-SSH-1, D41).
+[[bin]]
+name = "parley-ssh"
+path = "src/ssh_main.rs"
+
 [dependencies]
 parley-ui-egui.workspace = true
 eframe.workspace = true
 parley-core.workspace = true
 parley-sql-core.workspace = true
 parley-sql-ui.workspace = true
+parley-ssh-core.workspace = true
+parley-ssh-ui.workspace = true
 keyring = "4.2"
 # The 5250 alarm's beep (R-UI-25, D37): playback only, no decoders. ALSA on Linux.
 rodio = { version = "0.23", default-features = false, features = ["playback"] }
@@ -61,7 +68,7 @@ category = "Utility"
 license-file = "../../LICENSE-MIT"
 icons = ["icons/32.png", "icons/64.png", "icons/128.png", "icons/256.png", "icons/512.png", "icons/parley.ico"]
 out-dir = "../../target/packages"
-binaries = [{ path = "parley", main = true }, { path = "parley-sql", main = false }]
+binaries = [{ path = "parley", main = true }, { path = "parley-sql", main = false }, { path = "parley-ssh", main = false }]
 # The bundled fonts' licence (SIL OFL 1.1) must travel with them; so must the SQL helper, JTOpen and
 # their notices (R-SQL-13, D20), built into target/helpers by `make helper` before packaging.
 resources = [
@@ -80,18 +87,18 @@ resources = [
 # the settings, to list the installed fonts; GTK 3 by the macro file windows (R-KEY-7).
 depends = ["libgtk-3-0", "libasound2", "libxkbcommon-x11-0", "libegl1", "libgl1", "libfontconfig1"]
 section = "net"
-# R-NF-2: Parley SQL in the application menu beside Parley; the generated entry is Parley's only.
-files = { "linux/parley-sql.desktop" = "usr/share/applications/parley-sql.desktop" }
+# R-NF-2: Parley SQL and Parley SSH (R-SSH-1) in the application menu beside Parley; the generated entry is Parley's only.
+files = { "linux/parley-sql.desktop" = "usr/share/applications/parley-sql.desktop", "linux/parley-ssh.desktop" = "usr/share/applications/parley-ssh.desktop" }
 
 [package.metadata.packager.appimage]
 # Loaded at run time by the window library on X11, and missing on some minimal systems.
 libs = ["libxkbcommon-x11.so.0"]
 
 [package.metadata.packager.wix]
-# R-NF-2: the install folder on the system PATH, so `parley` and `parley-sql` work in a new
-# terminal (removed again on uninstall), and Parley SQL in the Start menu beside Parley. Ids from
+# R-NF-2: the install folder on the system PATH, so `parley`, `parley-sql` and `parley-ssh` work in a new
+# terminal (removed again on uninstall), and Parley SQL and Parley SSH in the Start menu beside Parley. Ids from
 # cargo-packager's main.wxs: INSTALLDIR, ApplicationProgramsFolder. Inline, so no path to resolve.
-component-refs = ["ParleyOnPath", "ParleySqlShortcut"]
+component-refs = ["ParleyOnPath", "ParleySqlShortcut", "ParleySshShortcut"]
 fragments = ["""<?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Fragment>
@@ -104,6 +111,10 @@ fragments = ["""<?xml version="1.0" encoding="utf-8"?>
       <Component Id="ParleySqlShortcut" Guid="B4E1D7A2-8C35-4F69-A0D2-5E7B9C3F1A86">
         <Shortcut Id="ParleySqlStartMenuShortcut" Name="Parley SQL" Description="SQL for IBM i" Target="[INSTALLDIR]parley-sql.exe" WorkingDirectory="INSTALLDIR"/>
         <RegistryValue Root="HKCU" Key="Software\\SoftDesign\\Parley" Name="Parley SQL Shortcut" Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+      <Component Id="ParleySshShortcut" Guid="3D8A6F21-9B47-4C5E-8E13-7A2F4B6C9D05">
+        <Shortcut Id="ParleySshStartMenuShortcut" Name="Parley SSH" Description="An SSH client" Target="[INSTALLDIR]parley-ssh.exe" WorkingDirectory="INSTALLDIR"/>
+        <RegistryValue Root="HKCU" Key="Software\\SoftDesign\\Parley" Name="Parley SSH Shortcut" Type="integer" Value="1" KeyPath="yes"/>
       </Component>
     </DirectoryRef>
   </Fragment>

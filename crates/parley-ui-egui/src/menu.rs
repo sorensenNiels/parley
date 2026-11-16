@@ -11,11 +11,12 @@ use crate::keymap::{Function, KeyMap};
 use crate::profile::Profile;
 use crate::theme;
 
-/// Which program the UI is: Parley, or Parley SQL, the SQL window on its own (R-SQL-45).
+/// Which program the UI is: Parley, Parley SQL, the SQL window on its own (R-SQL-45), or Parley SSH (D41).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Program {
     Parley,
     ParleySql,
+    ParleySsh,
 }
 
 impl Program {
@@ -24,6 +25,7 @@ impl Program {
         match self {
             Self::Parley => "Parley 5250",
             Self::ParleySql => "Parley SQL",
+            Self::ParleySsh => "Parley SSH",
         }
     }
 }

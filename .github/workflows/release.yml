@@ -75,12 +75,14 @@ jobs:
         shell: bash
         run: cargo build -p parley-app --release ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
 
-      - name: The binary starts
+      - name: The binaries start
         if: matrix.target != 'x86_64-apple-darwin'
         shell: bash
         run: |
-          bin=target/${{ matrix.target && format('{0}/', matrix.target) || '' }}release/parley
-          "$bin" --version
+          dir=target/${{ matrix.target && format('{0}/', matrix.target) || '' }}release
+          for program in parley parley-sql parley-ssh; do "$dir/$program" --version; done
+          # R-SSH-1: the hand-over the AppImage relies on.
+          "$dir/parley" --ssh --version
 
       - uses: actions/setup-java@v4
         with:

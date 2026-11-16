@@ -1,5 +1,5 @@
-//! What both of Parley's programs need from the desktop: `parley`, the terminal, and
-//! `parley-sql`, Parley SQL, the SQL window on its own (R-SQL-45). The window icon, the SQL
+//! What Parley's programs need from the desktop: `parley`, the terminal, `parley-sql`, Parley SQL, the SQL
+//! window on its own (R-SQL-45), and `parley-ssh`, Parley SSH (D41). The window icon, the SQL
 //! helper's jars, the assistant's API keys in the keychain, the file window, the snippet and macro folders, the update check, the
 //! alarm's beep and the development screenshot. UI code belongs in `parley-ui-egui`; the engine in `parley-core`.
 
@@ -13,6 +13,7 @@ pub mod macros;
     reason = "a development option of the binaries, which says where it saved the window"
 )]
 pub mod screenshot;
+pub mod siblings;
 pub mod snippets;
 pub mod sql_start;
 

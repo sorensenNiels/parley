@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
-default-members = ["crates/parley-core", "crates/parley-sql-core"]
+default-members = ["crates/parley-core", "crates/parley-sql-core", "crates/parley-ssh-core"]
 
 [workspace.package]
 version = "0.7.1"
@@ -15,6 +15,8 @@ parley-core = { path = "crates/parley-core" }
 parley-sql-core = { path = "crates/parley-sql-core" }
 parley-sql-ui = { path = "crates/parley-sql-ui" }
 parley-ui-egui = { path = "crates/parley-ui-egui" }
+parley-ssh-core = { path = "crates/parley-ssh-core" }
+parley-ssh-ui = { path = "crates/parley-ssh-ui" }
 des = "0.8"
 sha1 = "0.10"
 getrandom = "0.3"

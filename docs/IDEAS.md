@@ -2,7 +2,7 @@
 
 > Ideas that might become requirements later. Nothing here is planned or promised: the plan is
 > [ROADMAP.md](ROADMAP.md). Look an idea up with `grep -n` (`"| IDEA-13 "`) rather than reading the whole file.
-> Ideas for SQL (the SQL window, Parley SQL) are in [sql/IDEAS.md](sql/IDEAS.md); both files share one sequence of
+> Ideas for SQL (the SQL window, Parley SQL) are in [sql/IDEAS.md](sql/IDEAS.md), for Parley SSH in [ssh/IDEAS.md](ssh/IDEAS.md); all three share one sequence of
 > numbers, kept on the last line of this file.
 
 ## How an idea moves on
@@ -20,4 +20,4 @@
 - [Working with the screen](ideas/working-with-the-screen.md)
 - [Automation](ideas/automation.md)
 
-Next free ID: `IDEA-37`.
+Next free ID: `IDEA-43`.
