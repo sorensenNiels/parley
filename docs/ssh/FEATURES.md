@@ -30,3 +30,23 @@ Seen: the start screen in a `--screenshot` run (dark theme).
 | R-SSH-8 | JetBrains Mono, block cursor blinking, dark and light ANSI colours, 10,000-line scrollback, wheel and Shift+Page Up/Down. Not done: italic (no italic face bundled). | Scroll back during output; light theme. |
 | R-SSH-9 | Drag, double and triple click, copy with wrapped lines joined, paste with bracketed mode, the multi-line question, the right-click menu. | Paste several lines into bash (bracketed) and into `cat` (asks). |
 | R-SSH-10 | Header (Session, Edit, View, Help, pill, gear), status bar with size and the algorithms on hover, Settings (Appearance, Terminal, About), the close question. New session waits for R-SSH-15 (Phase 27). | Light and dark; close while connected. |
+
+### Phase 27: saved sessions and keys (built 2026-11-16, Linux under WSL)
+
+Automated (all pass): `tests/net.rs` against the in-process russh server: an OpenSSH key file signs on with no
+prompt; an encrypted key asks its passphrase, again when wrong; a PuTTY `.ppk` v3 key signs on; a key file that
+cannot be read is said (`Event::Problem`) and the password still works; russh's own agent on a Unix socket signs on and,
+forwarded, answers the server's request for its keys; an agent key not named is not used and forwarding stays off.
+`sessions.rs`, `start.rs` and `tests.rs` (kittest): a session saved from the editor and listed, edit and delete (asked
+twice), the defaults, search, the command line's request, New and Duplicate asking for windows; `ssh_start.rs` the
+arguments; `tests/stored_settings.rs` settings saved before sessions still load and sessions read back. Seen: the start
+screen in a `--screenshot` run, with the settings Phase 26 saved.
+
+| ID | Built | Still to check in the running app |
+|---|---|---|
+| R-SSH-11 | Saved sessions in the settings, "Default Settings…", the editor (Name, Host, Port, User name, Key files, agent switches), search, quick connect. | Save, connect, edit, delete; restart Parley SSH and see them again. |
+| R-SSH-12 | Key files tried after the agent's keys: OpenSSH, PKCS #8, `.ppk` v2/v3; passphrase each time, three tries; keys wiped when dropped (ssh-key). | An encrypted OpenSSH key and a PuTTYgen key against a real server. |
+| R-SSH-13 | `SSH_AUTH_SOCK`; on Windows OpenSSH's agent pipe, then Pageant; one key by fingerprint; forwarding off by default, with a warning when turned on. | ssh-agent on Linux/macOS, the Windows OpenSSH agent and Pageant on Windows; `ssh-add -l` on the server with forwarding. |
+| R-SSH-14 | `parley-ssh [user@]host[:port] -p -l -i -load -A -a`, wrong arguments with usage and exit 2. | `parley-ssh -load NAME` and `parley-ssh me@host -i key` in a terminal. |
+| R-SSH-15 | Session ▸ New session (Ctrl+Shift+N) and Duplicate session (Ctrl+Shift+D) start `parley-ssh` again: `-load NAME` for a saved session, else its host and options. | Both, on each OS. |
+| R-SSH-16 | Session ▸ Event log: every line with its time, Copy, never a password or key. | Read it after a connection; copy it. |

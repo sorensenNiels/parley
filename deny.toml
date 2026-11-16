@@ -4,7 +4,12 @@ all-features = true
 
 [advisories]
 # RUSTSEC advisories fail the build; add `ignore = ["RUSTSEC-..."]` entries with a justification.
-ignore = []
+ignore = [
+  # russh pins rsa 0.10.0-rc.18, which already has the constant-time fix; it fails ">= 0.10.0"
+  # only because a pre-release sorts first. Remove once russh moves to rsa 0.10.0.
+  { id = "RUSTSEC-2023-0071", reason = "rsa 0.10 pre-release already has the constant-time fix" },
+]
+
 # Only fail on unmaintained crates we depend on directly; transitive ones come from
 # eframe/winit and are tracked upstream.
 unmaintained = "workspace"

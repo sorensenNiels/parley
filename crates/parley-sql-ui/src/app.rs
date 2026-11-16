@@ -18,6 +18,7 @@ use crate::settings::{self, Assistant, Settings};
 
 /// The start screen's words: saved connections.
 const CONNECTIONS: connect::Words = connect::Words {
+    heading: "Connect to IBM i",
     none: "No connections yet.",
     new: "New connection…",
 };

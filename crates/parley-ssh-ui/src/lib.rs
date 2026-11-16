@@ -1,28 +1,54 @@
-//! Parley SSH's UI (D41): the start screen, the SSH session in the main window (one per window, D45), under a
-//! header and over a status bar, in the look Parley 5250 and Parley SQL share (D12). The engine is
-//! `parley-ssh-core`; the launcher (`parley-ssh` in `parley-app`) keeps the settings.
+//! Parley SSH's UI (D41): the start screen with the saved sessions (R-SSH-11), the SSH session in the main window
+//! (one per window, D45), under a header and over a status bar, in the look Parley 5250 and Parley SQL share (D12).
+//! The engine is `parley-ssh-core`; the launcher (`parley-ssh` in `parley-app`) keeps the settings, reads the
+//! command line (R-SSH-14) and opens other windows (R-SSH-15).
 
 mod bars;
 mod dialogs;
 pub mod screen;
 mod session;
+pub mod sessions;
 pub mod settings;
 mod start;
 
+use std::sync::Arc;
+
 use egui::{CentralPanel, Margin, Panel, Ui, ViewportCommand};
 use parley_ssh_core::known_hosts::KnownHosts;
+use parley_ssh_core::net::Target;
 use parley_ui_egui::menu::{Logo, Program};
 use parley_ui_egui::{theme, updates};
 
 use bars::Action;
 use session::Session;
+use sessions::{Edited, Editor, SavedSession};
 pub use settings::Settings;
 
 /// The smallest and largest text size View offers, in percent, and its step.
 const TEXT_SIZES: (u16, u16, u16) = (60, 250, 10);
 
+/// Starts another Parley SSH window with these arguments (R-SSH-15); the launcher's, as the UI keeps no platform
+/// code.
+pub type Spawner = Arc<dyn Fn(&[String]) -> Result<(), String> + Send + Sync>;
+
+/// What the command line asked to open (R-SSH-14): a saved session by name, or a host, with what goes with them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StartRequest {
+    /// `-load NAME`.
+    pub load: Option<String>,
+    /// `[user@]host[:port]`.
+    pub host: Option<String>,
+    /// `-p PORT`.
+    pub port: Option<u16>,
+    /// `-l USER`.
+    pub user: Option<String>,
+    /// `-i FILE`, each one.
+    pub key_files: Vec<String>,
+    /// `-A` (true) or `-a` (false).
+    pub agent_forwarding: Option<bool>,
+}
+
 /// Parley SSH's whole UI.
-#[derive(Debug)]
 pub struct ParleySshUi {
     settings: Settings,
     applied: Option<Settings>,
@@ -32,12 +58,25 @@ pub struct ParleySshUi {
     known_hosts: KnownHosts,
     form: start::Form,
     session: Option<Session>,
-    /// Why the last session closed, for the status bar on the start screen.
+    editor: Option<Editor>,
+    /// The event log is open, with its scroll area's last height (R-SSH-16).
+    event_log: Option<f32>,
+    spawner: Option<Spawner>,
+    /// Why the last session closed, or what the command line could not open, for the status bar.
     note: Option<String>,
     shortcuts_open: bool,
     /// The window's close button was pressed while connected: ask (R-SSH-10).
     asking_close: bool,
     close_confirmed: bool,
+}
+
+impl std::fmt::Debug for ParleySshUi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParleySshUi")
+            .field("session", &self.session.as_ref().map(|s| s.target.label()))
+            .field("sessions", &self.settings.sessions.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl ParleySshUi {
@@ -52,6 +91,9 @@ impl ParleySshUi {
             updates: updates::Updates::default(),
             known_hosts,
             session: None,
+            editor: None,
+            event_log: None,
+            spawner: None,
             note: None,
             shortcuts_open: false,
             asking_close: false,
@@ -71,6 +113,10 @@ impl ParleySshUi {
         self.updates.set_checker(checker);
     }
 
+    pub fn set_spawner(&mut self, spawner: Spawner) {
+        self.spawner = Some(spawner);
+    }
+
     /// The title bar: what the host set, or the session, then the program.
     pub fn title(&self) -> String {
         let name = Program::ParleySsh.name();
@@ -84,6 +130,51 @@ impl ParleySshUi {
             host_title
         };
         format!("{shown} – {name}")
+    }
+
+    /// Opens what the command line asked for (R-SSH-14); what cannot be opened is said in the status bar.
+    pub fn start(&mut self, ctx: &egui::Context, request: StartRequest) {
+        match self.source_for(request) {
+            Ok(Some((source, saved))) => self.open(ctx, source, saved),
+            Ok(None) => {}
+            Err(e) => self.note = Some(e),
+        }
+    }
+
+    /// The session a [`StartRequest`] names, and whether it is saved; `None` when it names none.
+    fn source_for(&self, request: StartRequest) -> Result<Option<(SavedSession, bool)>, String> {
+        let (mut source, saved) = if let Some(name) = &request.load {
+            let found = self.settings.sessions.iter().find(|s| &s.name == name);
+            let found =
+                found.ok_or_else(|| format!("There is no saved session called \"{name}\"."))?;
+            (found.clone(), true)
+        } else if let Some(host) = &request.host {
+            let user = request
+                .user
+                .clone()
+                .unwrap_or_else(|| self.settings.defaults.user.clone());
+            let port = request.port.map_or_else(String::new, |p| p.to_string());
+            let target = start::parse(host, &port, &user)?;
+            (
+                SavedSession::from_defaults(&self.settings.defaults, "", &target),
+                false,
+            )
+        } else {
+            return Ok(None);
+        };
+        if request.load.is_some() {
+            if let Some(port) = request.port {
+                source.port = port;
+            }
+            if let Some(user) = request.user {
+                source.user = user;
+            }
+        }
+        source.key_files.extend(request.key_files);
+        if let Some(forwarding) = request.agent_forwarding {
+            source.agent_forwarding = forwarding;
+        }
+        Ok(Some((source, saved)))
     }
 
     pub fn ui(&mut self, ui: &mut Ui) {
@@ -110,11 +201,13 @@ impl ParleySshUi {
             .show(ui, |ui| {
                 bars::status_bar(ui, self.session.as_ref(), self.note.as_deref());
             });
-        let shortcuts = self.central(ui);
-        for shortcut in shortcuts {
-            match shortcut {
-                screen::Shortcut::Restart => self.carry_out(ui.ctx(), Action::Restart),
-            }
+        for shortcut in self.central(ui) {
+            let action = match shortcut {
+                screen::Shortcut::NewSession => Action::NewSession,
+                screen::Shortcut::Duplicate => Action::Duplicate,
+                screen::Shortcut::Restart => Action::Restart,
+            };
+            self.carry_out(ui.ctx(), action);
         }
         if let Some(action) = action {
             self.carry_out(ui.ctx(), action);
@@ -146,37 +239,94 @@ impl ParleySshUi {
         let zoom = self.settings.text_size;
         let frame = egui::Frame::NONE.fill(palette.background);
         let mut shortcuts = Vec::new();
-        let mut connect = None;
-        match &mut self.session {
-            Some(session) => {
-                session.view.zoom = zoom;
-                CentralPanel::default().frame(frame).show(ui, |ui| {
-                    shortcuts = session.show(ui, &palette, confirm_paste);
-                });
-            }
-            None => {
-                CentralPanel::default().show(ui, |ui| connect = self.form.show(ui));
-            }
+        let mut choice = None;
+        if let Some(session) = &mut self.session {
+            session.view.zoom = zoom;
+            CentralPanel::default().frame(frame).show(ui, |ui| {
+                shortcuts = session.show(ui, &palette, confirm_paste);
+            });
+        } else {
+            let sessions = &self.settings.sessions;
+            CentralPanel::default().show(ui, |ui| choice = self.form.show(ui, sessions));
         }
-        if let Some(target) = connect {
-            self.connect(ui.ctx(), target);
+        if let Some(choice) = choice {
+            self.chosen(ui.ctx(), choice);
         }
         shortcuts
     }
 
-    fn connect(&mut self, ctx: &egui::Context, target: parley_ssh_core::net::Target) {
-        self.settings.last_host.clone_from(&target.host);
-        self.settings.last_port = target.port;
-        self.settings.last_user.clone_from(&target.user);
+    /// What was chosen on the start screen.
+    fn chosen(&mut self, ctx: &egui::Context, choice: start::Choice) {
+        match choice {
+            start::Choice::Connect(i) => {
+                if let Some(source) = self.settings.sessions.get(i).cloned() {
+                    self.open(ctx, source, true);
+                }
+            }
+            start::Choice::Edit(i) => {
+                if let Some(session) = self.settings.sessions.get(i).cloned() {
+                    self.editor = Some(Editor::new(session, Some(i)));
+                }
+            }
+            start::Choice::New => {
+                let blank = Target {
+                    host: String::new(),
+                    port: self.settings.defaults.port,
+                    user: String::new(),
+                };
+                let new = SavedSession {
+                    user: self.settings.defaults.user.clone(),
+                    ..SavedSession::from_defaults(&self.settings.defaults, "", &blank)
+                };
+                self.editor = Some(Editor::new(new, None));
+            }
+            start::Choice::Defaults => {
+                self.editor = Some(Editor::defaults(&self.settings.defaults));
+            }
+            start::Choice::Quick(target) => {
+                self.settings.last_host.clone_from(&target.host);
+                self.settings.last_port = target.port;
+                self.settings.last_user.clone_from(&target.user);
+                let source = SavedSession::from_defaults(&self.settings.defaults, "", &target);
+                self.open(ctx, source, false);
+            }
+        }
+    }
+
+    fn open(&mut self, ctx: &egui::Context, source: SavedSession, saved: bool) {
         let ctx = ctx.clone();
-        self.session = Some(Session::open(target, self.known_hosts.clone(), move || {
-            ctx.request_repaint();
-        }));
+        self.session = Some(Session::open(
+            source,
+            saved,
+            self.known_hosts.clone(),
+            move || ctx.request_repaint(),
+        ));
         self.note = None;
+    }
+
+    /// Starts another window with `args` (R-SSH-15).
+    fn spawn(&mut self, args: &[String]) {
+        let result = match &self.spawner {
+            Some(spawner) => spawner(args),
+            None => Err("This window cannot start another one.".to_owned()),
+        };
+        if let Err(e) = result {
+            self.note = Some(e);
+        }
     }
 
     fn carry_out(&mut self, ctx: &egui::Context, action: Action) {
         match action {
+            Action::NewSession => self.spawn(&[]),
+            Action::Duplicate => {
+                if let Some(args) = self
+                    .session
+                    .as_ref()
+                    .map(|s| s.source.command_line(s.saved))
+                {
+                    self.spawn(&args);
+                }
+            }
             Action::Restart => {
                 if let Some(session) = &mut self.session {
                     session.disconnect();
@@ -197,8 +347,10 @@ impl ParleySshUi {
                         session.target.label()
                     ));
                 }
+                self.event_log = None;
                 self.form = start::Form::from_settings(&self.settings);
             }
+            Action::EventLog => self.event_log = Some(0.0),
             Action::Exit => ctx.send_viewport_cmd(ViewportCommand::Close),
             Action::Copy => {
                 if let Some(text) = self.session.as_ref().and_then(Session::copy_selection) {
@@ -271,7 +423,55 @@ impl ParleySshUi {
                 ctx.send_viewport_cmd(ViewportCommand::Close);
             }
         }
+        self.show_event_log(ctx);
+        self.show_editor(ctx);
         self.show_settings(ctx);
+    }
+
+    fn show_event_log(&mut self, ctx: &egui::Context) {
+        let (Some(height), Some(session)) = (&mut self.event_log, &self.session) else {
+            return;
+        };
+        match dialogs::event_log(ctx, &session.target, &session.log, height) {
+            Some(dialogs::LogAction::Copy) => ctx.copy_text(session.log_text()),
+            Some(dialogs::LogAction::Close) => self.event_log = None,
+            None => {}
+        }
+    }
+
+    /// The session editor; what it saved goes into the settings at once (R-SSH-11).
+    fn show_editor(&mut self, ctx: &egui::Context) {
+        let Some(editor) = &mut self.editor else {
+            return;
+        };
+        let taken: Vec<&str> = self
+            .settings
+            .sessions
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| Some(*i) != editor.index)
+            .map(|(_, s)| s.name.as_str())
+            .collect();
+        let Some(edited) = editor.show(ctx, &taken) else {
+            return;
+        };
+        let sessions = &mut self.settings.sessions;
+        match (edited, editor.index) {
+            (Edited::Save(session), _) if editor.is_defaults() => {
+                self.settings.defaults = SavedSession {
+                    name: String::new(),
+                    host: String::new(),
+                    ..session
+                };
+            }
+            (Edited::Save(session), Some(i)) if i < sessions.len() => sessions[i] = session,
+            (Edited::Save(session), _) => sessions.push(session),
+            (Edited::Delete, Some(i)) if i < sessions.len() => {
+                sessions.remove(i);
+            }
+            (Edited::Delete | Edited::Cancel, _) => {}
+        }
+        self.editor = None;
     }
 
     fn show_settings(&mut self, ctx: &egui::Context) {
@@ -294,70 +494,4 @@ impl ParleySshUi {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable;
-
-    fn app(settings: Settings) -> Harness<'static, ParleySshUi> {
-        let known = KnownHosts::new(
-            std::env::temp_dir()
-                .join("parley-ssh-app-test")
-                .join("known_hosts"),
-            None,
-        );
-        Harness::builder()
-            .with_size(egui::vec2(900.0, 640.0))
-            .build_ui_state(
-                |ui, app: &mut ParleySshUi| app.ui(ui),
-                ParleySshUi::new(settings, known),
-            )
-    }
-
-    #[test]
-    fn the_start_screen_keeps_the_last_connection_and_says_what_is_missing_r_ssh_2() {
-        let settings = Settings {
-            last_host: "box.lan".into(),
-            last_port: 2222,
-            ..Settings::default()
-        };
-        let mut h = app(settings);
-        h.run_steps(3);
-        assert_eq!(h.get_by_label("Host").value().as_deref(), Some("box.lan"));
-        assert_eq!(h.get_by_label("Port").value().as_deref(), Some("2222"));
-        h.get_by_label("Connect").click();
-        h.run_steps(3);
-        assert!(
-            h.query_by_label("Fill in the user name to sign on as.")
-                .is_some()
-        );
-        assert!(h.state().session.is_none(), "nothing is opened");
-        assert_eq!(h.state().title(), "Parley SSH");
-    }
-
-    #[test]
-    fn the_header_has_parley_sshs_menus() {
-        let mut h = app(Settings::default());
-        h.run_steps(2);
-        for menu in ["Session", "Edit", "View", "Help"] {
-            assert!(h.query_by_label(menu).is_some(), "{menu}");
-        }
-        assert!(h.query_by_label("Parley SSH").is_some());
-    }
-
-    #[test]
-    fn view_changes_the_text_size_within_its_limits() {
-        let mut app = ParleySshUi::new(
-            Settings::default(),
-            KnownHosts::new("known_hosts".into(), None),
-        );
-        let ctx = egui::Context::default();
-        app.carry_out(&ctx, Action::TextLarger);
-        assert_eq!(app.settings.text_size, 110);
-        app.settings.text_size = TEXT_SIZES.1;
-        app.carry_out(&ctx, Action::TextLarger);
-        assert_eq!(app.settings.text_size, TEXT_SIZES.1);
-        app.carry_out(&ctx, Action::TextActualSize);
-        assert_eq!(app.settings.text_size, 100);
-    }
-}
+mod tests;

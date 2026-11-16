@@ -12,10 +12,16 @@ use crate::session::{self, Session, State};
 /// Something the user chose from the header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
+    /// Another window (R-SSH-15).
+    NewSession,
+    /// Another window on this session.
+    Duplicate,
     Restart,
     Disconnect,
     /// Back to the start screen.
     CloseSession,
+    /// The event log (R-SSH-16).
+    EventLog,
     Exit,
     Copy,
     Paste,
@@ -64,6 +70,7 @@ pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
                 "Close session",
                 Action::CloseSession,
             ),
+            Item(open, icons::LIST, "Event log", Action::EventLog),
             Item(true, icons::SIGN_OUT, "Exit", Action::Exit),
         ];
         let edit = [
@@ -187,6 +194,10 @@ pub fn status_bar(ui: &mut Ui, session: Option<&Session>, note: Option<&str>) {
             State::Ended(ending) => session::ending_text(ending),
         };
         status::muted(ui, Some(icons::TERMINAL), text);
+        if let Some(problem) = &session.problem {
+            ui.add_space(8.0);
+            theme::warning(ui, problem);
+        }
         theme::button_row(ui, |ui| {
             let (columns, rows) = session.size();
             status::muted(ui, None, format!("{columns}×{rows}"));

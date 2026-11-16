@@ -1,5 +1,6 @@
 //! A whole connection against a small SSH server in this process (russh's own): the host key question
-//! (R-SSH-3), signing on with a password and its retries (R-SSH-4), the shell with its pseudo-terminal, output into
+//! (R-SSH-3), signing on with a password and its retries (R-SSH-4), with key files (R-SSH-12) and an agent and its
+//! forwarding (R-SSH-13), the shell with its pseudo-terminal, output into
 //! the terminal and the terminal's replies back, typing, resizing and the exit status (R-SSH-5). No real server.
 
 #![expect(
@@ -13,9 +14,13 @@ use std::time::{Duration, Instant};
 
 use parley_ssh_core::Secret;
 use parley_ssh_core::known_hosts::{HostKeyStatus, KnownHosts};
-use parley_ssh_core::net::{Command, Connection, Ending, Event, HostKeyAnswer, Target, lock};
+use parley_ssh_core::net::agent::AgentAddress;
+use parley_ssh_core::net::{
+    Command, Connection, Ending, Event, HostKeyAnswer, Options, Target, lock,
+};
 use parley_ssh_core::term::Terminal;
-use russh::keys::PrivateKey;
+use russh::keys::agent::client::AgentClient;
+use russh::keys::{PrivateKey, PublicKey};
 use russh::server::{self, Auth, Msg, Session};
 use russh::{Channel, ChannelId, MethodKind, MethodSet, Pty};
 
@@ -32,6 +37,43 @@ const OTHER_KEY: &str =
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAV5CINKVHRsJdOO4vr5nwVr0ASkuG8DODBufVj2pCQ9";
 const PASSWORD: &str = "æøå-hemmelig";
 
+/// A throwaway client key, not encrypted.
+const CLIENT_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACAFeQiDSlR0bCXTjuL6+Z8Fa9AEpLhvAzgwbn1Y9qQkPQAAAIh6ftWfen7V
+nwAAAAtzc2gtZWQyNTUxOQAAACAFeQiDSlR0bCXTjuL6+Z8Fa9AEpLhvAzgwbn1Y9qQkPQ
+AAAECXCI4l4HDPIwcUS0V+zYG5CsJo842jllOriKgHsbVdSgV5CINKVHRsJdOO4vr5nwVr
+0ASkuG8DODBufVj2pCQ9AAAAAAECAwQF
+-----END OPENSSH PRIVATE KEY-----
+";
+/// A throwaway client key encrypted with [`PASSPHRASE`].
+const ENCRYPTED_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABDgvps3CL
+3vsJBTt8FVQPyqAAAAGAAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAID4h3fHUfGd/+K7r
+KTBQ1aDn4eeuDmwKgTzydjnS3MeeAAAAkOZlOjnJWzsGiivWyJz5ZQaWaP31Vh2Ht3UWwq
+oHgZGzsxXsSh3uHiB6M4xe8UO8MTxO5R5kQwwCA7qczI1xmyb4PcsOcBLbr9ixQgwTSJzz
+3DiJTwL32EtllwyLZyEIic3q6yX7Zy7xMVXOTm5F0Bqf7t7vpxJfqQZYFRxfz0nVpaVTsY
+rhs2UO8rFas9LTdQ==
+-----END OPENSSH PRIVATE KEY-----
+";
+const PASSPHRASE: &str = "æøå pass";
+/// [`CLIENT_KEY`] in `PuTTY`'s format, version 3, not encrypted.
+const PPK_KEY: &str = "PuTTY-User-Key-File-3: ssh-ed25519
+Encryption: none
+Comment: parley test
+Public-Lines: 2
+AAAAC3NzaC1lZDI1NTE5AAAAIAV5CINKVHRsJdOO4vr5nwVr0ASkuG8DODBufVj2
+pCQ9
+Private-Lines: 1
+AAAAIJcIjiXgcM8jBxRLRX7NgbkKwmjzjaOWU6uIqAextV1K
+Private-MAC: 5ae5626107004366d633f9948f22ffb48398eab366e8b35fdc259a8f2ad91f66
+";
+/// The public keys the server lets in.
+const ALLOWED: [&str; 2] = [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAV5CINKVHRsJdOO4vr5nwVr0ASkuG8DODBufVj2pCQ9",
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID4h3fHUfGd/+K7rKTBQ1aDn4eeuDmwKgTzydjnS3Mee",
+];
+
 /// The pseudo-terminal the client asked for.
 #[derive(Debug, Clone)]
 struct PtyRequest {
@@ -47,6 +89,8 @@ struct Seen {
     pty: Option<PtyRequest>,
     sizes: Vec<(u32, u32)>,
     input: Vec<u8>,
+    /// The client asked for agent forwarding.
+    agent_requested: bool,
 }
 
 struct Server {
@@ -57,6 +101,30 @@ struct Server {
 
 impl server::Handler for Server {
     type Error = russh::Error;
+
+    async fn auth_publickey(
+        &mut self,
+        _user: &str,
+        key: server::VerifiedPublicKey<'_>,
+    ) -> Result<Auth, Self::Error> {
+        let allowed = ALLOWED.iter().any(|k| {
+            PublicKey::from_openssh(k).is_ok_and(|a| a.key_data() == key.public_key.key_data())
+        });
+        let again = Auth::Reject {
+            proceed_with_methods: Some(methods()),
+            partial_success: false,
+        };
+        Ok(if allowed { Auth::Accept } else { again })
+    }
+
+    async fn agent_request(
+        &mut self,
+        _channel: ChannelId,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        self.seen.lock().expect("not poisoned").agent_requested = true;
+        Ok(true)
+    }
 
     async fn auth_password(&mut self, _user: &str, password: &str) -> Result<Auth, Self::Error> {
         // As OpenSSH: a refusal names the methods that can go on, so the client may try again.
@@ -111,6 +179,23 @@ impl server::Handler for Server {
         session.channel_success(channel)?;
         // A greeting, and a primary device attributes query the terminal must answer.
         session.data(channel, "Velkommen æøå\r\n$ \x1b[c".as_bytes().to_vec())?;
+        if self.seen.lock().expect("not poisoned").agent_requested {
+            // As a program on the server would: ask the forwarded agent for its keys, and say how many.
+            let handle = session.handle();
+            tokio::spawn(async move {
+                let count = match handle.channel_open_agent().await {
+                    Ok(agent) => AgentClient::connect(agent.into_stream())
+                        .request_identities()
+                        .await
+                        .map_or(0, |ids| ids.len()),
+                    Err(_) => 0,
+                };
+                // The test reads the answer from the screen; a closed session has no screen to read.
+                let _ = handle
+                    .data(channel, format!("agent keys: {count}\r\n").into_bytes())
+                    .await;
+            });
+        }
         Ok(())
     }
 
@@ -158,6 +243,11 @@ fn password_only() -> MethodSet {
     MethodSet::from(&[MethodKind::Password][..])
 }
 
+/// What the server offers: public keys and the password, as most do.
+fn methods() -> MethodSet {
+    MethodSet::from(&[MethodKind::PublicKey, MethodKind::Password][..])
+}
+
 /// Starts the server on a free local port; it serves every connection until the test ends.
 fn start_server(seen: Arc<Mutex<Seen>>) -> SocketAddr {
     let (tx, rx) = std::sync::mpsc::channel();
@@ -174,7 +264,7 @@ fn start_server(seen: Arc<Mutex<Seen>>) -> SocketAddr {
                 .expect("test waits");
             let config = Arc::new(server::Config {
                 keys: vec![PrivateKey::from_openssh(HOST_KEY).expect("test key")],
-                methods: password_only(),
+                methods: methods(),
                 auth_rejection_time: Duration::from_millis(10),
                 auth_rejection_time_initial: Some(Duration::ZERO),
                 ..server::Config::default()
@@ -208,13 +298,21 @@ fn known_hosts(name: &str) -> KnownHosts {
 }
 
 fn open(address: SocketAddr, known: &KnownHosts) -> (Connection, Arc<Mutex<Terminal>>) {
+    open_with(address, known, Options::default())
+}
+
+fn open_with(
+    address: SocketAddr,
+    known: &KnownHosts,
+    options: Options,
+) -> (Connection, Arc<Mutex<Terminal>>) {
     let target = Target {
         host: address.ip().to_string(),
         port: address.port(),
         user: "tester".into(),
     };
     let terminal = Arc::new(Mutex::new(Terminal::new(80, 24)));
-    let connection = Connection::open(target, known.clone(), Arc::clone(&terminal), || {});
+    let connection = Connection::open(target, options, known.clone(), Arc::clone(&terminal), || {});
     (connection, terminal)
 }
 
@@ -393,4 +491,170 @@ fn a_port_nobody_listens_on_is_said_in_plain_words_r_ssh_2() {
         why.contains("refused") || why.contains("could not"),
         "{why}"
     );
+}
+
+/// A file in a fresh temporary folder for `name`.
+fn temp_file(name: &str, file: &str, text: &str) -> std::path::PathBuf {
+    // Not `known_hosts`'s folder, which is emptied when the connection starts.
+    let folder =
+        std::env::temp_dir().join(format!("parley-ssh-file-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).expect("folder");
+    let path = folder.join(file);
+    std::fs::write(&path, text).expect("written");
+    path
+}
+
+/// Connects with `options`, trusting the host once, up to the first event after the key exchange.
+fn signing_on(
+    name: &str,
+    options: Options,
+) -> (Connection, Arc<Mutex<Terminal>>, Arc<Mutex<Seen>>) {
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let address = start_server(Arc::clone(&seen));
+    let (connection, terminal) = open_with(address, &known_hosts(name), options);
+    let Event::HostKey(_) = next(&connection) else {
+        panic!("host key question")
+    };
+    connection.send(Command::HostKey(HostKeyAnswer::ConnectOnce));
+    assert!(matches!(next(&connection), Event::Secured { .. }));
+    (connection, terminal, seen)
+}
+
+#[test]
+fn a_key_file_signs_on_without_a_password_r_ssh_12() {
+    let key = temp_file("key", "id_ed25519", CLIENT_KEY);
+    let options = Options {
+        key_files: vec![key],
+        ..Options::default()
+    };
+    let (connection, _, _) = signing_on("key", options);
+    assert_eq!(next(&connection), Event::Started, "no prompt");
+}
+
+#[test]
+fn a_putty_key_file_signs_on_too_r_ssh_12() {
+    let key = temp_file("ppk", "key.ppk", PPK_KEY);
+    let options = Options {
+        key_files: vec![key],
+        ..Options::default()
+    };
+    let (connection, _, _) = signing_on("ppk", options);
+    assert_eq!(next(&connection), Event::Started, "no prompt");
+}
+
+#[test]
+fn an_encrypted_key_asks_its_passphrase_again_when_wrong_r_ssh_12() {
+    let key = temp_file("encrypted", "id_ed25519", ENCRYPTED_KEY);
+    let options = Options {
+        key_files: vec![key],
+        ..Options::default()
+    };
+    let (connection, _, _) = signing_on("encrypted", options);
+    let Event::Prompt(prompt) = next(&connection) else {
+        panic!("passphrase prompt")
+    };
+    assert_eq!(prompt.name, "Key passphrase");
+    assert!(!prompt.fields[0].echo);
+    connection.send(Command::Answers(Some(vec![Secret::new("wrong".into())])));
+    let Event::Prompt(again) = next(&connection) else {
+        panic!("asked again")
+    };
+    assert!(
+        again.instructions.contains("did not open"),
+        "{}",
+        again.instructions
+    );
+    connection.send(Command::Answers(Some(vec![Secret::new(PASSPHRASE.into())])));
+    assert_eq!(next(&connection), Event::Started);
+}
+
+#[test]
+fn a_key_file_that_cannot_be_read_is_said_and_the_password_still_works_r_ssh_12() {
+    let missing = std::env::temp_dir().join("parley-ssh-no-such-key-æøå");
+    let options = Options {
+        key_files: vec![missing],
+        ..Options::default()
+    };
+    let (connection, _, _) = signing_on("unreadable", options);
+    let Event::Problem(problem) = next(&connection) else {
+        panic!("said")
+    };
+    assert!(problem.contains("could not be read"), "{problem}");
+    let Event::Prompt(_) = next(&connection) else {
+        panic!("password prompt")
+    };
+    connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
+    assert_eq!(next(&connection), Event::Started);
+}
+
+/// Starts russh's own agent on a Unix socket, holding the client key.
+#[cfg(unix)]
+fn start_agent(name: &str) -> std::path::PathBuf {
+    let folder =
+        std::env::temp_dir().join(format!("parley-ssh-agent-{name}-{}", std::process::id()));
+    // A previous run may have left it.
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).expect("folder");
+    let socket = folder.join("agent.sock");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let path = socket.clone();
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async move {
+            let listener = tokio::net::UnixListener::bind(&path).expect("bind");
+            let incoming = futures::stream::unfold(listener, |l| async move {
+                Some((l.accept().await.map(|(s, _)| s), l))
+            });
+            tokio::spawn(russh::keys::agent::server::serve(Box::pin(incoming), ()));
+            let mut client = AgentClient::connect_uds(&path).await.expect("agent");
+            let key = PrivateKey::from_openssh(CLIENT_KEY).expect("test key");
+            client.add_identity(&key, &[]).await.expect("added");
+            tx.send(()).expect("test waits");
+            std::future::pending::<()>().await;
+        });
+    });
+    rx.recv().expect("agent started");
+    socket
+}
+
+#[cfg(unix)]
+#[test]
+fn the_agent_signs_on_and_is_forwarded_when_asked_r_ssh_13() {
+    let socket = start_agent("forward");
+    let options = Options {
+        agent: Some(AgentAddress::Socket(socket)),
+        agent_forwarding: true,
+        ..Options::default()
+    };
+    let (connection, terminal, seen) = signing_on("agent", options);
+    assert_eq!(
+        next(&connection),
+        Event::Started,
+        "the agent's key, no prompt"
+    );
+    assert!(seen.lock().expect("not poisoned").agent_requested);
+    wait_until("the server to use the agent", || {
+        screen_text(&terminal).contains("agent keys: 1")
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn an_agent_key_not_named_is_not_used_and_forwarding_stays_off_r_ssh_13() {
+    let socket = start_agent("named");
+    let options = Options {
+        agent: Some(AgentAddress::Socket(socket)),
+        agent_key: Some("SHA256:not-this-one".into()),
+        ..Options::default()
+    };
+    let (connection, _, seen) = signing_on("named", options);
+    let Event::Prompt(_) = next(&connection) else {
+        panic!("password prompt: the agent's key was not used")
+    };
+    connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
+    assert_eq!(next(&connection), Event::Started);
+    assert!(!seen.lock().expect("not poisoned").agent_requested);
 }

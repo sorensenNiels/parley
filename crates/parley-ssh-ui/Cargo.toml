@@ -13,6 +13,8 @@ parley-ssh-core.workspace = true
 parley-ui-egui.workspace = true
 egui.workspace = true
 serde.workspace = true
+# The event log's times (R-SSH-16): the local clock only, as Parley SQL's history.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [dev-dependencies]
 egui_kittest.workspace = true

@@ -49,3 +49,43 @@ fn each_programs_settings_round_trip_through_storage() {
         sql
     );
 }
+
+/// Parley SSH's settings as 0.8 saved them, before saved sessions (Phase 26).
+const SSH_SAVED_BY_0_8: &str = r#"(theme:Light,text_size:110,density:Comfortable,check_for_updates:true,confirm_close:false,confirm_paste:true,last_host:"box.lan",last_port:2222,last_user:"æøå")"#;
+
+#[test]
+fn parley_sshs_settings_saved_before_saved_sessions_still_load_r_ssh_11() {
+    let settings: parley_ssh_ui::Settings = ron::from_str(SSH_SAVED_BY_0_8).expect("loads");
+    assert_eq!(settings.text_size, 110);
+    assert!(!settings.confirm_close);
+    assert_eq!(
+        (settings.last_host.as_str(), settings.last_port),
+        ("box.lan", 2222)
+    );
+    assert_eq!(settings.sessions, []);
+    assert!(settings.defaults.use_agent, "the defaults' own default");
+}
+
+#[test]
+fn parley_sshs_saved_sessions_are_read_back_from_storage_r_ssh_11() {
+    let session = parley_ssh_ui::sessions::SavedSession {
+        name: "Prod æøå".into(),
+        host: "box.lan".into(),
+        port: 2222,
+        user: "me".into(),
+        key_files: vec!["C:\\Users\\me\\key.ppk".into()],
+        agent_key: "SHA256:abc".into(),
+        agent_forwarding: true,
+        ..parley_ssh_ui::sessions::SavedSession::default()
+    };
+    let settings = parley_ssh_ui::Settings {
+        sessions: vec![session],
+        ..parley_ssh_ui::Settings::default()
+    };
+    let text = ron::to_string(&settings).expect("saves");
+    assert!(!text.contains("password"), "no password field: {text}");
+    assert_eq!(
+        ron::from_str::<parley_ssh_ui::Settings>(&text).expect("loads"),
+        settings
+    );
+}

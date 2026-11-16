@@ -1,6 +1,7 @@
-//! One SSH session in the window (D45): its connection, its terminal, where it stands, and the questions it
-//! asks while connecting (R-SSH-3, R-SSH-4) and pasting (R-SSH-9).
+//! One SSH session in the window (D45): its connection, its terminal, where it stands, its event log (R-SSH-16),
+//! and the questions it asks while connecting (R-SSH-3, R-SSH-4, R-SSH-12) and pasting (R-SSH-9).
 
+use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
 use parley_ssh_core::keys;
@@ -10,6 +11,23 @@ use parley_ssh_core::term::Terminal;
 
 use crate::dialogs;
 use crate::screen::{self, Out, Shortcut};
+use crate::sessions::SavedSession;
+
+/// One line of the event log: when, and what (R-SSH-16).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogLine {
+    pub at: String,
+    pub text: String,
+}
+
+impl LogLine {
+    fn now(text: String) -> Self {
+        Self {
+            at: chrono::Local::now().format("%H:%M:%S%.3f").to_string(),
+            text,
+        }
+    }
+}
 
 /// Where the session stands (R-SSH-10's status bar).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,13 +43,19 @@ pub enum State {
 #[derive(Debug)]
 pub struct Session {
     pub target: Target,
+    /// What the session was opened from: a saved session, or the defaults with the quick connect's target.
+    pub source: SavedSession,
+    /// Whether `source` is a saved session, to open again by its name (R-SSH-15).
+    pub saved: bool,
+    /// The last problem that did not end the connection (a key file that cannot be read), for the status bar.
+    pub problem: Option<String>,
     connection: Connection,
     terminal: Arc<Mutex<Terminal>>,
     pub state: State,
     pub algorithms: Option<Algorithms>,
     pub fingerprint: Option<String>,
-    /// What happened, for the event log (R-SSH-16 shows it in Phase 27).
-    pub log: Vec<String>,
+    /// What happened, for the event log (R-SSH-16).
+    pub log: Vec<LogLine>,
     pub view: screen::View,
     host_key: Option<dialogs::HostKey>,
     prompt: Option<dialogs::Prompt>,
@@ -44,14 +68,17 @@ pub struct Session {
 }
 
 impl Session {
-    /// Starts connecting; `repaint` wakes the UI when there is news.
+    /// Starts connecting to `source` (`saved` when it is a saved session); `repaint` wakes the UI when there is
+    /// news.
     pub fn open(
-        target: Target,
+        source: SavedSession,
+        saved: bool,
         known_hosts: KnownHosts,
         repaint: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         Self::open_on(
-            target,
+            source,
+            saved,
             known_hosts,
             Arc::new(Mutex::new(Terminal::new(80, 24))),
             repaint,
@@ -59,19 +86,25 @@ impl Session {
     }
 
     fn open_on(
-        target: Target,
+        source: SavedSession,
+        saved: bool,
         known_hosts: KnownHosts,
         terminal: Arc<Mutex<Terminal>>,
         repaint: impl Fn() + Send + Sync + 'static,
     ) -> Self {
+        let target = source.target();
         let connection = Connection::open(
             target.clone(),
+            source.options(),
             known_hosts.clone(),
             Arc::clone(&terminal),
             repaint,
         );
         Self {
             target,
+            source,
+            saved,
+            problem: None,
             connection,
             terminal,
             state: State::Connecting,
@@ -94,7 +127,8 @@ impl Session {
         net::lock(&terminal).feed(b"\r\n");
         let zoom = self.view.zoom;
         *self = Self::open_on(
-            self.target.clone(),
+            self.source.clone(),
+            self.saved,
             self.known_hosts.clone(),
             terminal,
             repaint,
@@ -122,6 +156,15 @@ impl Session {
         self.grab_focus = true;
     }
 
+    /// The event log as text, one line each, for Copy (R-SSH-16).
+    pub fn log_text(&self) -> String {
+        self.log.iter().fold(String::new(), |mut text, l| {
+            // Writing to a String cannot fail.
+            let _ = writeln!(text, "{}  {}", l.at, l.text);
+            text
+        })
+    }
+
     pub fn disconnect(&self) {
         self.connection.send(Command::Disconnect);
     }
@@ -131,7 +174,11 @@ impl Session {
         let events: Vec<Event> = self.connection.events().collect();
         for event in events {
             match event {
-                Event::Log(line) => self.log.push(line),
+                Event::Log(line) => self.log.push(LogLine::now(line)),
+                Event::Problem(problem) => {
+                    self.log.push(LogLine::now(problem.clone()));
+                    self.problem = Some(problem);
+                }
                 Event::HostKey(question) => self.host_key = Some(dialogs::HostKey::new(question)),
                 Event::Banner(text) => self.banner = Some(text),
                 Event::Prompt(prompt) => {
@@ -149,10 +196,11 @@ impl Session {
                 }
                 Event::Started => {
                     self.state = State::Running;
+                    self.problem = None;
                     self.grab_focus = true;
                 }
                 Event::Ended(ending) => {
-                    self.log.push(ending_text(&ending));
+                    self.log.push(LogLine::now(ending_text(&ending)));
                     self.host_key = None;
                     self.prompt = None;
                     self.state = State::Ended(ending);

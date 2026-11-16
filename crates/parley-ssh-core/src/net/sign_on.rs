@@ -1,22 +1,39 @@
-//! Signing on (R-SSH-4; RFC 4252, RFC 4256): keyboard-interactive, then password, with every answer asked of the
-//! user each time and never kept (D16, D44).
+//! Signing on (R-SSH-4, R-SSH-12, R-SSH-13; RFC 4252, RFC 4256): public keys from the agent and key files, then
+//! keyboard-interactive, then password, with every answer and passphrase asked of the user each time and never
+//! kept (D16, D44).
 
 use russh::MethodKind;
 use russh::client::{self as ssh, AuthResult, KeyboardInteractiveAuthResponse};
 
 use super::client::Client;
-use super::{Command, Commands, Event, Link, Prompt, PromptField, Target, wait_for};
+use super::{
+    Command, Commands, Event, Link, Options, Prompt, PromptField, Target, public_key, wait_for,
+};
 use crate::{Error, Secret};
 
 /// How often a method is tried before the next one, as OpenSSH's `NumberOfPasswordPrompts`.
 const TRIES: usize = 3;
 
 /// The methods tried, in order.
-const ORDER: [MethodKind; 2] = [MethodKind::KeyboardInteractive, MethodKind::Password];
+const ORDER: [MethodKind; 3] = [
+    MethodKind::PublicKey,
+    MethodKind::KeyboardInteractive,
+    MethodKind::Password,
+];
+
+/// How often each method of [`ORDER`] is tried: public keys once (every key in that round), the others
+/// [`TRIES`] times.
+const fn limit(kind: MethodKind) -> usize {
+    match kind {
+        MethodKind::PublicKey => 1,
+        _ => TRIES,
+    }
+}
 
 pub(super) async fn sign_on(
     handle: &mut ssh::Handle<Client>,
     target: &Target,
+    options: &Options,
     commands: &Commands,
     link: &Link,
 ) -> Result<(), Error> {
@@ -35,6 +52,9 @@ pub(super) async fn sign_on(
         };
         tries[index] += 1;
         let outcome = match ORDER[index] {
+            MethodKind::PublicKey => {
+                public_key::sign_on(handle, target, options, commands, link).await?
+            }
             MethodKind::KeyboardInteractive => {
                 keyboard_interactive(handle, target, commands, link).await?
             }
@@ -58,7 +78,7 @@ fn next_method(methods: &[MethodKind], tries: &[usize; ORDER.len()]) -> Option<u
     ORDER
         .iter()
         .enumerate()
-        .position(|(i, kind)| methods.contains(kind) && tries[i] < TRIES)
+        .position(|(i, kind)| methods.contains(kind) && tries[i] < limit(*kind))
 }
 
 /// The methods to go on with after a refusal: those the server names, or, when it names none (some servers
@@ -76,7 +96,7 @@ fn names(methods: &[MethodKind]) -> String {
     }
 }
 
-enum Outcome {
+pub(super) enum Outcome {
     Success,
     Failure(Vec<MethodKind>),
 }
@@ -165,6 +185,17 @@ async fn keyboard_interactive(
 
 /// Shows `prompt` and waits for the user's answers; Cancel ends the sign-on.
 async fn ask(prompt: Prompt, commands: &Commands, link: &Link) -> Result<Vec<Secret>, Error> {
+    ask_or_skip(prompt, commands, link)
+        .await?
+        .ok_or(Error::Cancelled)
+}
+
+/// Shows `prompt` and waits for the user's answers, one per field; `None` when Cancel was pressed.
+pub(super) async fn ask_or_skip(
+    prompt: Prompt,
+    commands: &Commands,
+    link: &Link,
+) -> Result<Option<Vec<Secret>>, Error> {
     let fields = prompt.fields.len();
     link.send(Event::Prompt(prompt));
     let answers = wait_for(commands, |command| match command {
@@ -172,9 +203,10 @@ async fn ask(prompt: Prompt, commands: &Commands, link: &Link) -> Result<Vec<Sec
         _ => None,
     })
     .await?;
-    let mut answers = answers.ok_or(Error::Cancelled)?;
-    answers.resize(fields, Secret::default());
-    Ok(answers)
+    Ok(answers.map(|mut answers| {
+        answers.resize(fields, Secret::default());
+        answers
+    }))
 }
 
 #[cfg(test)]
@@ -182,13 +214,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn keyboard_interactive_comes_before_password_and_each_gets_three_tries_r_ssh_4() {
-        let both = [MethodKind::Password, MethodKind::KeyboardInteractive];
-        assert_eq!(next_method(&both, &[0, 0]), Some(0));
-        assert_eq!(next_method(&both, &[3, 0]), Some(1));
-        assert_eq!(next_method(&both, &[3, 3]), None);
-        assert_eq!(next_method(&[MethodKind::PublicKey], &[0, 0]), None);
-        assert_eq!(next_method(&[MethodKind::Password], &[0, 2]), Some(1));
+    fn public_keys_come_first_once_then_keyboard_interactive_then_password_r_ssh_4_r_ssh_12() {
+        let all = [
+            MethodKind::Password,
+            MethodKind::KeyboardInteractive,
+            MethodKind::PublicKey,
+        ];
+        assert_eq!(next_method(&all, &[0, 0, 0]), Some(0));
+        assert_eq!(
+            next_method(&all, &[1, 0, 0]),
+            Some(1),
+            "public keys get one round"
+        );
+        assert_eq!(next_method(&all, &[1, 3, 0]), Some(2));
+        assert_eq!(next_method(&all, &[1, 3, 3]), None);
+        assert_eq!(next_method(&[MethodKind::HostBased], &[0, 0, 0]), None);
+        assert_eq!(next_method(&[MethodKind::Password], &[0, 0, 2]), Some(2));
     }
 
     #[test]

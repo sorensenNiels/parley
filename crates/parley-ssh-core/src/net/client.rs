@@ -7,6 +7,7 @@ use russh::keys::PublicKeyOrCertificate;
 use russh::keys::ssh_key::{Algorithm, EcdsaCurve, HashAlg, PublicKey};
 use russh::{Preferred, cipher, kex, mac};
 
+use super::agent::{self, AgentAddress};
 use super::{
     Algorithms, Command, Commands, Event, HostKeyAnswer, HostKeyQuestion, Link, Target, wait_for,
 };
@@ -84,6 +85,8 @@ pub(super) struct Client {
     host: String,
     port: u16,
     known_hosts: KnownHosts,
+    /// The agent the server may use, when forwarding is on (R-SSH-13).
+    forward_to: Option<AgentAddress>,
     commands: Commands,
     link: Link,
     fingerprint: String,
@@ -93,6 +96,7 @@ impl Client {
     pub(super) fn new(
         target: &Target,
         known_hosts: KnownHosts,
+        forward_to: Option<AgentAddress>,
         commands: Commands,
         link: Link,
     ) -> Self {
@@ -100,6 +104,7 @@ impl Client {
             host: target.host.clone(),
             port: target.port,
             known_hosts,
+            forward_to,
             commands,
             link,
             fingerprint: String::new(),
@@ -193,6 +198,41 @@ impl ssh::Handler for Client {
         self.link.send(Event::Secured {
             algorithms,
             fingerprint: self.fingerprint.clone(),
+        });
+        Ok(())
+    }
+
+    /// The server opens a channel to the agent (R-SSH-13): only when forwarding is on, and each one is
+    /// carried to the user's agent until either side closes it.
+    async fn server_channel_open_agent_forward(
+        &mut self,
+        channel: russh::Channel<ssh::Msg>,
+        reply: ssh::ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Error> {
+        let Some(address) = self.forward_to.clone() else {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            self.link
+                .log("Refused the server's use of the agent: forwarding is off");
+            return Ok(());
+        };
+        reply.accept().await;
+        self.link.log("The server uses the agent");
+        let link = self.link.clone();
+        tokio::spawn(async move {
+            match agent::connect(&address).await {
+                Ok(client) => {
+                    let mut agent = client.into_inner();
+                    let mut channel = channel.into_stream();
+                    // Either side closing ends the relay; how is of no interest.
+                    let _ = tokio::io::copy_bidirectional(&mut channel, &mut agent).await;
+                }
+                Err(e) => link.log(format!(
+                    "The server asked for the agent, which did not answer: {e}"
+                )),
+            }
         });
         Ok(())
     }

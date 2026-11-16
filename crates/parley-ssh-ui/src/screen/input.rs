@@ -8,6 +8,8 @@ use parley_ssh_core::term::Modes;
 /// A shortcut of Parley SSH's own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shortcut {
+    NewSession,
+    Duplicate,
     Restart,
 }
 
@@ -84,6 +86,8 @@ fn shortcut(key: EguiKey, m: Modifiers, mac: bool) -> Option<Typed> {
     Some(match key {
         EguiKey::C => Typed::Copy,
         EguiKey::V => Typed::RequestPaste,
+        EguiKey::N => Typed::Shortcut(Shortcut::NewSession),
+        EguiKey::D => Typed::Shortcut(Shortcut::Duplicate),
         EguiKey::R => Typed::Shortcut(Shortcut::Restart),
         _ => return None,
     })

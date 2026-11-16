@@ -16,6 +16,7 @@ pub mod screenshot;
 pub mod siblings;
 pub mod snippets;
 pub mod sql_start;
+pub mod ssh_start;
 
 use eframe::egui;
 

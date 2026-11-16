@@ -2,7 +2,9 @@
 //! module is async. The UI sends [`Command`]s and reads [`Event`]s; output goes straight into the shared
 //! [`Terminal`], whose replies go back to the host from here.
 
+pub mod agent;
 mod client;
+mod public_key;
 mod sign_on;
 
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
@@ -37,6 +39,19 @@ impl Target {
             format!("{}@{}:{}", self.user, self.host, self.port)
         }
     }
+}
+
+/// How to sign on and what to allow, besides the target (R-SSH-12, R-SSH-13).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Options {
+    /// Private key files, tried in this order after the agent's keys (R-SSH-12).
+    pub key_files: Vec<std::path::PathBuf>,
+    /// The running agent to sign on with; `None` leaves agents out (R-SSH-13).
+    pub agent: Option<agent::AgentAddress>,
+    /// Only the agent key with this SHA-256 fingerprint (`SHA256:…`); `None`: each of the agent's keys.
+    pub agent_key: Option<String>,
+    /// Let the server use the agent while connected (`auth-agent-req@openssh.com`); off by default.
+    pub agent_forwarding: bool,
 }
 
 /// What the UI tells the connection.
@@ -115,6 +130,8 @@ pub enum Event {
     },
     /// Signed on and the shell is running.
     Started,
+    /// Something went wrong that did not end the connection, in plain words (a key file that cannot be read).
+    Problem(String),
     Ended(Ending),
 }
 
@@ -146,6 +163,7 @@ impl Connection {
     /// new to show or an event to read.
     pub fn open(
         target: Target,
+        options: Options,
         known_hosts: KnownHosts,
         terminal: Arc<Mutex<Terminal>>,
         repaint: impl Fn() + Send + Sync + 'static,
@@ -168,6 +186,7 @@ impl Connection {
                     {
                         Ok(runtime) => runtime.block_on(run(
                             target,
+                            options,
                             known_hosts,
                             shared,
                             command_rx,
@@ -233,13 +252,14 @@ type Commands = Arc<tokio::sync::Mutex<UnboundedReceiver<Command>>>;
 
 async fn run(
     target: Target,
+    options: Options,
     known_hosts: KnownHosts,
     terminal: Arc<Mutex<Terminal>>,
     commands: UnboundedReceiver<Command>,
     link: Link,
 ) -> Ending {
     let commands: Commands = Arc::new(tokio::sync::Mutex::new(commands));
-    match session(&target, known_hosts, &terminal, &commands, &link).await {
+    match session(&target, &options, known_hosts, &terminal, &commands, &link).await {
         Ok(ending) => ending,
         Err(Error::Cancelled) => Ending::Disconnected,
         Err(e) => Ending::Failed(e.to_string()),
@@ -252,6 +272,7 @@ async fn run(
 )]
 async fn session(
     target: &Target,
+    options: &Options,
     known_hosts: KnownHosts,
     terminal: &Arc<Mutex<Terminal>>,
     commands: &Commands,
@@ -261,7 +282,14 @@ async fn session(
         "Connecting to {} port {}",
         target.host, target.port
     ));
-    let handler = client::Client::new(target, known_hosts, Arc::clone(commands), link.clone());
+    let forward_to = options.agent.clone().filter(|_| options.agent_forwarding);
+    let handler = client::Client::new(
+        target,
+        known_hosts,
+        forward_to.clone(),
+        Arc::clone(commands),
+        link.clone(),
+    );
     let config = Arc::new(client::config());
     let connecting = ssh::connect(config, (target.host.as_str(), target.port), handler);
     let mut handle = match tokio::time::timeout(CONNECT_TIMEOUT, connecting).await {
@@ -273,7 +301,7 @@ async fn session(
             ));
         }
     };
-    sign_on::sign_on(&mut handle, target, commands, link).await?;
+    sign_on::sign_on(&mut handle, target, options, commands, link).await?;
 
     let (columns, rows) = {
         let t = lock(terminal);
@@ -292,6 +320,10 @@ async fn session(
             &modes,
         )
         .await?;
+    if forward_to.is_some() {
+        channel.agent_forward(false).await?;
+        link.log("Agent forwarding requested");
+    }
     channel.request_shell(true).await?;
     link.log("Shell requested");
 

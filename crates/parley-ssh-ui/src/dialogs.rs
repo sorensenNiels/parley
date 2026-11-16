@@ -292,6 +292,54 @@ pub fn confirm_close(ctx: &Context, target: &Target) -> Option<bool> {
     }
 }
 
+/// What the event log's buttons ask for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogAction {
+    Copy,
+    Close,
+}
+
+/// `PuTTY`'s Event Log (R-SSH-16): what happened, with times, never a password or key. `last_height` is kept by
+/// the caller for the scroll area (CLAUDE.md "Layout traps").
+pub fn event_log(
+    ctx: &Context,
+    target: &Target,
+    lines: &[crate::session::LogLine],
+    last_height: &mut f32,
+) -> Option<LogAction> {
+    let title = format!("Event log – {}", target.label());
+    let (close, clicked) = dialog::dialog(ctx, "ssh-event-log", &title, 640.0, |ui| {
+        dialog::fitting_scroll_area(ui, "ssh-event-log-lines", 220.0, last_height, |ui| {
+            ui.set_width(ui.available_width());
+            egui::Grid::new("ssh-event-log-grid")
+                .num_columns(2)
+                .spacing([12.0, 4.0])
+                .show(ui, |ui| {
+                    for line in lines {
+                        ui.label(RichText::new(&line.at).monospace().small());
+                        ui.add(egui::Label::new(&line.text).wrap().selectable(true));
+                        ui.end_row();
+                    }
+                });
+        });
+        ui.add_space(12.0);
+        theme::button_row(ui, |ui| {
+            if ui.add(theme::primary_button(ui, "Close")).clicked() {
+                Some(LogAction::Close)
+            } else if ui.button("Copy").clicked() {
+                Some(LogAction::Copy)
+            } else {
+                None
+            }
+        })
+    });
+    if close {
+        Some(LogAction::Close)
+    } else {
+        clicked
+    }
+}
+
 /// Parley SSH's shortcuts (R-SSH-7); true when closed.
 pub fn shortcut_sheet(ctx: &Context, mac: bool) -> bool {
     let command = if mac { "Cmd" } else { "Ctrl+Shift" };
@@ -299,6 +347,8 @@ pub fn shortcut_sheet(ctx: &Context, mac: bool) -> bool {
         ("Copy", format!("{command}+C")),
         ("Paste", format!("{command}+V")),
         ("Paste", "Shift+Insert".to_owned()),
+        ("New session", format!("{command}+N")),
+        ("Duplicate session", format!("{command}+D")),
         ("Restart session", format!("{command}+R")),
         ("Scroll back a page", "Shift+Page Up".to_owned()),
         ("Scroll forward a page", "Shift+Page Down".to_owned()),

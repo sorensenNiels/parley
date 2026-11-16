@@ -30,10 +30,14 @@ pub struct Settings {
     pub confirm_close: bool,
     /// Pasting several lines outside bracketed paste asks first (R-SSH-9).
     pub confirm_paste: bool,
-    /// The start screen's last host, port and user (R-SSH-2); saved sessions come in Phase 27.
+    /// The start screen's quick connect: the last host, port and user (R-SSH-2).
     pub last_host: String,
     pub last_port: u16,
     pub last_user: String,
+    /// The saved sessions, in the order they were made (R-SSH-11).
+    pub sessions: Vec<crate::sessions::SavedSession>,
+    /// What a new session, and the quick connect, start with (`PuTTY`'s "Default Settings").
+    pub defaults: crate::sessions::SavedSession,
 }
 
 impl Default for Settings {
@@ -48,6 +52,8 @@ impl Default for Settings {
             last_host: String::new(),
             last_port: 22,
             last_user: String::new(),
+            sessions: Vec::new(),
+            defaults: crate::sessions::SavedSession::default(),
         }
     }
 }

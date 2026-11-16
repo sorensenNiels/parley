@@ -1,5 +1,5 @@
 //! The start screen while not connected: the saved sessions, to connect to or edit (R-UI-5);
-//! in Parley SQL, its saved connections (R-SQL-46).
+//! in Parley SQL, its saved connections (R-SQL-46); in Parley SSH, its saved sessions (R-SSH-11).
 
 use egui::{Button, RichText, Ui};
 
@@ -17,6 +17,8 @@ pub enum Choice {
 /// What the start screen calls the things it lists.
 #[derive(Debug, Clone, Copy)]
 pub struct Words {
+    /// The screen's heading: "Connect to IBM i".
+    pub heading: &'static str,
     /// Said when there are none: "No sessions yet."
     pub none: &'static str,
     /// The button that adds one: "New session…"
@@ -25,6 +27,7 @@ pub struct Words {
 
 /// Parley's words: saved sessions.
 pub const SESSIONS: Words = Words {
+    heading: "Connect to IBM i",
     none: "No sessions yet.",
     new: "New session…",
 };
@@ -57,7 +60,7 @@ pub fn show(
     let mut choice = None;
     ui.vertical_centered(|ui| {
         ui.add_space(ui.available_height() * 0.12);
-        ui.heading("Connect to IBM i");
+        ui.heading(words.heading);
         ui.add_space(12.0);
         if let Some(error) = last_error {
             theme::error(ui, error);

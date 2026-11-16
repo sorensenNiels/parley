@@ -1,7 +1,7 @@
 //! Parley SSH (D41, R-SSH-1): an SSH client in Parley's look.
 //!
 //! Thin like `parley` and `parley-sql`: it opens the window and hands over the platform services from this
-//! crate's library. The UI is `parley_ssh_ui::ParleySshUi`. The full command line comes with R-SSH-14.
+//! crate's library. The UI is `parley_ssh_ui::ParleySshUi`; the command line is `ssh_start` (R-SSH-14).
 
 // Release builds on Windows are GUI apps: no console window opens next to Parley SSH.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
@@ -13,33 +13,28 @@
 
 use eframe::egui;
 use parley_app::screenshot;
+use parley_app::ssh_start::{self, Command};
 use parley_ssh_core::known_hosts::KnownHosts;
-use parley_ssh_ui::{ParleySshUi, Settings};
+use parley_ssh_ui::{ParleySshUi, Settings, StartRequest};
 
 /// Parley SSH's app id: its settings folder, apart from Parley's and Parley SQL's.
 const APP_ID: &str = "parley-ssh";
 /// Where the settings are kept in eframe's storage.
 const SETTINGS_KEY: &str = "settings";
 
-const USAGE: &str = "\
-Usage: parley-ssh [OPTION]
-
-Opens Parley SSH, an SSH client.
-
-Options:
-  --screenshot FILE    After a few seconds, save the window as a PPM image and quit
-                       (for development)
-  --version            Print the version and quit
-  --help               Print this help and quit";
-
 struct App {
     ui: ParleySshUi,
+    /// What the command line asked to open, on the first frame (R-SSH-14).
+    start: Option<StartRequest>,
     title: String,
     screenshot: Option<screenshot::Pending>,
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if let Some(request) = self.start.take() {
+            self.ui.start(ui.ctx(), request);
+        }
         self.ui.ui(ui);
         if let Some(pending) = &mut self.screenshot {
             pending.update(ui.ctx());
@@ -60,39 +55,22 @@ impl eframe::App for App {
     }
 }
 
-enum Start {
-    Run { screenshot: Option<String> },
-    Version,
-    Help,
-}
-
-fn parse(args: impl IntoIterator<Item = String>) -> Result<Start, String> {
-    let mut screenshot = None;
-    let mut args = args.into_iter();
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--version" | "-V" => return Ok(Start::Version),
-            "--help" | "-h" => return Ok(Start::Help),
-            "--screenshot" => screenshot = Some(args.next().ok_or("'--screenshot' needs a value")?),
-            other => return Err(format!("unknown argument '{other}'")),
-        }
-    }
-    Ok(Start::Run { screenshot })
-}
-
 fn main() -> eframe::Result {
-    let screenshot = match parse(std::env::args().skip(1)) {
-        Ok(Start::Run { screenshot }) => screenshot,
-        Ok(Start::Version) => {
+    let (request, screenshot) = match ssh_start::parse(std::env::args().skip(1)) {
+        Ok(Command::Run {
+            request,
+            screenshot,
+        }) => (request, screenshot),
+        Ok(Command::Version) => {
             println!("parley-ssh {}", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
-        Ok(Start::Help) => {
-            println!("{USAGE}");
+        Ok(Command::Help) => {
+            println!("{}", ssh_start::USAGE);
             return Ok(());
         }
         Err(e) => {
-            eprintln!("parley-ssh: {e}\n\n{USAGE}");
+            eprintln!("parley-ssh: {e}\n\n{}", ssh_start::USAGE);
             std::process::exit(2);
         }
     };
@@ -122,12 +100,14 @@ fn main() -> eframe::Result {
                 .unwrap_or_default();
             let mut ui = ParleySshUi::new(settings, known_hosts);
             ui.set_update_checker(parley_app::update_checker());
+            ui.set_spawner(std::sync::Arc::new(ssh_start::spawn));
             match parley_app::logo() {
                 Ok(logo) => ui.set_logo(logo),
                 Err(e) => eprintln!("parley-ssh: could not load the menu bar icon: {e}"),
             }
             Ok(Box::new(App {
                 ui,
+                start: Some(request),
                 title: String::new(),
                 screenshot: screenshot.map(screenshot::Pending::new),
             }))

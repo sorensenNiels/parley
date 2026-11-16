@@ -15,7 +15,7 @@ unicode-width = "0.2"
 # SSH (D42): pure Rust with ring, as rustls uses (D6); RSA keys; zlib compression for R-SSH-27.
 russh = { version = "0.65", default-features = false, features = ["ring", "rsa", "flate2"] }
 # Only inside the network thread (D42): one current-thread runtime per connection.
-tokio = { version = "1", default-features = false, features = ["rt", "net", "sync", "time", "macros"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "sync", "time", "macros", "io-util"] }
 thiserror.workspace = true
 # Hashed known_hosts entries (HMAC-SHA1 of the host name), the versions russh uses.
 hmac = "0.13"
@@ -27,6 +27,8 @@ zeroize = "1"
 [dev-dependencies]
 # The in-process SSH server of tests/net.rs runs on its own runtime.
 tokio = { version = "1", default-features = false, features = ["rt", "net", "macros", "time"] }
+# A stream of the test agent's connections (russh's agent server takes one); russh uses futures already.
+futures = "0.3"
 
 [lints]
 workspace = true
