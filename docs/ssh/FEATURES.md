@@ -88,3 +88,59 @@ follows the host is the command). Not yet seen in the running app.
 | R-SSH-27 | New keys after N minutes (60) and N MB (1024, at most 1 GiB); compression switch (off; `Compression yes`). | A long session past the rekey time; compression on a slow link; the event log's algorithms. |
 | R-SSH-28 | Session ▸ On the server: a command instead of the shell, still with a pseudo-terminal (`RemoteCommand`; `parley-ssh host cmd…`); environment `NAME=value` lines (`SetEnv`), each answered by the server and a refusal said in the event log; the terminal type. | `tmux new -A -s main`; `LANG` with OpenSSH's default `AcceptEnv`; a variable it refuses; `TERM=xterm` in vim. |
 | R-SSH-29 | Session ▸ Connection ▸ Proxy: None, SOCKS 5, HTTP (host, port, user; the password asked when the proxy wants one, never kept) or a command (`%h`, `%p`, `%r`; `ProxyCommand`); a proxy reaches the first jump host; its refusals in plain words. | A real SOCKS 5 proxy (`ssh -D` on another machine), an HTTP proxy such as Squid with and without a password, `ProxyCommand nc …`, a proxy with jump hosts; Windows' `cmd /C` for a proxy command. |
+
+### Phase 28: the terminal, lean (R-SSH-24 built 2026-11-16, R-SSH-19 and R-SSH-25 2026-11-17, Linux under WSL)
+
+Automated (all pass): `parley-ssh-core`'s `term/find.rs` (matches in the scrollback and on the screen with and
+without case, not overlapping, wide characters and æøå as cells; a match scrolled into view; the change counter),
+`parley-ssh-ui`'s `find.rs` (the current match scrolled to, only those in view given, Match case), `session.rs`
+(the bar over a pane: "1 of 2", Match case to "1 of 1", Close clearing the highlights), `window_keys.rs`
+(Ctrl+Shift+F, Ctrl+F still the host's). R-SSH-19 and R-SSH-25: `parley-ssh-core`'s `term/plain.rs` (escape
+sequences, carriage returns and strings left out, also cut in two by the network, a UTF-8 character too; recording
+only while asked), `parley-ssh-ui`'s `log.rs` (a file named from its pattern with `~`; a text log and a raw one
+appended to the same file), `session.rs` (a log keeps only what came while it was on; the bell noticed). Not yet
+seen in the running app.
+
+While building: the snippet picker's "No snippets yet" hint used `▸`, which the bundled fonts lack; opening the
+picker without snippets would have crashed (Phase 38). Fixed.
+
+| ID | Built | Still to check in the running app |
+|---|---|---|
+| R-SSH-19 | Settings ▸ Terminal ▸ Bell: Flash (default: the pane's border, 0.2 s), Sound (the launcher's beep, D37) or None; while the window is not focused the taskbar asks for attention; bells from tabs not in front too. | `printf '\a'`; tab completion with nothing to complete in bash; each setting; Windows' and macOS's taskbar or dock. |
+| R-SSH-25 | Session editor ▸ On the server ▸ Session log: Off, Text (without escape sequences) or Raw output, to a file from a pattern (`~/parley-ssh-logs/&H-&Y&M&D-&T.log`), appended to with a line saying when it started; started when the shell starts; Session ▸ Start log / Stop log for the session in front (text when the session has none); an error said in the status bar and the log stopped; kept across reconnects. | A text log of vim and htop (readable?), a raw log replayed with `cat`; a folder that cannot be written; Windows paths. |
+| R-SSH-24 | Edit ▸ Find… and Ctrl+Shift+F (Cmd+F on macOS) open Parley 5250's find bar over the pane, with Match case; Enter and Shift+Enter or the arrows go to the next and previous match, scrolled into view; matches in view are highlighted in the theme's yellow, the current one solid; Escape or 🗙 closes. Searched again only when the text, Match case or the output changed. | `dmesg` or a long `journalctl` with 10,000 lines of scrollback; matches while output keeps coming; each theme's highlight; Escape giving the keyboard back to the shell. |
+
+
+### Phase 35: shell integration (built 2026-11-16, Linux under WSL)
+
+Automated (all pass): `parley-ssh-core`'s `term/integration.rs` (an OSC 8 link over its text and ended by an empty
+URI; written addresses without the punctuation after them, a balanced bracket kept; OSC 133 prompts, output and exit
+status; marks of dropped lines gone and none on the alternate screen; OSC 9 and 777 notifications but not ConEmu's
+numbered OSC 9; OSC 52 set, a query never answered), `term/find.rs` (a line put at the top); `parley-ssh-ui`'s
+`screen.rs` (Ctrl+click on a link opens it and sends nothing to the host), `screen/scrollbar.rs` (Ctrl+Shift+Up and
+Down from command to command; a command's output from any of its lines; a failed command's mark red), `session.rs`
+(a command over 10 s and the host's notifications become notes, a short one not; the clipboard set only when the
+setting allows). Not yet seen in the running app.
+
+While building: the screen had no scroll bar although R-SSH-8 names one; a slim one at the right edge now scrolls by
+drag or click and carries R-SSH-45's marks. And eframe's `links` feature was off, so egui's links opened nothing on
+the desktop in all three programs (Parley 5250's addresses on the screen, the newer-version link): it is on now.
+
+| ID | Built | Still to check in the running app |
+|---|---|---|
+| R-SSH-44 | OSC 8 links and written `http(s)://`, `ftp://`, `file://` addresses: underlined under the pointer, Ctrl+click (Cmd+click) opens in the browser (logged), also while a program has the mouse; right-click ▸ Copy link. | `ls --hyperlink=auto`, `gcc` errors with links, a URL in `git log`; Cmd+click on macOS; Windows' default browser. |
+| R-SSH-45 | OSC 133 A/C/D marks; each prompt marked on the scroll bar, red when its command failed; Ctrl+Shift+Up/Down (Cmd+Up/Down) to the previous and next command; right-click on a command ▸ Select command output, Copy command output. | bash with `bash-preexec` or VS Code's/WezTerm's integration script, zsh, fish 4 (built in), PowerShell with its prompt marks; long output; the scroll bar in each theme. |
+| R-SSH-46 | OSC 9 and OSC 777;notify from the host, and a command (OSC 133) that ran 10 s or more ending, as a desktop notification (`notify-rust` in the launcher, on a thread) and the taskbar asking for attention, only while the window is not focused; from tabs not in front too. | `sleep 12` in another window; `printf '\e]9;Build done\a'`; notifications on Windows, macOS and Linux (GNOME, KDE). |
+| R-SSH-47 | OSC 52 sets the clipboard (Settings ▸ Terminal: "Programs on the server may set the clipboard", on); never read; each time in the event log. | tmux with `set -g set-clipboard on`, vim's OSC 52 yank, over a jump host; the setting off. |
+
+### Phase 36: the command palette (built 2026-11-16, Linux under WSL)
+
+Automated (all pass): `parley-ssh-ui`'s `palette.rs` (words, letters in order, a swapped pair and two typos in a
+long query found, none in three letters, æøå; recent first, then the best fit, the detail searched; each recent key
+once, at most 20), `tests.rs` (Ctrl+Shift+P, "setings" running Settings and listed first next time, snippets and
+shortcuts listed; a saved session connecting in the start screen, then in a new tab, kept once as a recent
+connection without its name). Not yet seen in the running app.
+
+| ID | Built | Still to check in the running app |
+|---|---|---|
+| R-SSH-48 | Ctrl+Shift+P (Cmd+Shift+P): "Go to…" over the window finds open tabs, saved sessions, `~/.ssh/config` hosts, the last ten connections, snippets and every menu action, each with its shortcut; matches whole words, letters in order and a typo (from four letters); arrows and Enter or a click; the 20 chosen last first (`palette_recent`, kept in the settings). A session, host or recent connection opens in the start screen in front, else in a new tab. | Many sessions and config hosts; typing fast; macOS's Cmd+Shift+P; light and dark. |

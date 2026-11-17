@@ -68,6 +68,8 @@ pub struct Cell {
     pub combining: Vec<char>,
     pub style: Style,
     pub width: Width,
+    /// The link it is part of (OSC 8, R-SSH-44): an index from 1 into the terminal's links; 0 for none.
+    pub link: u16,
 }
 
 impl Default for Cell {
@@ -87,6 +89,7 @@ impl Cell {
                 ..Style::default()
             },
             width: Width::Narrow,
+            link: 0,
         }
     }
 

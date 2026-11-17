@@ -227,6 +227,33 @@ pub fn server_page(ui: &mut Ui, s: &mut SavedSession) {
         ui,
         "The server takes only the variables its configuration allows (OpenSSH's AcceptEnv); the event log says which.",
     );
+    ui.add_space(10.0);
+    theme::section_label(ui, "Session log");
+    theme::segmented(
+        ui,
+        &mut s.log_mode,
+        &[
+            (crate::log::LogMode::Off, "Off"),
+            (crate::log::LogMode::Text, "Text"),
+            (crate::log::LogMode::Raw, "Raw output"),
+        ],
+    );
+    ui.add_space(6.0);
+    egui::Grid::new("ssh-session-log")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            text(
+                ui,
+                "Log file",
+                &mut s.log_pattern,
+                crate::log::DEFAULT_PATTERN,
+            );
+        });
+    theme::hint(
+        ui,
+        "Appended to. &H host, &Y&M&D date, &T time. Start log in the Session menu starts one at any time.",
+    );
 }
 
 #[cfg(test)]

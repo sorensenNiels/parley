@@ -159,6 +159,9 @@ impl vte::Perform for Terminal {
     }
 
     fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        if self.shell_osc(params) {
+            return;
+        }
         // OSC 0 and 2: the window title (OSC 1, the icon name, is not shown).
         if let [kind, rest @ ..] = params
             && matches!(*kind, b"0" | b"2")
@@ -200,6 +203,7 @@ impl Terminal {
             self.split_wide(row, column + 1);
         }
         let style = self.cursor.style;
+        let link = self.cursor_link;
         let width_kind = if width == 2 {
             Width::Wide
         } else {
@@ -211,6 +215,7 @@ impl Terminal {
                 combining: Vec::new(),
                 style,
                 width: width_kind,
+                link,
             };
         }
         if width == 2
@@ -221,6 +226,7 @@ impl Terminal {
                 combining: Vec::new(),
                 style,
                 width: Width::Spacer,
+                link,
             };
         }
         self.last_printed = Some(c);

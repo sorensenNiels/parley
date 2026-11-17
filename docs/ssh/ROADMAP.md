@@ -47,14 +47,14 @@ Parley's principles apply ([../ROADMAP.md](../ROADMAP.md) §2), read for SSH:
 | Phase 38: snippets and broadcast | In progress (2026-11-16; D50): R-SSH-49, R-SSH-50 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
 | Phase 39: reconnect and restore | In progress (2026-11-16; D50): R-SSH-51, R-SSH-52 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
 | Phase 29: the connection, complete | In progress (2026-11-16; D51): R-SSH-26..29 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
-| Phase 35: shell integration | Planned. |
-| Phase 36: the command palette | Planned. |
-| Phase 28: the terminal, lean | In progress: R-SSH-18 done ([phase file](phases/phase-28-the-terminal-lean.md)); cut down by D46. |
+| Phase 35: shell integration | In progress (2026-11-16): R-SSH-44..47 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
+| Phase 36: the command palette | In progress (2026-11-16): R-SSH-48 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
+| Phase 28: the terminal, lean | In progress: R-SSH-18 done ([phase file](phases/phase-28-the-terminal-lean.md)); R-SSH-19, R-SSH-24 and R-SSH-25 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
 | Phase 31: transfers with rsync | Planned (D48; was file transfer with SFTP). |
 | Phase 30: tunnels | Later. |
 | Phase 32: keys made here | Later. |
 
-The table is in the order the phases are built (the owner, 2026-11-16; 37, 38, 39 and 29 moved ahead of 35, 36 and the rest of 28 the same day); numbers are kept, so they are not in order.
+The table is in the order the phases are built (the owner, 2026-11-16; 37, 38, 39 and 29 moved ahead of 35, 36 and the rest of 28 the same day; then R-SSH-24 first, as Phase 35's marks build on the scrollback search, Claude's choice when asked); numbers are kept, so they are not in order.
 
 ## 4. Phases
 

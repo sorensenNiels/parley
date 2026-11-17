@@ -373,6 +373,19 @@ pub fn shortcut_sheet(ctx: &Context, mac: bool, last_height: &mut f32) -> bool {
         ("Duplicate session", format!("{command}+D")),
         ("New window", format!("{command}+Alt+N")),
         ("Restart session", format!("{command}+R")),
+        (
+            "Command palette",
+            if mac {
+                "Cmd+Shift+P".to_owned()
+            } else {
+                format!("{command}+P")
+            },
+        ),
+        ("Find in the scrollback", format!("{command}+F")),
+        (
+            "Previous and next command",
+            format!("{command}+Up, {command}+Down"),
+        ),
         ("Send a snippet", format!("{command}+S")),
         ("Broadcast to this tab, or stop", format!("{command}+B")),
         ("Stop broadcasting", "Escape twice".to_owned()),

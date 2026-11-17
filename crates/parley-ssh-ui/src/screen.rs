@@ -4,6 +4,7 @@
 pub mod colors;
 pub mod input;
 mod mouse;
+pub mod scrollbar;
 pub mod themes;
 
 use std::collections::HashMap;
@@ -59,6 +60,8 @@ pub enum Out {
     Resized { columns: usize, rows: usize },
     /// Text to paste: the session asks first when it is several lines (R-SSH-9).
     Paste(String),
+    /// A link Ctrl+clicked (Cmd+click on macOS), to open in the browser (R-SSH-44).
+    OpenLink(String),
 }
 
 /// A selection, from where the drag began to where it is (R-SSH-9).
@@ -100,6 +103,13 @@ pub struct View {
     pub mouse_reporting: bool,
     /// A text size other than 100 %, in percent (the settings' text size).
     pub zoom: u16,
+    /// Matches of find in the scrollback to highlight, and the current one (R-SSH-24).
+    pub highlights: Vec<parley_ssh_core::term::Found>,
+    pub current_match: Option<parley_ssh_core::term::Found>,
+    /// The link the right-click menu was opened on (R-SSH-44).
+    menu_link: Option<String>,
+    /// The command the right-click menu was opened on (R-SSH-45).
+    menu_command: Option<parley_ssh_core::term::CommandMark>,
 }
 
 impl View {
@@ -194,7 +204,16 @@ pub fn show(
     let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let inner = response.rect.shrink(look.padding);
     let grid = Grid::new(ui.ctx(), inner.min, look.font_size, view.zoom);
-    let (columns, rows) = fit(inner.size(), grid.cell);
+    // The scroll bar's strip at the right edge is kept free of cells.
+    let strip = Rect::from_min_max(
+        egui::pos2(
+            response.rect.right() - scrollbar::WIDTH,
+            response.rect.top(),
+        ),
+        response.rect.max,
+    );
+    let cells = Vec2::new((inner.width() - scrollbar::WIDTH).max(0.0), inner.height());
+    let (columns, rows) = fit(cells, grid.cell);
 
     let mut t = lock(terminal);
     t.set_default_cursor(look.cursor, look.cursor_blink);
@@ -258,23 +277,14 @@ pub fn show(
             out.push(Out::Paste(text));
         }
     }
-    if mouse::reporting(ui, &t, &view.mouse, view.mouse_reporting) {
-        let bytes = mouse::report(ui, &response, &grid, &t, &mut view.mouse);
-        if !bytes.is_empty() {
-            out.push(Out::Send(bytes));
-        }
-    } else {
-        if response.hovered() {
-            scroll_with_wheel(ui, &mut t, view, grid.cell.y);
-        }
-        select(&response, &grid, &t, view);
-        if context_menu(&response, &t, view) {
-            response.request_focus();
-        }
-    }
+    let link = pointer(ui, &response, &grid, &mut t, view, &mut out);
 
     let now = ui.input(|i| i.time);
     draw(&painter, &grid, &t, view, palette, response.rect);
+    scrollbar::show(ui, strip, &mut t, palette);
+    if let Some((found, _)) = &link {
+        underline_link(&painter, &grid, &t, *found, palette.foreground);
+    }
     draw_cursor(ui, &painter, &grid, &t, palette, focused, now);
     let text: Vec<String> = (0..t.rows())
         .filter_map(|r| t.visible_row(r))
@@ -289,9 +299,122 @@ pub fn show(
 
 /// The right-click menu: Copy, Paste and Copy all (R-SSH-9). True when one was chosen, so the screen takes the
 /// keyboard back from the menu.
+/// The pointer over the screen: a link under it (Ctrl+click opens it, R-SSH-44), else the host's mouse
+/// (R-SSH-18), else the wheel, selecting and the right-click menu. Returns the link under the pointer.
+fn pointer(
+    ui: &Ui,
+    response: &egui::Response,
+    grid: &Grid,
+    t: &mut Terminal,
+    view: &mut View,
+    out: &mut Vec<Out>,
+) -> Option<(parley_ssh_core::term::Found, String)> {
+    let link = hovered_link(ui, response, grid, t);
+    let command = ui.input(|i| i.modifiers.command);
+    if response.secondary_clicked() {
+        view.menu_link = link.as_ref().map(|(_, url)| url.clone());
+        view.menu_command = response.interact_pointer_pos().and_then(|pos| {
+            let (row, _) = grid.nearest(pos, t.rows(), t.columns());
+            scrollbar::command_at(t, t.point_in_view(row, 0).line)
+        });
+    }
+    if let Some((_, url)) = link.as_ref().filter(|_| command) {
+        // Ctrl+click opens the link and never reaches the host or the selection (R-SSH-44).
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        if response.clicked() {
+            out.push(Out::OpenLink(url.clone()));
+        }
+    } else if mouse::reporting(ui, t, &view.mouse, view.mouse_reporting) {
+        let bytes = mouse::report(ui, response, grid, t, &mut view.mouse);
+        if !bytes.is_empty() {
+            out.push(Out::Send(bytes));
+        }
+    } else {
+        if response.hovered() {
+            scroll_with_wheel(ui, t, view, grid.cell.y);
+        }
+        select(response, grid, t, view);
+        if context_menu(response, t, view) {
+            response.request_focus();
+        }
+    }
+    link
+}
+
+/// The link under the pointer, if any (R-SSH-44).
+fn hovered_link(
+    ui: &Ui,
+    response: &egui::Response,
+    grid: &Grid,
+    t: &Terminal,
+) -> Option<(parley_ssh_core::term::Found, String)> {
+    let pos = response.hover_pos()?;
+    let (row, column) = grid.nearest(pos, t.rows(), t.columns());
+    // Only on the cell itself, not past the edge.
+    if !ui.max_rect().contains(pos) {
+        return None;
+    }
+    t.link_at(t.point_in_view(row, column))
+}
+
+/// A line under the link's cells while the pointer is on it.
+fn underline_link(
+    painter: &egui::Painter,
+    grid: &Grid,
+    t: &Terminal,
+    found: parley_ssh_core::term::Found,
+    colour: egui::Color32,
+) {
+    let first = t.point_in_view(0, 0).line;
+    let Some(row) = found.from.line.checked_sub(first).filter(|r| *r < t.rows()) else {
+        return;
+    };
+    let rect = grid.rect(
+        row,
+        found.from.column,
+        found.to.column + 1 - found.from.column,
+    );
+    let y = rect.bottom() - 1.0;
+    painter.line_segment(
+        [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+        Stroke::new(1.0, colour),
+    );
+}
+
 fn context_menu(response: &egui::Response, t: &Terminal, view: &mut View) -> bool {
     let mut chosen = false;
     response.context_menu(|ui| {
+        if let Some(url) = view.menu_link.clone()
+            && ui.button("Copy link").clicked()
+        {
+            ui.ctx().copy_text(url);
+            chosen = true;
+        }
+        // R-SSH-45: the output of the command right-clicked on.
+        if let Some(command) = view.menu_command.filter(|c| c.output.is_some()) {
+            if ui.button("Select command output").clicked()
+                && let Some((from, to)) = command.output_lines()
+            {
+                view.selection = Some(Selection {
+                    anchor: Point {
+                        line: from,
+                        column: 0,
+                    },
+                    head: Point {
+                        line: to,
+                        column: t.columns().saturating_sub(1),
+                    },
+                    dropped: t.dropped(),
+                });
+                chosen = true;
+            }
+            if ui.button("Copy command output").clicked() {
+                ui.ctx()
+                    .copy_text(scrollbar::output_text(t, &command).unwrap_or_default());
+                chosen = true;
+            }
+            ui.separator();
+        }
         let selected = view.selected_text(t);
         if ui
             .add_enabled(selected.is_some(), egui::Button::new("Copy"))
@@ -444,7 +567,21 @@ fn draw(
             if style.inverse {
                 std::mem::swap(&mut fg, &mut bg);
             }
-            if selection.is_some_and(|s| s.contains(t.point_in_view(r, c))) {
+            let point = t.point_in_view(r, c);
+            if view
+                .current_match
+                .is_some_and(|m| m.from <= point && point <= m.to)
+            {
+                bg = palette.ansi(3);
+                fg = palette.background;
+            } else if view
+                .highlights
+                .iter()
+                .any(|m| m.from <= point && point <= m.to)
+            {
+                bg = palette.ansi(3).gamma_multiply(0.45);
+            }
+            if selection.is_some_and(|s| s.contains(point)) {
                 bg = palette.selection;
             }
             if style.weight == Weight::Faint {
@@ -765,7 +902,7 @@ mod tests {
             .iter()
             .filter_map(|o| match o {
                 Out::Send(b) | Out::Typed(b) => Some(b.clone()),
-                Out::Resized { .. } | Out::Paste(_) => None,
+                Out::Resized { .. } | Out::Paste(_) | Out::OpenLink(_) => None,
             })
             .flatten()
             .collect()
@@ -944,5 +1081,37 @@ mod tests {
         t.feed(b"\r\n1\r\n2");
         assert_eq!(view.selected_text(&t), None);
         view.clear_selection();
+    }
+
+    #[test]
+    fn ctrl_click_on_a_link_opens_it_and_sends_nothing_to_the_host_r_ssh_44() {
+        let mut h = shown(b"see \x1b]8;;https://ex.dk/\x1b\\docs\x1b]8;;\x1b\\ and https://b.dk");
+        h.run_steps(2);
+        let at = cell_centre(&h, 0, 5);
+        h.event(egui::Event::PointerMoved(at));
+        h.step();
+        let ctrl = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..egui::Modifiers::NONE
+        };
+        h.event(egui::Event::ModifiersChanged(ctrl));
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: ctrl,
+            });
+        }
+        h.run_steps(2);
+        let opened: Vec<&Out> = h
+            .state()
+            .out
+            .iter()
+            .filter(|o| matches!(o, Out::OpenLink(_)))
+            .collect();
+        assert_eq!(opened, [&Out::OpenLink("https://ex.dk/".into())]);
+        assert!(!h.state().out.iter().any(|o| matches!(o, Out::Typed(_))));
     }
 }

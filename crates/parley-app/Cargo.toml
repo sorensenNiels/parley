@@ -37,6 +37,8 @@ keyring = "4.2"
 rodio = { version = "0.23", default-features = false, features = ["playback"] }
 # Opens a finished download in the program the system uses for it (R-SQL-101).
 opener = { version = "0.9", default-features = false }
+# Parley SSH's desktop notifications (R-SSH-46): D-Bus (zbus) on Linux, the system's own on macOS and Windows.
+notify-rust = "4"
 
 # File windows for importing and exporting macros (R-KEY-7). GTK on Linux, as Tortuga: the
 # xdg-desktop-portal backend fails silently where no portal runs (WSL).

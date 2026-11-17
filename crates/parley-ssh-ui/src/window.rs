@@ -45,6 +45,7 @@ impl ParleySshUi {
         source: SavedSession,
         saved: bool,
     ) {
+        crate::palette::remember_connection(&mut self.settings.recent, &source);
         let new = self.session_pane(ctx, source, saved);
         if let Some(tab) = self.tabs.get_mut(self.current)
             && let Some(slot) = tab.pane_mut(pane)
@@ -118,11 +119,18 @@ impl ParleySshUi {
             WindowKey::Restart => self.carry_out(ctx, crate::bars::Action::Restart),
             WindowKey::FontSize(step) => self.settings.step_font_size(step),
             WindowKey::Snippets => self.open_picker(),
+            WindowKey::Find => self.carry_out(ctx, crate::bars::Action::Find),
+            WindowKey::Palette => self.palette = Some(crate::palette::Palette::default()),
+            WindowKey::PreviousCommand | WindowKey::NextCommand => {
+                if let Some(session) = self.active_session_mut() {
+                    session.jump_command(key == WindowKey::PreviousCommand);
+                }
+            }
             WindowKey::Broadcast => self.toggle_broadcast_tab(),
         }
     }
 
-    fn select(&mut self, tab: usize) {
+    pub(super) fn select(&mut self, tab: usize) {
         if tab < self.tabs.len() {
             self.current = tab;
             self.note = None;
@@ -300,6 +308,7 @@ impl ParleySshUi {
             self.openssh.refresh();
         }
         let broadcast_all = self.broadcast_all;
+        let now = ui.input(|i| i.time);
         let mut shared = Vec::new();
         let sessions = &self.settings.sessions;
         let openssh = &self.openssh;
@@ -345,18 +354,14 @@ impl ParleySshUi {
                     }
                     None => {}
                 }
-                if broadcasting && tab.pane(id).is_some_and(crate::broadcast::receives) {
-                    crate::broadcast::mark(ui, rect, id);
-                }
-                if split && active {
-                    let border = Stroke::new(1.5, accent);
-                    ui.painter().rect_stroke(
-                        rect.shrink(0.5),
-                        0.0,
-                        border,
-                        egui::StrokeKind::Inside,
-                    );
-                }
+                let pane = tab.pane(id);
+                let marks = Marks {
+                    flash: palette.foreground,
+                    accent,
+                    broadcasting,
+                    active: split && active,
+                };
+                marks.draw(ui, pane, rect, id, now);
                 if split && close_pane_button(ui, rect, id) {
                     close = Some(id);
                 }
@@ -407,6 +412,37 @@ fn drag_dividers(ui: &Ui, tab: &mut Tab, area: egui::Rect) {
             && let Some(pointer) = response.interact_pointer_pos()
         {
             *share = panes::share_at(divided, axis, pointer);
+        }
+    }
+}
+
+/// What is drawn over a pane: the bell's flash (R-SSH-19), the broadcast mark (R-SSH-50) and, in a split tab, the
+/// border of the pane in front (R-SSH-40).
+struct Marks {
+    flash: egui::Color32,
+    accent: egui::Color32,
+    broadcasting: bool,
+    active: bool,
+}
+
+impl Marks {
+    fn draw(&self, ui: &mut Ui, pane: Option<&Pane>, rect: egui::Rect, id: PaneId, now: f64) {
+        if let Some(session) = pane.and_then(Pane::session)
+            && session.flash_until > now
+        {
+            let stroke = Stroke::new(3.0, self.flash);
+            ui.painter()
+                .rect_stroke(rect.shrink(1.5), 0.0, stroke, egui::StrokeKind::Inside);
+            let left = std::time::Duration::from_secs_f64(session.flash_until - now);
+            ui.ctx().request_repaint_after(left);
+        }
+        if self.broadcasting && pane.is_some_and(crate::broadcast::receives) {
+            crate::broadcast::mark(ui, rect, id);
+        }
+        if self.active {
+            let border = Stroke::new(1.5, self.accent);
+            ui.painter()
+                .rect_stroke(rect.shrink(0.5), 0.0, border, egui::StrokeKind::Inside);
         }
     }
 }

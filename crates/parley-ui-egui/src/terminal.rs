@@ -11,7 +11,10 @@ mod windows;
 pub use colors::{COLORS, CustomColors, Palette, Scheme};
 pub use cursor::CursorShape;
 
-pub use find::{FindAction, FindBar, bar as find_bar};
+pub use find::{
+    FIELD as FIND_FIELD, FindAction, FindBar, bar as find_bar,
+    bar_with_match_case as find_bar_with_match_case,
+};
 
 use egui::{
     Align2, Color32, CornerRadius, CursorIcon, EventFilter, FontId, Pos2, Rect, Sense, Stroke, Ui,

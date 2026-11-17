@@ -395,8 +395,12 @@ impl Picker {
         if up {
             self.selected = self.selected.saturating_sub(1);
         }
-        let (close, (cancel, clicked)) =
-            dialog::dialog(ctx, "ssh-snippet-picker", "Send a snippet", 460.0, |ui| {
+        let (close, (cancel, clicked)) = dialog::dialog(
+            ctx,
+            "ssh-snippet-picker",
+            "Send a snippet",
+            460.0,
+            |ui| {
                 let search = ui
                     .horizontal(|ui| {
                         let label = ui.label("Find");
@@ -418,7 +422,7 @@ impl Picker {
                             theme::hint(
                                 ui,
                                 if snippets.is_empty() {
-                                    "No snippets yet: add them in Settings ▸ Snippets."
+                                    "No snippets yet: add them on the Snippets page of the settings."
                                 } else {
                                     "No snippet matches."
                                 },
@@ -437,7 +441,8 @@ impl Picker {
                     });
                 let cancel = theme::button_row(ui, |ui| ui.button("Cancel").clicked());
                 (cancel, clicked)
-            });
+            },
+        );
         if close || cancel {
             return Some(Picked::Cancel);
         }

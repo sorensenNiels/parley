@@ -31,6 +31,8 @@ pub enum Action {
     Copy,
     Paste,
     CopyAll,
+    /// Find in the scrollback (R-SSH-24).
+    Find,
     ClearScrollback,
     ResetTerminal,
     TextLarger,
@@ -49,6 +51,8 @@ pub enum Action {
     BroadcastAll,
     /// Stop reconnecting the session in front (R-SSH-51).
     StopReconnect,
+    /// Start or stop the session in front's log (R-SSH-25).
+    ToggleLog,
 }
 
 /// What the header shows.
@@ -89,6 +93,11 @@ pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
             Item(connected, icons::POWER, "Disconnect", Action::Disconnect),
             Item(true, icons::SIGN_OUT, "Close", Action::Close),
             Item(open, icons::LIST, "Event log", Action::EventLog),
+            if header.session.is_some_and(Session::logging) {
+                Item(true, icons::STOP, "Stop log", Action::ToggleLog)
+            } else {
+                Item(open, icons::RECORD, "Start log", Action::ToggleLog)
+            },
             broadcast_item(header.broadcast, false),
             broadcast_item(header.broadcast, true),
             Item(true, icons::SIGN_OUT, "Exit", Action::Exit),
@@ -97,6 +106,7 @@ pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
             Item(open, icons::COPY, "Copy", Action::Copy),
             Item(connected, icons::CLIPBOARD, "Paste", Action::Paste),
             Item(open, icons::COPY, "Copy all", Action::CopyAll),
+            Item(open, icons::MAGNIFYING_GLASS, "Find…", Action::Find),
             Item(
                 open,
                 icons::ERASER,

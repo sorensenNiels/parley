@@ -103,6 +103,8 @@ fn main() -> eframe::Result {
             ui.set_update_checker(parley_app::update_checker());
             ui.set_spawner(std::sync::Arc::new(ssh_start::spawn));
             ui.set_snippet_files(Box::new(parley_app::helpers::SnippetFileWindow));
+            ui.set_notifier(std::sync::Arc::new(notify));
+            ui.set_beeper(std::sync::Arc::new(parley_app::beep::beep));
             // The hosts of ~/.ssh/config (R-SSH-42); none without a home folder.
             if let Some(config) = parley_ssh_core::openssh_config::Config::from_home() {
                 ui.set_openssh_config(config);
@@ -119,4 +121,17 @@ fn main() -> eframe::Result {
             }))
         }),
     )
+}
+
+/// A desktop notification (R-SSH-46), on a thread of its own: D-Bus may take a moment and must not hold up the
+/// window. A system without notifications loses only the notice, so a failure is not said.
+fn notify(title: &str, body: &str) {
+    let (title, body) = (title.to_owned(), body.to_owned());
+    std::thread::spawn(move || {
+        let _ = notify_rust::Notification::new()
+            .appname("Parley SSH")
+            .summary(&title)
+            .body(&body)
+            .show();
+    });
 }

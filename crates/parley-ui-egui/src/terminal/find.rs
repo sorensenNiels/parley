@@ -1,4 +1,5 @@
-//! The find bar (R-UI-21): a text field above the screen whose matches the screen highlights.
+//! The find bar (R-UI-21): a text field above the screen whose matches the screen highlights. Parley SSH's find in
+//! the scrollback uses it too, with Match case (R-SSH-24).
 
 use egui::{Key, Role, TextEdit, Ui, WidgetInfo};
 use parley_core::Session;
@@ -14,6 +15,8 @@ pub struct FindBar {
     current: usize,
     /// Give the text field the keyboard on the next frame.
     focus: bool,
+    /// Upper and lower case must match (only where the bar offers it).
+    pub match_case: bool,
 }
 
 /// What the operator did in the bar.
@@ -68,6 +71,15 @@ pub const FIELD: &str = "Find on screen";
 
 /// Draws the bar over `count` matches.
 pub fn bar(ui: &mut Ui, bar: &mut FindBar, count: usize) -> Option<FindAction> {
+    draw(ui, bar, count, false)
+}
+
+/// The bar with a Match case switch (Parley SSH, R-SSH-24).
+pub fn bar_with_match_case(ui: &mut Ui, bar: &mut FindBar, count: usize) -> Option<FindAction> {
+    draw(ui, bar, count, true)
+}
+
+fn draw(ui: &mut Ui, bar: &mut FindBar, count: usize, case: bool) -> Option<FindAction> {
     let mut action = None;
     ui.horizontal(|ui| {
         ui.label(icons::icon(icons::MAGNIFYING_GLASS));
@@ -110,6 +122,9 @@ pub fn bar(ui: &mut Ui, bar: &mut FindBar, count: usize) -> Option<FindAction> {
         let next = icons::button(icons::ARROW_DOWN, "").small();
         if icons::add_named(ui, count > 0, next, "Next match").clicked() {
             bar.step(count, true);
+        }
+        if case && ui.checkbox(&mut bar.match_case, "Match case").changed() {
+            bar.current = 0;
         }
         theme::button_row(ui, |ui| {
             let close = ui.add(theme::icon_button(ui, "🗙")).on_hover_text("Close");

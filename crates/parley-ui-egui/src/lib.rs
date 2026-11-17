@@ -19,6 +19,12 @@ pub mod settings;
 mod shortcuts;
 pub mod status;
 mod terminal;
+/// The find bar, which Parley SSH's find in the scrollback uses too (R-SSH-24).
+pub mod find {
+    pub use crate::terminal::{
+        FIND_FIELD as FIELD, FindAction, FindBar, find_bar_with_match_case as bar_with_match_case,
+    };
+}
 pub mod theme;
 pub mod updates;
 

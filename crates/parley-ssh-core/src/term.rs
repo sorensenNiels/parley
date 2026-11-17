@@ -4,6 +4,12 @@
 //! parses them and [`perform`] carries them out.
 
 mod cell;
+mod find;
+pub use find::Found;
+mod integration;
+mod plain;
+pub use integration::{CommandMark, ShellEvent};
+pub use plain::PlainText;
 mod perform;
 mod sgr;
 #[cfg(test)]
@@ -184,6 +190,17 @@ pub struct Terminal {
     last_printed: Option<char>,
     /// The user's cursor (R-SSH-20): what DECSCUSR 0, RIS and a new terminal give.
     default_cursor: (CursorShape, bool),
+    /// Grows with each change that may change what is shown (R-SSH-24's search is made again then).
+    changes: u64,
+    /// The links named with OSC 8; a cell's `link` is an index from 1 (R-SSH-44).
+    links: Vec<String>,
+    /// The link printed text gets now; 0 for none.
+    cursor_link: u16,
+    /// The shell's marks (R-SSH-45) and what the UI must act on (Phase 35).
+    marks: Vec<integration::Mark>,
+    shell_events: Vec<ShellEvent>,
+    /// A copy of what the host sent, while a session log records it (R-SSH-25).
+    recording: Option<Vec<u8>>,
 }
 
 impl std::fmt::Debug for Terminal {
@@ -227,6 +244,12 @@ impl Terminal {
             bells: 0,
             last_printed: None,
             default_cursor: (CursorShape::Block, true),
+            changes: 0,
+            links: Vec::new(),
+            cursor_link: 0,
+            marks: Vec::new(),
+            shell_events: Vec::new(),
+            recording: None,
         }
     }
 
@@ -242,9 +265,13 @@ impl Terminal {
 
     /// Carries out what the host sent. Sequences cut in two by the network are completed by the next call.
     pub fn feed(&mut self, bytes: &[u8]) {
+        if let Some(recording) = &mut self.recording {
+            recording.extend_from_slice(bytes);
+        }
         let mut parser = std::mem::replace(&mut self.parser, vte::Parser::new());
         parser.advance(self, bytes);
         self.parser = parser;
+        self.changes += 1;
     }
 
     /// What the terminal must send back to the host (device attributes, cursor position), since the last call.
@@ -384,6 +411,7 @@ impl Terminal {
         self.dropped += self.history.len() as u64;
         self.history.clear();
         self.display_offset = 0;
+        self.changes += 1;
     }
 
     /// Changes the size. Rows that no longer fit go into the scrollback, keeping the cursor's line on screen,
@@ -394,6 +422,7 @@ impl Terminal {
         if columns == self.columns && rows == self.rows {
             return;
         }
+        self.changes += 1;
         if rows < self.rows {
             let surplus = self.rows - rows;
             // Blank lines under the cursor go first; then lines from the top, into the scrollback.
@@ -440,6 +469,11 @@ impl Terminal {
         fresh.history_limit = self.history_limit;
         fresh.dropped = self.dropped;
         fresh.set_default_cursor(self.default_cursor.0, self.default_cursor.1);
+        fresh.changes = self.changes + 1;
+        // The scrollback stays, and with it its links and marks.
+        fresh.links = std::mem::take(&mut self.links);
+        fresh.marks = std::mem::take(&mut self.marks);
+        fresh.recording = self.recording.take();
         *self = fresh;
     }
 

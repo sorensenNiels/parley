@@ -26,6 +26,13 @@ pub enum WindowKey {
     Restart,
     /// The snippet picker (R-SSH-49).
     Snippets,
+    /// Find in the scrollback (R-SSH-24).
+    Find,
+    /// The command palette (R-SSH-48).
+    Palette,
+    /// The command before or after the one at the view's top (R-SSH-45).
+    PreviousCommand,
+    NextCommand,
     /// Broadcast to this tab, on or off (R-SSH-50).
     Broadcast,
     /// The screen's text size one step bigger (1), smaller (-1) or back to the default (0) (R-SSH-20).
@@ -125,6 +132,19 @@ fn shortcut(key: Key, held: Held, mac: bool, split: bool) -> Option<WindowKey> {
         (Key::D, h) if h == ours => WindowKey::Duplicate,
         (Key::R, h) if h == ours => WindowKey::Restart,
         (Key::S, h) if h == ours => WindowKey::Snippets,
+        (Key::F, h) if h == ours => WindowKey::Find,
+        (Key::P, h)
+            if (!mac && h == ours)
+                || (mac
+                    && h == Held {
+                        shift: true,
+                        ..ours
+                    }) =>
+        {
+            WindowKey::Palette
+        }
+        (Key::ArrowUp, h) if h == ours => WindowKey::PreviousCommand,
+        (Key::ArrowDown, h) if h == ours => WindowKey::NextCommand,
         (Key::B, h) if h == ours => WindowKey::Broadcast,
         (Key::Tab, h) if h == ctrl => WindowKey::NextTab,
         (Key::Tab, h)
@@ -350,6 +370,24 @@ mod tests {
         assert!(
             found(Key::Minus, ctrl, true).is_empty(),
             "Ctrl+- is the host's on macOS"
+        );
+    }
+
+    #[test]
+    fn ctrl_shift_f_finds_and_ctrl_f_stays_the_hosts_r_ssh_24() {
+        let ctrl_shift = Modifiers {
+            ctrl: true,
+            shift: true,
+            command: true,
+            ..Modifiers::NONE
+        };
+        assert_eq!(
+            keys(&[press(Key::F, ctrl_shift)], false, false).0,
+            [WindowKey::Find]
+        );
+        assert_eq!(
+            keys(&[press(Key::F, Modifiers::CTRL)], false, false),
+            (vec![], 1)
         );
     }
 }

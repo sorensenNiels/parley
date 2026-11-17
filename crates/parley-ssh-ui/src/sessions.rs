@@ -56,6 +56,9 @@ pub struct SavedSession {
     pub proxy_port: u16,
     pub proxy_user: String,
     pub proxy_command: String,
+    /// A session log from the start (R-SSH-25), and where it goes.
+    pub log_mode: crate::log::LogMode,
+    pub log_pattern: String,
 }
 
 impl Default for SavedSession {
@@ -84,6 +87,8 @@ impl Default for SavedSession {
             proxy_port: 1080,
             proxy_user: String::new(),
             proxy_command: String::new(),
+            log_mode: crate::log::LogMode::Off,
+            log_pattern: crate::log::DEFAULT_PATTERN.to_owned(),
         }
     }
 }

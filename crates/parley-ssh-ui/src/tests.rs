@@ -867,8 +867,64 @@ fn the_terminal_page_offers_reconnect_and_restore_r_ssh_51_r_ssh_52() {
     h.get_by_label("Keep trying for");
     h.get_by_label("Open the tabs of last time").scroll_to_me();
     h.run_steps(2);
+    h.get_by_label("Reconnect a lost connection").scroll_to_me();
+    h.run_steps(2);
     h.get_by_label("Reconnect a lost connection").click();
     h.run_steps(2);
     assert!(!h.state().settings.reconnect);
     assert!(h.query_by_label("Keep trying for").is_none());
+}
+
+#[test]
+fn the_palette_finds_an_action_and_runs_it_and_lists_it_first_next_time_r_ssh_48() {
+    let mut h = app(with_snippets());
+    h.run_steps(2);
+    key(&mut h, egui::Key::P, CTRL_SHIFT);
+    assert!(h.state().palette.is_some(), "Ctrl+Shift+P opens it");
+    // A typo forgiven: Enter runs the first match.
+    h.get_by_label("Find").type_text("setings");
+    h.run_steps(2);
+    key(&mut h, egui::Key::Enter, egui::Modifiers::NONE);
+    assert!(h.state().palette.is_none());
+    assert!(h.state().settings_dialog.is_some(), "Settings opened");
+    assert_eq!(h.state().settings.palette_recent, ["action:Settings"]);
+    let items = h.state().palette_items(false);
+    let ranked = palette::ranked(&items, "", &h.state().settings.palette_recent);
+    assert_eq!(ranked[0].label, "Settings", "recent first");
+    assert!(
+        items
+            .iter()
+            .any(|i| i.kind == "Snippet" && i.label == "uptime")
+    );
+    assert!(
+        items
+            .iter()
+            .any(|i| i.label == "New tab" && i.shortcut == "Ctrl+Shift+T")
+    );
+}
+
+#[test]
+fn a_session_from_the_palette_connects_in_the_start_screen_or_a_new_tab_and_is_recent_r_ssh_48() {
+    let mut h = app(Settings {
+        sessions: vec![waiting()],
+        ..Settings::default()
+    });
+    h.run_steps(2);
+    let ctx = h.ctx.clone();
+    let chosen = palette::Closed::Chosen("session:Wait".into(), palette::Choice::Session(0));
+    h.state_mut().palette_chosen(&ctx, chosen.clone());
+    assert_eq!(h.state().tabs.len(), 1, "the start screen took it");
+    assert!(h.state().active_session().is_some());
+    h.state_mut().palette_chosen(&ctx, chosen);
+    assert_eq!(
+        h.state().tabs.len(),
+        2,
+        "a new tab, the first being connected"
+    );
+    assert_eq!(h.state().settings.recent.len(), 1, "one address once");
+    assert_eq!(
+        h.state().settings.recent[0].name,
+        "",
+        "kept without its name"
+    );
 }

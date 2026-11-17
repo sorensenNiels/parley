@@ -6,8 +6,11 @@
 mod bars;
 mod broadcast;
 mod dialogs;
+mod find;
 mod fonts;
+mod log;
 mod openssh;
+mod palette;
 mod panes;
 mod reconnect;
 pub mod restore;
@@ -38,6 +41,15 @@ use tabs::{Pane, Tab};
 /// Starts another Parley SSH window with these arguments (R-SSH-41); the launcher's, as the UI keeps no platform
 /// code.
 pub type Spawner = Arc<dyn Fn(&[String]) -> Result<(), String> + Send + Sync>;
+
+/// Shows a desktop notification, title and text (R-SSH-46); only the launcher can.
+pub type Notifier = Arc<dyn Fn(&str, &str) + Send + Sync>;
+
+/// How long a pane's border flashes for the bell, in seconds (R-SSH-19).
+const BELL_FLASH: f64 = 0.2;
+
+/// Sounds a short beep (R-SSH-19, D37); only the launcher can.
+pub type Beeper = Arc<dyn Fn() + Send + Sync>;
 
 /// What the command line asked to open (R-SSH-14): a saved session by name, or a host, with what goes with them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -106,6 +118,10 @@ pub struct ParleySshUi {
     broadcast_all: bool,
     /// When Escape was last pressed while broadcasting, for Escape twice.
     last_escape: Option<f64>,
+    notifier: Option<Notifier>,
+    /// The command palette, while open (R-SSH-48).
+    palette: Option<palette::Palette>,
+    beeper: Option<Beeper>,
 }
 
 impl std::fmt::Debug for ParleySshUi {
@@ -147,6 +163,58 @@ impl ParleySshUi {
             fill: None,
             broadcast_all: false,
             last_escape: None,
+            notifier: None,
+            palette: None,
+            beeper: None,
+        }
+    }
+
+    /// The bell's sound (R-SSH-19).
+    pub fn set_beeper(&mut self, beeper: Beeper) {
+        self.beeper = Some(beeper);
+    }
+
+    /// Desktop notifications (R-SSH-46).
+    pub fn set_notifier(&mut self, notifier: Notifier) {
+        self.notifier = Some(notifier);
+    }
+
+    /// Every session's shell events, also in tabs not in front; notifications while the window is not focused.
+    fn shell_events(&mut self, ctx: &egui::Context) {
+        let (now, focused) = ctx.input(|i| (i.time, i.viewport().focused.unwrap_or(true)));
+        let allow = self.settings.clipboard_from_server;
+        let bell = self.settings.bell;
+        let mut notes = Vec::new();
+        let mut rang = false;
+        for tab in &mut self.tabs {
+            for (_, pane) in &mut tab.panes {
+                if let Some(session) = pane.session_mut() {
+                    notes.extend(session.shell_events(ctx, now, allow));
+                    if std::mem::take(&mut session.rang) {
+                        rang = true;
+                        if bell == settings::BellStyle::Flash {
+                            session.flash_until = now + BELL_FLASH;
+                        }
+                    }
+                }
+            }
+        }
+        if rang
+            && bell == settings::BellStyle::Sound
+            && let Some(beeper) = &self.beeper
+        {
+            beeper();
+        }
+        if focused || (notes.is_empty() && !rang) {
+            return;
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+            egui::UserAttentionType::Informational,
+        ));
+        if let Some(notifier) = &self.notifier {
+            for note in notes {
+                notifier(&note.title, &note.body);
+            }
         }
     }
 
@@ -289,6 +357,7 @@ impl ParleySshUi {
 
     pub fn ui(&mut self, ui: &mut Ui) {
         self.apply_settings(ui.ctx());
+        self.shell_events(ui.ctx());
         self.guard_close(ui.ctx());
         if !self.dialog_open() {
             let mac = ui.ctx().os() == egui::os::OperatingSystem::Mac;
@@ -346,6 +415,23 @@ impl ParleySshUi {
         }
         self.show_dialogs(ui.ctx());
         self.snippet_dialogs(ui.ctx());
+        self.show_palette(ui.ctx());
+    }
+
+    /// The command palette, when open (R-SSH-48).
+    fn show_palette(&mut self, ctx: &egui::Context) {
+        if self.palette.is_none() {
+            return;
+        }
+        let mac = ctx.os() == egui::os::OperatingSystem::Mac;
+        let items = self.palette_items(mac);
+        let recent = self.settings.palette_recent.clone();
+        if let Some(palette) = &mut self.palette
+            && let Some(closed) = palette.show(ctx, &items, &recent)
+        {
+            self.palette = None;
+            self.palette_chosen(ctx, closed);
+        }
     }
 
     /// A dialog of the window's own is open: the window's shortcuts wait.
@@ -356,6 +442,7 @@ impl ParleySshUi {
             || self.shortcuts.is_some()
             || self.picker.is_some()
             || self.fill.is_some()
+            || self.palette.is_some()
     }
 
     fn apply_settings(&mut self, ctx: &egui::Context) {
@@ -495,6 +582,20 @@ impl ParleySshUi {
             Action::TextSmaller => self.settings.step_font_size(-1),
             Action::TextActualSize => self.settings.step_font_size(0),
             Action::Shortcuts => self.shortcuts = Some(0.0),
+            Action::ToggleLog => {
+                if let Some(session) = self.active_session_mut() {
+                    if session.logging() {
+                        session.stop_log();
+                    } else {
+                        session.start_log();
+                    }
+                }
+            }
+            Action::Find => {
+                if let Some(session) = self.active_session_mut() {
+                    session.open_find();
+                }
+            }
             Action::SendSnippet(i) => self.send_snippet(i),
             Action::PickSnippet => self.open_picker(),
             Action::EditSnippets => {

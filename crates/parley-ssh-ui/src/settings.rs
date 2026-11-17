@@ -65,9 +65,28 @@ pub struct Settings {
     /// A lost connection reconnects by itself, for this many minutes (R-SSH-51).
     pub reconnect: bool,
     pub reconnect_minutes: u8,
+    /// What the host's bell does (R-SSH-19).
+    pub bell: BellStyle,
+    /// The palette's items chosen lately, newest first (R-SSH-48).
+    pub palette_recent: Vec<String>,
+    /// The last connections made, newest first, without passwords (R-SSH-48).
+    pub recent: Vec<crate::sessions::SavedSession>,
+    /// Programs on the server may set the clipboard (OSC 52, R-SSH-47); they can never read it.
+    pub clipboard_from_server: bool,
     /// Open the tabs of last time on start (R-SSH-52, off by default), and those tabs.
     pub restore_tabs: bool,
     pub last_tabs: Vec<crate::restore::SavedTab>,
+}
+
+/// What the host's bell does (R-SSH-19, D46).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BellStyle {
+    None,
+    /// The launcher's beep (D37).
+    Sound,
+    /// The pane's border flashes.
+    #[default]
+    Flash,
 }
 
 /// The screen's text sizes (R-SSH-20).
@@ -100,6 +119,10 @@ impl Default for Settings {
             reconnect_minutes: 10,
             restore_tabs: false,
             last_tabs: Vec::new(),
+            clipboard_from_server: true,
+            palette_recent: Vec::new(),
+            recent: Vec::new(),
+            bell: BellStyle::Flash,
         }
     }
 }
@@ -194,6 +217,8 @@ impl Page {
             Self::Terminal => {
                 settings.confirm_close = defaults.confirm_close;
                 settings.confirm_paste = defaults.confirm_paste;
+                settings.clipboard_from_server = defaults.clipboard_from_server;
+                settings.bell = defaults.bell;
                 settings.reconnect = defaults.reconnect;
                 settings.reconnect_minutes = defaults.reconnect_minutes;
                 settings.restore_tabs = defaults.restore_tabs;
@@ -304,6 +329,26 @@ fn terminal_page(ui: &mut Ui, settings: &mut Settings) {
             "Ask before pasting several lines",
             Some("Each line may run as a command, unless the program asked for bracketed paste."),
             &mut settings.confirm_paste,
+        );
+        rows.row(
+            "Bell",
+            Some("The taskbar also asks for attention while the window is in the background."),
+            |ui, _| {
+                parley_ui_egui::theme::segmented(
+                    ui,
+                    &mut settings.bell,
+                    &[
+                        (BellStyle::Flash, "Flash"),
+                        (BellStyle::Sound, "Sound"),
+                        (BellStyle::None, "None"),
+                    ],
+                );
+            },
+        );
+        rows.switch(
+            "Programs on the server may set the clipboard",
+            Some("As tmux and vim do over SSH (OSC 52). They can never read it."),
+            &mut settings.clipboard_from_server,
         );
     });
     group(ui, "Connections", None, |rows| {
