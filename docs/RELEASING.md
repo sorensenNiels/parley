@@ -59,7 +59,7 @@ make package      # installers for this OS in target/packages/
 3. The tag starts the **Release** workflow (CI does not run on tags). Release builds every installer, checks that the tag
    matches the version, and **publishes** a GitHub release with them and `SHA256SUMS.txt` attached, marked latest.
    It then keeps only the three newest versions: every older release, published or draft, is deleted with its
-   files, and so are the older `v*` tags.
+   files, and so are the older `v*` tags. Only the three newest Release runs stay in the Actions tab.
 4. Download the installers and run the checks below on each OS. Edit the release notes on GitHub if needed. If an
    installer is broken, mark the release as a draft again (or delete it).
 

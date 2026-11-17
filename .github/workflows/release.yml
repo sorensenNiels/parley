@@ -116,6 +116,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       # Only for the release notes' header (--notes-file below); the packages come from the artifacts.
       - uses: actions/checkout@v5
@@ -160,4 +161,18 @@ jobs:
             while read -r tag; do
               echo "Deleting tag $tag"
               gh api -X DELETE "repos/$repo/git/refs/tags/$tag"
+            done
+      - name: Keep only the newest three Release runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # The Actions tab keeps the three newest runs of this workflow (this one included; tagged or
+        # run by hand) and deletes every older one with its logs and artifacts. CI no longer runs on
+        # tags, so the runs it made for earlier tags are deleted too.
+        run: |
+          repo=$GITHUB_REPOSITORY
+          runs() { gh run list --repo "$repo" --workflow "$1" --limit 1000 "${@:2}" --json databaseId --jq '.[].databaseId'; }
+          { runs release.yml | tail -n +4; runs ci.yml --event push; } |
+            while read -r id; do
+              echo "Deleting run $id"
+              gh api -X DELETE "repos/$repo/actions/runs/$id"
             done
