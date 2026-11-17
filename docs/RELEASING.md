@@ -39,7 +39,7 @@ make package      # installers for this OS in target/packages/
 
 ## Make a release
 
-1. Make sure `docs/FEATURES.md` is up to date. CI runs only on release tags (or by hand from the Actions tab),
+1. Make sure `docs/FEATURES.md` is up to date. CI runs only by hand (from the Actions tab),
    so `make verify` locally is the check before a release; the release script runs it too.
 2. Run one of these on an up-to-date, clean `main`:
 
@@ -56,7 +56,7 @@ make package      # installers for this OS in target/packages/
 
    By hand, the same is: set the version, commit and push, then `git tag vX.Y.Z` and `git push origin vX.Y.Z`.
 
-3. The tag starts the **Release** workflow and **CI**. Release builds every installer, checks that the tag
+3. The tag starts the **Release** workflow (CI does not run on tags). Release builds every installer, checks that the tag
    matches the version, and **publishes** a GitHub release with them and `SHA256SUMS.txt` attached, marked latest.
    It then keeps only the three newest versions: every older release, published or draft, is deleted with its
    files, and so are the older `v*` tags.

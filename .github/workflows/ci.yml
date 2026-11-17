@@ -1,10 +1,9 @@
 name: CI
 
-# Runs only for a release (a pushed `vX.Y.Z` tag) or by hand (Actions → CI → Run workflow).
-# Day to day, `make verify` runs the same checks locally.
+# Runs only by hand (Actions → CI → Run workflow). Day to day, and before every release
+# (the release script runs it), `make verify` runs the same checks locally; a pushed `vX.Y.Z` tag
+# starts only the Release workflow.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 concurrency:
