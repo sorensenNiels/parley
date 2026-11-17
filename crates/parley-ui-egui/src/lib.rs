@@ -486,9 +486,8 @@ impl ParleyUi {
         let status_frame = theme::bar(ui, Margin::symmetric(8, 5));
         let tab_frame = theme::bar(ui, Margin::symmetric(8, 2));
         actions.extend(self.menu_panel(ui, menu_frame, session.as_deref(), link.as_ref()));
-        // R-UI-35: the session in front's colour under the header.
-        let color = session
-            .is_some()
+        // R-UI-35: the session's colour under the header, alone in the window; with tabs, their stripes say it.
+        let color = (session.is_some() && self.tabs.len() < 2)
             .then(|| self.current.as_ref().map(|p| p.color))
             .flatten()
             .and_then(|c| theme::session_color(ui, c));
@@ -614,10 +613,6 @@ impl ParleyUi {
                     );
                     asked =
                         terminal::show(ui, session, &mut self.key_input, map, grab, &mut self.view);
-                    // R-UI-35: a frame in the session's colour round the screen.
-                    let color = self.current.as_ref().map(|p| p.color).unwrap_or_default();
-                    let rect = ui.max_rect().expand(14.0);
-                    session_color::screen_frame(ui, rect, theme::session_color(ui, color));
                 });
         } else {
             CentralPanel::default().show(ui, |ui| {

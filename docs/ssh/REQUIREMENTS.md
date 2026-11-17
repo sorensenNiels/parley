@@ -30,3 +30,5 @@
 | R-SSH-41 | New, Duplicate and windows with tabs | [Phase 33](phases/phase-33-tabs-and-split-panes.md) |
 | R-SSH-58 | A split pane that fails, and closing a pane | [Phase 33](phases/phase-33-tabs-and-split-panes.md) |
 | R-SSH-42 | Hosts from `~/.ssh/config` | [Phase 34](phases/phase-34-hosts-from-ssh-config.md) |
+| R-SSH-60 | No console window for a proxy command on Windows | [Between phases](phases/between-phases.md) |
+| R-SSH-61 | A colour for each session | [Between phases](phases/between-phases.md) |

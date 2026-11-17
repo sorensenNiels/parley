@@ -1,8 +1,9 @@
 //! A colour for each session (R-UI-35, R-SSH-61, D54), shared by Parley 5250 and Parley SSH: chosen in the session
-//! dialog, shown as stripes, lines, an outline and a frame, never as a background. The colours themselves are theme
+//! dialog, shown as a stripe on its tab, a line under the header and a block in the status bar, never as a
+//! background. The colours themselves are theme
 //! tokens ([`theme::session_color`]).
 
-use egui::{Color32, Frame, Panel, Rect, Sense, Stroke, StrokeKind, Ui, vec2};
+use egui::{Color32, Frame, Panel, Rect, Sense, Stroke, Ui, vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::theme;
@@ -119,39 +120,11 @@ pub fn tab_stripe(ui: &Ui, rect: Rect, color: Option<Color32>) {
     }
 }
 
-/// The stripe along the left edge of a start screen card drawn in `rect` (R-UI-35).
-pub fn card_stripe(ui: &Ui, rect: Rect, color: Option<Color32>) {
-    if let Some(color) = color {
-        let stripe = Rect::from_min_size(rect.min, vec2(4.0, rect.height()));
-        ui.painter().rect_filled(stripe, 2.0, color);
-    }
-}
-
 /// The block at the left end of the status bar (R-UI-35).
 pub fn status_block(ui: &mut Ui, color: Option<Color32>) {
     if let Some(color) = color {
         let (rect, _) = ui.allocate_exact_size(vec2(4.0, 16.0), Sense::hover());
         ui.painter().rect_filled(rect, 2.0, color);
-    }
-}
-
-/// The outline round the session pill drawn in `rect` (R-UI-35).
-pub fn pill_outline(ui: &Ui, rect: Rect, color: Option<Color32>) {
-    if let Some(color) = color {
-        ui.painter().rect_stroke(
-            rect.expand(1.0),
-            6.0,
-            Stroke::new(1.5, color),
-            StrokeKind::Outside,
-        );
-    }
-}
-
-/// The 2 px frame round the screen, or a pane, drawn in `rect` (R-UI-35, R-SSH-61).
-pub fn screen_frame(ui: &Ui, rect: Rect, color: Option<Color32>) {
-    if let Some(color) = color {
-        ui.painter()
-            .rect_stroke(rect, 0.0, Stroke::new(2.0, color), StrokeKind::Inside);
     }
 }
 

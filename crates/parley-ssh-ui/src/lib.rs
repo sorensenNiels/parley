@@ -391,9 +391,10 @@ impl ParleySshUi {
             .frame(menu_frame)
             .show(ui, |ui| bars::menu_bar(ui, &header))
             .inner;
-        // R-SSH-61: the session in front's colour under the header.
+        // R-SSH-61: the session's colour under the header with one tab; with more, their stripes say it.
         let color = self
             .active_session()
+            .filter(|_| self.tabs.len() < 2)
             .and_then(|s| theme::session_color(ui, s.source.color));
         parley_ui_egui::session_color::header_line(ui, "ssh-session-line", color);
         let status_action = Panel::bottom("ssh-status")

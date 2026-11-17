@@ -108,5 +108,9 @@
 | R-SQL-99 | Commitment control per connection | [Phase 25](phases/phase-25-connection-settings.md) |
 | R-SQL-100 | Formats and the CSV delimiter | [Phase 25](phases/phase-25-connection-settings.md) |
 | R-SQL-101 | Open a finished download | [Between phases](phases/between-phases.md) |
+| R-SQL-102 | System naming by default | [Between phases](phases/between-phases.md) |
+| R-SQL-103 | No console windows on Windows | [Between phases](phases/between-phases.md) |
+| R-SQL-104 | Drag a library group into place | [Between phases](phases/between-phases.md) |
 | R-NET-9 | Record a sign-on and a query | [Phase 5](phases/phase-05-sql-against-the-host.md) |
 | R-NET-8 | Probe a host's SQL routes | [Phase 5](phases/phase-05-sql-against-the-host.md) |
+

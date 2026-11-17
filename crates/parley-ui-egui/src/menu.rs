@@ -405,8 +405,6 @@ fn session_pill(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
         LinkState::Connecting => "connecting",
         LinkState::Closed(_) | LinkState::Dropped(_) => "offline",
     };
-    let color = theme::session_color(ui, profile.color);
-    crate::session_color::pill_outline(ui, response.response.rect, color);
     response
         .response
         .on_hover_text(format!("{} is {state}", profile.name));

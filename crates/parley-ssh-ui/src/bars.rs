@@ -267,8 +267,6 @@ fn pill(ui: &mut Ui, session: &Session) -> Option<Action> {
         State::Connecting | State::SigningOn => (p.warning_text, "connecting"),
         State::Ended(_) => (p.muted, "not connected"),
     };
-    let outline = theme::session_color(ui, session.source.color);
-    parley_ui_egui::session_color::pill_outline(ui, response.response.rect, outline);
     response
         .response
         .on_hover_text(format!("{} is {word}", session.target.label()));

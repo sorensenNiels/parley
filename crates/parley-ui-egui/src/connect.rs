@@ -4,7 +4,6 @@
 use egui::{Button, RichText, Ui};
 
 use crate::profile::Profile;
-use crate::session_color::{self, SessionColor};
 use crate::theme;
 
 /// What the operator chose on the start screen.
@@ -38,8 +37,6 @@ pub const SESSIONS: Words = Words {
 pub struct Entry<'a> {
     pub name: &'a str,
     pub address: String,
-    /// The session's colour, as a stripe on the card's left edge (R-UI-35, R-SSH-61).
-    pub color: SessionColor,
 }
 
 impl<'a> Entry<'a> {
@@ -50,7 +47,6 @@ impl<'a> Entry<'a> {
         Self {
             name: &profile.name,
             address: format!("{}:{}{tls}", config.host, config.port),
-            color: profile.color,
         }
     }
 }
@@ -142,7 +138,7 @@ enum Card {
 /// One saved session or connection: its name and address, with `second` (Edit…) and `primary` (Connect).
 fn card(ui: &mut Ui, entry: &Entry<'_>, primary: &str, second: &str) -> Option<Card> {
     let muted = theme::palette(ui).muted;
-    let shown = theme::card(ui)
+    theme::card(ui)
         .inner_margin(egui::Margin::symmetric(14, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -163,11 +159,6 @@ fn card(ui: &mut Ui, entry: &Entry<'_>, primary: &str, second: &str) -> Option<C
                 })
             })
             .inner
-        });
-    session_color::card_stripe(
-        ui,
-        shown.response.rect,
-        theme::session_color(ui, entry.color),
-    );
-    shown.inner
+        })
+        .inner
 }

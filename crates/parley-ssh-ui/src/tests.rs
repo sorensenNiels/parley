@@ -928,3 +928,40 @@ fn a_session_from_the_palette_connects_in_the_start_screen_or_a_new_tab_and_is_r
         "kept without its name"
     );
 }
+
+#[test]
+fn a_click_on_a_tab_brings_it_to_the_front_with_and_without_a_colour_r_ssh_39_r_ssh_61() {
+    for color in [
+        parley_ui_egui::SessionColor::None,
+        parley_ui_egui::SessionColor::Teal,
+    ] {
+        let mut h = app(Settings::default());
+        h.run_steps(2);
+        let ctx = h.ctx.clone();
+        let session = SavedSession { color, ..waiting() };
+        let first = h.state().tabs[0].active;
+        h.state_mut()
+            .connect_pane(&ctx, first, session.clone(), false);
+        h.state_mut().new_tab(&ctx, None);
+        let second = h.state().tabs[1].active;
+        h.state_mut().connect_pane(
+            &ctx,
+            second,
+            SavedSession {
+                name: "Other".into(),
+                host: "10.255.255.2".into(),
+                ..session
+            },
+            false,
+        );
+        h.run_steps(3);
+        assert_eq!(h.state().current, 1);
+        let title = h.state().tabs[0].title();
+        pointer_click(&mut h, &title, 0);
+        assert_eq!(
+            h.state().current,
+            0,
+            "{color:?}: the first tab came to the front"
+        );
+    }
+}

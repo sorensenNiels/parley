@@ -66,6 +66,13 @@
 | R-UI-26 | Frames for the host's character windows | [Phase 21](phases/phase-21-protocol-gaps.md) |
 | R-UI-27 | No View menu | [Phase 24](phases/phase-24-more-settings.md) |
 | R-UI-28 | Cursor shape and blink | [Phase 24](phases/phase-24-more-settings.md) |
+| R-UI-29 | Japanese, Chinese and Korean text | [Between phases](phases/between-phases.md) |
+| R-UI-30 | Duplicate the session | [Phase 40](phases/phase-40-more-sessions-at-once.md) |
+| R-UI-31 | Session groups | [Phase 40](phases/phase-40-more-sessions-at-once.md) |
+| R-UI-32 | Starting a group | [Phase 40](phases/phase-40-more-sessions-at-once.md) |
+| R-UI-33 | Sessions as tabs | [Phase 40](phases/phase-40-more-sessions-at-once.md) |
+| R-UI-34 | Where more sessions open | [Phase 40](phases/phase-40-more-sessions-at-once.md) |
+| R-UI-35 | A colour for each session | [Between phases](phases/between-phases.md) |
 | R-ADD-1 | Settings ▸ Add-ons | [Phase 3](phases/phase-03-keyboard-maps-and-macros.md) |
 | R-ADD-2 | Macros are an add-on, on by default | [Phase 3](phases/phase-03-keyboard-maps-and-macros.md) |
 | R-NF-1 | Installers for every platform, built by the Release … | [Phase 1](phases/phase-01-connect-and-show-a-screen.md) |

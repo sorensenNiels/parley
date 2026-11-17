@@ -78,7 +78,6 @@ impl Form {
                     .map(|s| connect::Entry {
                         name: &s.name,
                         address: s.address(),
-                        color: s.color,
                     })
                     .collect();
                 choice = connect::show(ui, WORDS, &entries, None).map(|c| match c {
@@ -180,7 +179,6 @@ fn config_group(ui: &mut Ui, openssh: &openssh::Hosts, shown: &[usize]) -> Optio
         .map(|h| connect::Entry {
             name: &h.alias,
             address: address(h),
-            color: parley_ui_egui::SessionColor::None,
         })
         .collect();
     ui.add_space(16.0);

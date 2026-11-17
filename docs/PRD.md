@@ -84,6 +84,7 @@ tested against recorded host traffic.
 | Add-ons | Settings ▸ Add-ons turns optional parts on or off; Macros is the first, on by default | R-ADD-1, R-ADD-2 | Done |
 | Screen and window | Scalable 5250 screen, colours, cursor, copy and paste; status bar; menu and toolbar | R-UI-1, R-UI-2, R-UI-4 | Done |
 | | Saved sessions and the session dialog | R-UI-3, R-UI-5 | Done |
+| | More sessions at once: duplicate, session groups, tabs or windows (Phase 40, D53); a colour per session | R-UI-30..35 | Done |
 | | Settings (theme, size, terminal font, density) in pages; Tortuga's look | R-UI-6..10 | Done |
 | | "New version available", and the download command on Linux | R-UI-11, R-UI-12 | Done |
 | Delivery | Installers: `.msi`, `.dmg`, `.deb`, `.AppImage` from a tagged release | R-NF-1 | Done |
@@ -135,7 +136,7 @@ More on the design: [ARCHITECTURE.md](ARCHITECTURE.md).
   security risk (R-NET-7, D16).
 - **Next:** not planned yet; the next phase is picked from the ideas below.
 - **SQL:** Phases 5–12 built the SQL window and Parley SQL; their plan is [sql/ROADMAP.md](sql/ROADMAP.md).
-- **Later, to be planned:** printer sessions (IDEA-18), tabs (IDEA-15), reconnect (IDEA-16), importing sessions from other emulators (IDEA-17),
+- **Later, to be planned:** printer sessions (IDEA-18), reconnect (IDEA-16), importing sessions from other emulators (IDEA-17),
   hotspots and better copy (IDEA-19, IDEA-20). See [IDEAS.md](IDEAS.md).
 
 ## 10. Measures of success (proposed)
@@ -153,4 +154,4 @@ More on the design: [ARCHITECTURE.md](ARCHITECTURE.md).
 | Testing needs real hosts, but `cargo test` must not use one. | Recorded traffic and hand-built records in tests; PUB400.COM for the sign-on screen by hand. |
 | Signing on by hand each time costs operators time. | Accepted for security (D16); a macro can type the user and ask for the password. |
 | Installers are unsigned, so macOS and Windows warn on first start. | Documented in RELEASING.md (D10); signing needs certificates. |
-| One session per window may hold back heavy users. | Tabs are IDEA-15. |
+| One session per window may hold back heavy users. | Sessions can open as tabs or windows, and start as a group (Phase 40). |

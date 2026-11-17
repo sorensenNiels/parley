@@ -247,7 +247,9 @@ pub fn bar(ui: &mut Ui, tabs: &[Tab], current: usize) -> Option<BarAction> {
                             } else {
                                 RichText::new(title).color(p.muted)
                             };
-                            ui.label(text);
+                            // Not selectable: a selectable label takes the click, and only the tab's margin
+                            // brought it to the front.
+                            ui.add(egui::Label::new(text).selectable(false));
                             let close = ui
                                 .add(theme::icon_button(ui, "🗙").small())
                                 .on_hover_text("Close tab");

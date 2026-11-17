@@ -427,12 +427,6 @@ struct Marks {
 
 impl Marks {
     fn draw(&self, ui: &mut Ui, pane: Option<&Pane>, rect: egui::Rect, id: PaneId, now: f64) {
-        // R-SSH-61: a frame in the pane's own session's colour; the border of the pane in front goes inside it.
-        let color = pane
-            .and_then(Pane::session)
-            .and_then(|s| theme::session_color(ui, s.source.color));
-        parley_ui_egui::session_color::screen_frame(ui, rect, color);
-        let inset = if color.is_some() { 2.75 } else { 0.5 };
         if let Some(session) = pane.and_then(Pane::session)
             && session.flash_until > now
         {
@@ -448,7 +442,7 @@ impl Marks {
         if self.active {
             let border = Stroke::new(1.5, self.accent);
             ui.painter()
-                .rect_stroke(rect.shrink(inset), 0.0, border, egui::StrokeKind::Inside);
+                .rect_stroke(rect.shrink(0.5), 0.0, border, egui::StrokeKind::Inside);
         }
     }
 }
