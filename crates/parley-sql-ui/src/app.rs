@@ -650,14 +650,15 @@ mod tests {
         harness.run();
         type_into(&mut harness, "Name", "Dev");
         type_into(&mut harness, "Host", "dev.example.com");
-        harness.get_by_label("System").click();
+        harness.get_by_label("SQL").click();
         type_into(&mut harness, "Libraries", "nodejt400 qgpl");
         harness.get_by_label("Auto-commit").click();
         harness.run();
         harness.get_by_label("Save").click();
         harness.run();
         let options = &harness.state().connections()[0].options;
-        assert_eq!(options.naming, parley_sql_core::options::Naming::System);
+        // Not the default, System (R-SQL-102).
+        assert_eq!(options.naming, parley_sql_core::options::Naming::Sql);
         assert_eq!(options.library_list(), ["NODEJT400", "QGPL"]);
         assert!(!options.autocommit);
     }

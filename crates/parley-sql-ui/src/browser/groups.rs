@@ -182,6 +182,14 @@ impl Browser {
         }
     }
 
+    /// Moves group `from` to place `to`, the others keeping their order (R-SQL-104).
+    pub(super) fn move_group_to(&mut self, from: usize, to: usize) {
+        if from < self.groups.len() && to < self.groups.len() {
+            let group = self.groups.remove(from);
+            self.groups.insert(to, group);
+        }
+    }
+
     /// The groups `library` is not in, by index and name, for "Add to group".
     pub(super) fn groups_without(&self, library: &str) -> Vec<(usize, String)> {
         self.groups
@@ -460,6 +468,25 @@ mod tests {
 
     /// R-SQL-83: groups are kept by name in the settings, and a group kept without `open`
     /// reads as open.
+    #[test]
+    fn a_group_moves_to_any_place_the_others_keeping_their_order_r_sql_104() {
+        let mut b = named(&["A", "B", "C", "D"]);
+        let names = |b: &Browser| -> Vec<String> {
+            b.library_groups().iter().map(|g| g.name.clone()).collect()
+        };
+        b.move_group_to(0, 2);
+        assert_eq!(names(&b), ["B", "C", "A", "D"]);
+        b.move_group_to(3, 0);
+        assert_eq!(names(&b), ["D", "B", "C", "A"]);
+        b.move_group_to(1, 9);
+        b.move_group_to(9, 1);
+        assert_eq!(
+            names(&b),
+            ["D", "B", "C", "A"],
+            "a place past the end is no move"
+        );
+    }
+
     #[test]
     fn a_group_is_kept_and_read_back() {
         let group = LibraryGroup {

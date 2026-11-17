@@ -3,10 +3,12 @@
 //! bundled text fonts are under the SIL Open Font License, the icon font under MIT
 //! (`assets/fonts/*-LICENSE.txt`).
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use egui::{FontData, FontDefinitions, FontFamily};
-use fontique::{Collection, CollectionOptions, SourceCache, SourceCacheOptions};
+use fontique::{
+    Collection, CollectionOptions, FallbackKey, FamilyId, Script, SourceCache, SourceCacheOptions,
+};
 use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider};
 
@@ -99,6 +101,64 @@ pub fn system_face(name: &str, bold: bool, italic: bool) -> Option<FontData> {
     let mut data = FontData::from_owned(blob.data().to_vec());
     data.index = font.index();
     Some(data)
+}
+
+/// An installed font egui may fall back to, by its key in [`FontDefinitions::font_data`].
+pub type Fallback = (String, Arc<FontData>);
+
+/// Installed fonts for the scripts the bundled fonts lack: Japanese, Chinese and Korean
+/// (R-UI-29). Looked for the first time they are wanted and kept, so setting the fonts up
+/// again costs nothing; none where none is installed.
+pub fn script_fallbacks() -> &'static [Fallback] {
+    static FALLBACKS: OnceLock<Vec<Fallback>> = OnceLock::new();
+    FALLBACKS.get_or_init(find_script_fallbacks)
+}
+
+/// The system's own fallback family for each of Han as Japanese (with kana), Han as Chinese
+/// and Hangul, once each: one font that covers all three is added once.
+fn find_script_fallbacks() -> Vec<Fallback> {
+    let han = Script::from_bytes(*b"Hani");
+    let keys: [FallbackKey; 3] = [
+        (han, "ja").into(),
+        (han, "zh").into(),
+        Script::from_bytes(*b"Hang").into(),
+    ];
+    let (mut collection, mut cache) = system_collection();
+    let mut found: Vec<Fallback> = Vec::new();
+    for key in keys {
+        let ids: Vec<FamilyId> = collection.fallback_families(key).collect();
+        let Some(family) = ids.into_iter().find_map(|id| collection.family(id)) else {
+            continue;
+        };
+        let name = format!("fallback: {}", family.name());
+        if found.iter().any(|(known, _)| *known == name) {
+            continue;
+        }
+        let Some(blob) = family
+            .default_font()
+            .and_then(|font| Some((font.load(Some(&mut cache))?, font.index())))
+        else {
+            continue;
+        };
+        let mut data = FontData::from_owned(blob.0.data().to_vec());
+        data.index = blob.1;
+        found.push((name, Arc::new(data)));
+    }
+    found
+}
+
+/// Puts `fallbacks` last in `families`, so they draw only the characters every other font in
+/// them lacks (R-UI-29).
+pub fn add_fallbacks(fonts: &mut FontDefinitions, families: &[FontFamily], fallbacks: &[Fallback]) {
+    for (name, data) in fallbacks {
+        fonts.font_data.insert(name.clone(), Arc::clone(data));
+        for family in families {
+            let list = fonts.families.entry(family.clone()).or_default();
+            if !list.contains(name) {
+                list.push(name.clone());
+            }
+        }
+    }
 }
 
 /// True if the font's narrow and wide letters are equally wide: a grid needs that.
@@ -200,6 +260,46 @@ mod tests {
             terminal.contains(&HACK.to_owned()),
             "Hack fills in missing glyphs"
         );
+    }
+
+    #[test]
+    fn script_fallbacks_come_last_in_every_text_family_and_the_terminal_r_ui_29() {
+        let mut fonts = FontDefinitions::default();
+        let before = fonts.families[&FontFamily::Proportional].clone();
+        let fake: Vec<Fallback> = vec![(
+            "fallback: Fake CJK".to_owned(),
+            Arc::new(FontData::from_static(include_bytes!(
+                "../assets/fonts/Inter-Regular.ttf"
+            ))),
+        )];
+        let families = [FontFamily::Proportional, FontFamily::Monospace];
+        add_fallbacks(&mut fonts, &families, &fake);
+        add_fallbacks(&mut fonts, &families, &fake);
+        assert!(fonts.font_data.contains_key("fallback: Fake CJK"));
+        let ui = &fonts.families[&FontFamily::Proportional];
+        assert_eq!(
+            ui[..before.len()],
+            before[..],
+            "the others keep their place"
+        );
+        assert_eq!(ui.last().map(String::as_str), Some("fallback: Fake CJK"));
+        assert_eq!(ui.len(), before.len() + 1, "added once");
+        add_terminal_family(&mut fonts, DEFAULT_TERMINAL_FONT);
+        let terminal = &fonts.families[&terminal_family()];
+        assert_eq!(
+            terminal.last().map(String::as_str),
+            Some("fallback: Fake CJK")
+        );
+    }
+
+    #[test]
+    fn looking_for_script_fallbacks_twice_reads_the_system_once_r_ui_29() {
+        // Whatever is installed: the same fonts, kept, and each one once.
+        let first = script_fallbacks();
+        assert!(std::ptr::eq(first, script_fallbacks()));
+        let mut names: Vec<&String> = first.iter().map(|(n, _)| n).collect();
+        names.dedup();
+        assert_eq!(names.len(), first.len());
     }
 
     #[test]

@@ -18,7 +18,7 @@ Host: the IBM i's name or IP address.
 TLS: encrypt the connection (the IBM i's host servers need TLS set up). A CA certificate \
 names a PEM file to trust besides the system's own.
 Code page: how binary columns show as text in the hex view.
-Naming: SQL (SCHEMA.TABLE) or System (LIBRARY/FILE and the library list).
+Naming: System (LIBRARY/FILE and the library list, the default) or SQL (SCHEMA.TABLE).
 Libraries: set at connect, separated by commas or blanks; with SQL naming the first is the \
 default schema, with System naming they make the library list. Empty: the user profile's.
 Auto-commit: how the Autocommit switch starts. Isolation: the commitment control level.

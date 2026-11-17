@@ -209,6 +209,13 @@ pub fn font_definitions(terminal_font: &str) -> (FontDefinitions, Option<String>
     fonts.families.insert(icons, vec![PHOSPHOR.to_owned()]);
     let mono = fonts.families.entry(FontFamily::Monospace).or_default();
     mono.insert(0, fonts::JETBRAINS_MONO.to_owned());
+    // Japanese, Chinese and Korean from the system's own fonts, last (R-UI-29).
+    let text = [
+        FontFamily::Proportional,
+        FontFamily::Name(SEMIBOLD.into()),
+        FontFamily::Monospace,
+    ];
+    fonts::add_fallbacks(&mut fonts, &text, fonts::script_fallbacks());
 
     let note = fonts::add_terminal_family(&mut fonts, terminal_font);
     (fonts, note)

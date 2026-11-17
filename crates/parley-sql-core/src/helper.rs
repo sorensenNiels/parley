@@ -68,7 +68,7 @@ pub struct Helper {
 impl Helper {
     /// Starts the helper with `java`.
     pub fn start(java: &Path, files: &HelperFiles) -> Result<Self> {
-        let mut child = Command::new(java)
+        let mut child = crate::java::without_window(&mut Command::new(java))
             .arg("-cp")
             .arg(files.class_path()?)
             .arg("parley.sql.Helper")

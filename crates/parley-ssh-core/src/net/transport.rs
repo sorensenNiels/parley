@@ -396,6 +396,10 @@ fn spawn(line: &str) -> Result<impl Io + use<>, Error> {
     let mut command = if cfg!(windows) {
         let mut c = tokio::process::Command::new("cmd");
         c.arg("/C").arg(line);
+        // Win32 process creation flags: `CREATE_NO_WINDOW`, or `cmd` opens a console window
+        // beside Parley SSH's for as long as the connection lasts (R-SSH-60).
+        #[cfg(windows)]
+        c.creation_flags(0x0800_0000);
         c
     } else {
         let mut c = tokio::process::Command::new("sh");

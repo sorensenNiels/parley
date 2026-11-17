@@ -3,13 +3,13 @@
 
 use serde::{Deserialize, Serialize};
 
-/// How table names are qualified (R-SQL-97).
+/// How table names are qualified (R-SQL-97); System by default (R-SQL-102, D52).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Naming {
     /// `SCHEMA.TABLE`.
-    #[default]
     Sql,
     /// `LIBRARY/FILE` and the library list.
+    #[default]
     System,
 }
 
@@ -209,11 +209,11 @@ mod tests {
     }
 
     #[test]
-    fn the_defaults_are_what_parley_sql_always_used_r_sql_97() {
+    fn the_defaults_are_what_parley_sql_always_used_but_system_naming_r_sql_97_r_sql_102() {
         let options = ConnectOptions::default();
         assert!(options.autocommit);
         let p = options.jdbc_properties();
-        assert_eq!(property(&p, "naming"), Some("sql"));
+        assert_eq!(property(&p, "naming"), Some("system"));
         assert_eq!(property(&p, "date format"), Some("iso"));
         assert_eq!(property(&p, "time format"), Some("iso"));
         assert_eq!(property(&p, "decimal separator"), Some("."));
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn chosen_options_become_jtopen_properties_r_sql_97_r_sql_99_r_sql_100() {
         let options = ConnectOptions {
-            naming: Naming::System,
+            naming: Naming::Sql,
             libraries: " nodejt400, qgpl  æøålib\t".into(),
             autocommit: false,
             isolation: Isolation::Cs,
@@ -233,7 +233,7 @@ mod tests {
             decimal_separator: DecimalSeparator::Comma,
         };
         let p = options.jdbc_properties();
-        assert_eq!(property(&p, "naming"), Some("system"));
+        assert_eq!(property(&p, "naming"), Some("sql"));
         assert_eq!(property(&p, "libraries"), Some("NODEJT400,QGPL,ÆØÅLIB"));
         assert_eq!(
             property(&p, "transaction isolation"),
@@ -263,5 +263,11 @@ mod tests {
     fn old_saved_connections_read_with_the_defaults() {
         let options: ConnectOptions = serde_json::from_str("{}").expect("reads");
         assert_eq!(options, ConnectOptions::default());
+    }
+
+    #[test]
+    fn a_connection_saved_with_sql_naming_keeps_it_r_sql_102() {
+        let options: ConnectOptions = serde_json::from_str(r#"{"naming":"Sql"}"#).expect("reads");
+        assert_eq!(options.naming, Naming::Sql);
     }
 }

@@ -11,7 +11,7 @@ mod groups;
 use std::collections::BTreeMap;
 
 use egui::collapsing_header::CollapsingState;
-use egui::{CollapsingHeader, RichText, ScrollArea, TextEdit, Ui};
+use egui::{CollapsingHeader, Rect, RichText, ScrollArea, Sense, TextEdit, Ui};
 use parley_sql_core::catalog::{self, ColumnInfo, Kind, Object};
 
 use super::database::{Answered, Ask, Database, State};
@@ -253,9 +253,17 @@ impl Browser {
                 })
                 .body(|ui| {
                     picked = self.library_list(ui, list, db);
+                    let mut rects = Vec::with_capacity(self.groups.len());
+                    let mut dragging = None;
                     for i in 0..self.groups.len() {
-                        picked = self.group(ui, i, db).or(picked.take());
+                        let (pick, rect, dragged) = self.group(ui, i, db);
+                        picked = pick.or(picked.take());
+                        rects.push(rect);
+                        if dragged {
+                            dragging = Some(i);
+                        }
                     }
+                    self.drop_group(ui, dragging, &rects);
                     if self.groups.is_empty() {
                         ui.add_space(6.0);
                         theme::hint(
@@ -367,21 +375,39 @@ impl Browser {
     }
 
     /// Group `i`, with its menu (R-SQL-83).
-    fn group(&mut self, ui: &mut Ui, i: usize, db: &mut Database) -> Option<Pick> {
-        let group = self.groups.get(i)?;
+    /// Group `i` with its libraries; also where it is drawn and whether its menu button is being
+    /// dragged (R-SQL-104).
+    fn group(&mut self, ui: &mut Ui, i: usize, db: &mut Database) -> (Option<Pick>, Rect, bool) {
+        let Some(group) = self.groups.get(i) else {
+            return (None, Rect::NOTHING, false);
+        };
         let (name, libraries, open) = (group.name.clone(), group.libraries.clone(), group.open);
         let id = ("sql-library-group", i);
         let mut picked = None;
-        let (_, header, _) = group_header(ui, id, open, |ui| {
+        let mut handle = None;
+        let (_, header, body) = group_header(ui, id, open, |ui| {
             let label = ui.add(
                 egui::Label::new(theme::semibold(&name))
                     .truncate()
                     .sense(egui::Sense::click()),
             );
+            // The menu button is also the handle a group is dragged by (R-SQL-104): the drag is
+            // sensed behind the button, so a click still opens the menu (a sense on top would
+            // take the click).
             let menu = theme::button_row(ui, |ui| {
                 let glyph = icons::icon(icons::LIST).color(theme::palette(ui).muted);
-                ui.menu_button(glyph, |ui| self.group_menu(ui, i)).response
+                // By name, unique to the group: by place, the drag would pass to the group that
+                // took its place.
+                let behind = egui::UiBuilder::new()
+                    .id_salt(("sql-group-handle", &name))
+                    .sense(Sense::drag());
+                let shown = ui.scope_builder(behind, |ui| {
+                    ui.menu_button(glyph, |ui| self.group_menu(ui, i)).response
+                });
+                handle = Some(shown.response);
+                shown.inner
             });
+            let menu = menu.on_hover_text("Menu; drag to move the group");
             menu.widget_info(|| {
                 egui::WidgetInfo::labeled(
                     egui::accesskit::Role::Button,
@@ -410,7 +436,29 @@ impl Browser {
         if let Some(group) = self.groups.get_mut(i) {
             group.open = open;
         }
-        picked
+        let rect = body.map_or(header.response.rect, |b| {
+            header.response.rect.union(b.response.rect)
+        });
+        let dragged = handle.is_some_and(|h| {
+            if h.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            } else if h.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            }
+            h.dragged()
+        });
+        (picked, rect, dragged)
+    }
+
+    /// The group being dragged, `dragging`, takes the place of the group under the pointer, as
+    /// it moves (R-SQL-104); `rects` are where the groups were drawn.
+    fn drop_group(&mut self, ui: &Ui, dragging: Option<usize>, rects: &[Rect]) {
+        if let (Some(from), Some(pointer)) = (dragging, ui.ctx().pointer_interact_pos())
+            && let Some(to) = rects.iter().position(|r| r.y_range().contains(pointer.y))
+            && to != from
+        {
+            self.move_group_to(from, to);
+        }
     }
 
     fn search_row(&mut self, ui: &mut Ui) {
@@ -446,8 +494,13 @@ impl Browser {
                 .as_ref()
                 .is_some_and(|(i, l)| *i == g && l == library)
         });
+        // By the group's name, which is its own (R-SQL-83), so a library stays open when its
+        // group moves (R-SQL-104).
+        let in_group = group
+            .and_then(|g| self.groups.get(g))
+            .map(|g| g.name.clone());
         let header = CollapsingHeader::new(RichText::new(library))
-            .id_salt(("sql-library", library, group))
+            .id_salt(("sql-library", library, in_group))
             .default_open(just_added)
             .show(ui, |ui| match self.objects_load(library, db).clone() {
                 Load::Reading => reading(ui),
@@ -898,6 +951,69 @@ mod tests {
                 "the panel's edge stays put: {before:?} then {after:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_group_is_dragged_by_its_menu_button_which_still_opens_on_a_click_r_sql_104() {
+        use egui_kittest::kittest::Queryable;
+
+        use super::super::tests::{drawn, window};
+        use super::groups::LibraryGroup;
+
+        let mut w = window();
+        w.database.state = State::Ready {
+            job: "1/QUSER/QZDASOINIT".to_owned(),
+        };
+        let groups = ["Udvikling æøå", "Test"]
+            .into_iter()
+            .map(|name| LibraryGroup {
+                name: name.to_owned(),
+                ..LibraryGroup::default()
+            })
+            .collect();
+        w.browser = Browser::with_groups(groups, true, false);
+        let mut harness = drawn(w, Vec::new());
+        let names = |h: &egui_kittest::Harness<'static, super::super::SqlWindow>| -> Vec<String> {
+            h.state()
+                .browser
+                .library_groups()
+                .iter()
+                .map(|g| g.name.clone())
+                .collect()
+        };
+
+        let from = harness.get_by_label("Udvikling æøå menu").rect().center();
+        let to = harness.get_by_label("Test").rect().center();
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(egui::Event::PointerMoved(from));
+        harness.event(button(from, true));
+        harness.run();
+        for step in 1..=4 {
+            #[expect(clippy::cast_precision_loss, reason = "a step of four")]
+            let at = from + (to - from) * (step as f32 / 4.0);
+            harness.event(egui::Event::PointerMoved(at));
+            harness.run();
+        }
+        harness.event(button(to, false));
+        harness.run();
+        assert_eq!(names(&harness), ["Test", "Udvikling æøå"]);
+        assert!(
+            harness.query_by_label("Rename…").is_none(),
+            "a drag opens no menu"
+        );
+
+        harness.get_by_label("Test menu").click();
+        harness.run();
+        assert!(
+            harness.query_by_label("Rename…").is_some(),
+            "a click opens the menu"
+        );
+        assert_eq!(names(&harness), ["Test", "Udvikling æøå"]);
     }
 
     #[test]

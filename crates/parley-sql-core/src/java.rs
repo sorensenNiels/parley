@@ -60,9 +60,22 @@ const fn executable() -> &'static str {
     if cfg!(windows) { "java.exe" } else { "java" }
 }
 
+/// `command` started without a console window: on Windows a window program's `java.exe` would
+/// otherwise open one of its own for as long as it runs (R-SQL-103). Win32 process creation
+/// flags: `CREATE_NO_WINDOW`; the pipes to the helper work as before.
+pub(crate) fn without_window(command: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 /// Runs `path -version`; `None` when it does not run or does not say a version.
 fn probe(path: &Path) -> Option<Java> {
-    let output = Command::new(path)
+    let output = without_window(&mut Command::new(path))
         .arg("-version")
         .stdin(Stdio::null())
         .output()
