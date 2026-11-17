@@ -267,6 +267,8 @@ fn pill(ui: &mut Ui, session: &Session) -> Option<Action> {
         State::Connecting | State::SigningOn => (p.warning_text, "connecting"),
         State::Ended(_) => (p.muted, "not connected"),
     };
+    let outline = theme::session_color(ui, session.source.color);
+    parley_ui_egui::session_color::pill_outline(ui, response.response.rect, outline);
     response
         .response
         .on_hover_text(format!("{} is {word}", session.target.label()));
@@ -284,6 +286,9 @@ pub fn status_bar(ui: &mut Ui, session: Option<&Session>, note: Option<&str>) ->
             status::muted(ui, None, note.unwrap_or("Not connected.").to_owned());
             return;
         };
+        // R-SSH-61: the session's colour at the bar's left end.
+        let color = theme::session_color(ui, session.source.color);
+        parley_ui_egui::session_color::status_block(ui, color);
         let now = ui.input(|i| i.time);
         if let Some((attempt, seconds)) = session.reconnecting(now) {
             // R-SSH-51: the count down, Restart now and Stop.

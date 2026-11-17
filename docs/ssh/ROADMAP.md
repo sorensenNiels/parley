@@ -179,6 +179,7 @@ planned, as Phase 22's rows were.
 | R-SSH-56 | **The Transfer panel** (2026-11-16, IDEA-43, D48). A source and a target, each an open session (or the desktop) and a path; a dry run first (`--dry-run --itemize-changes`) listed as what will be added, changed and deleted; then progress, speed and time left (`--info=progress2`), Cancel, and resume (`--partial`); switches for deleting extra files, keeping permissions and excludes; transfers saved by name to run again, also from the palette (R-SSH-48). | 31 |
 | R-SSH-57 | **rsync is checked first** (2026-11-16, IDEA-43, D48). Both ends need rsync 3.1 or later (`rsync --version`); when one has none or an older one, this is said in plain words before anything is copied. | 31 |
 | R-SSH-60 | **No console window for a proxy command on Windows** (2026-11-17, found with R-SQL-103). A connection through a proxy command starts `cmd /C` without a console window (Win32 `CREATE_NO_WINDOW`); its standard input and output are the connection as before. | Between phases |
+| R-SSH-61 | **A colour for each session** (2026-11-17, D54, as Parley 5250's R-UI-35). The session editor's "Colour" on the Session page: none or one of the eight named colours. The session in front shows it as the line under the header, the pill's outline and the status bar's block; every tab has a stripe in the colour of its pane in front; every pane has a 2 px frame in its own session's colour (the pane in front keeps its accent border inside it); a saved session's card has a stripe on its left edge. Never as a background. | Between phases |
 
 ## 6. Open questions
 
@@ -203,4 +204,4 @@ D36–D38 in [../DECISIONS.md](../DECISIONS.md) bind this work too.
   `phases/phase-NN-<slug>.md`, and its §3 row links to it.
 - An idea is not a plan: it goes in [IDEAS.md](IDEAS.md) (by theme in [ideas/](ideas/)) until it is picked, then becomes requirements here.
 
-Next free ID: `R-SSH-61` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).
+Next free ID: `R-SSH-62` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).

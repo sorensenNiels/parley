@@ -9,7 +9,7 @@ use parley_core::net::Connection;
 
 use crate::keymap::KeyInput;
 use crate::settings::MoreSessions;
-use crate::{ParleyUi, Profile, dialog, reconnect, status, terminal, theme};
+use crate::{ParleyUi, Profile, SessionColor, dialog, reconnect, status, terminal, theme};
 
 /// A session's own state (R-UI-33): in a tab behind the one in front, or a placeholder in the front tab's slot.
 #[derive(Debug, Default)]
@@ -181,7 +181,7 @@ impl ParleyUi {
         if self.tabs.len() < 2 {
             return None;
         }
-        let labels: Vec<(String, Mark)> = (0..self.tabs.len())
+        let labels: Vec<(String, Mark, SessionColor)> = (0..self.tabs.len())
             .map(|i| {
                 if i == self.active {
                     // During the frame the front connection is out of its field: `front` is its session.
@@ -192,7 +192,11 @@ impl ParleyUi {
                         self.current.as_ref(),
                         self.closed.is_some(),
                     );
-                    (tab_name(self.current.as_ref()), mark)
+                    (
+                        tab_name(self.current.as_ref()),
+                        mark,
+                        tab_color(self.current.as_ref()),
+                    )
                 } else {
                     let tab = &self.tabs[i];
                     let waiting = tab
@@ -205,7 +209,11 @@ impl ParleyUi {
                         tab.current.as_ref(),
                         tab.closed.is_some(),
                     );
-                    (tab_name(tab.current.as_ref()), mark)
+                    (
+                        tab_name(tab.current.as_ref()),
+                        mark,
+                        tab_color(tab.current.as_ref()),
+                    )
                 }
             })
             .collect();
@@ -397,12 +405,22 @@ fn tab_name(current: Option<&Profile>) -> String {
     current.map_or_else(|| "New session".to_owned(), |p| p.name.clone())
 }
 
-/// One tab per session: a dot for a message or a lost connection, the name, and a close button.
-fn tab_bar(ui: &mut Ui, labels: &[(String, Mark)], active: usize) -> Option<TabAction> {
+fn tab_color(current: Option<&Profile>) -> SessionColor {
+    current.map(|p| p.color).unwrap_or_default()
+}
+
+/// One tab per session: a dot for a message or a lost connection, the name, and a close button; a stripe in the
+/// session's colour along its top (R-UI-35).
+fn tab_bar(
+    ui: &mut Ui,
+    labels: &[(String, Mark, SessionColor)],
+    active: usize,
+) -> Option<TabAction> {
     let mut action = None;
     ui.horizontal(|ui| {
         let p = theme::palette(ui);
-        for (i, (name, mark)) in labels.iter().enumerate() {
+        for (i, (name, mark, session_color)) in labels.iter().enumerate() {
+            let start = ui.cursor().min;
             let (color, about) = match mark {
                 Mark::Message => (Some(p.warning_text), "A message is waiting"),
                 Mark::Lost => (Some(p.fail), "Not connected"),
@@ -440,6 +458,8 @@ fn tab_bar(ui: &mut Ui, labels: &[(String, Mark)], active: usize) -> Option<TabA
             if close.clicked() {
                 action = Some(TabAction::Close(i));
             }
+            let rect = egui::Rect::from_min_max(start, close.rect.right_bottom());
+            crate::session_color::tab_stripe(ui, rect, theme::session_color(ui, *session_color));
             ui.add_space(10.0);
         }
     });

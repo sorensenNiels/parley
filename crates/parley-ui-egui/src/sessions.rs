@@ -162,6 +162,10 @@ impl Editor {
     fn options(&mut self, ui: &mut Ui, macros: Option<&Macros>, maps: &[KeyMap]) {
         keyboard_map(ui, &mut self.draft.keyboard_map, maps);
         screen_colors(ui, &mut self.draft.screen_colors);
+        ui.horizontal(|ui| {
+            ui.label("Colour");
+            crate::session_color::chooser(ui, &mut self.draft.color);
+        });
         if let Some(macros) = macros {
             self.run_macro(ui, macros);
         }

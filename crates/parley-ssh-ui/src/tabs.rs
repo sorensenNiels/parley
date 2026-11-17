@@ -182,6 +182,14 @@ impl Tab {
         }
     }
 
+    /// The colour of the session in the pane in front (R-SSH-61).
+    pub fn color(&self) -> parley_ui_egui::SessionColor {
+        self.active_pane()
+            .and_then(Pane::session)
+            .map(|s| s.source.color)
+            .unwrap_or_default()
+    }
+
     /// The state of the pane in front, for the dot.
     fn state(&self) -> Option<&State> {
         self.active_pane().and_then(Pane::session).map(|s| &s.state)
@@ -258,6 +266,8 @@ pub fn bar(ui: &mut Ui, tabs: &[Tab], current: usize) -> Option<BarAction> {
             });
             let response = shown.response;
             let rect = response.rect;
+            let color = theme::session_color(ui, tab.color());
+            parley_ui_egui::session_color::tab_stripe(ui, rect, color);
             if front {
                 ui.painter().hline(
                     rect.x_range(),

@@ -15,6 +15,7 @@ mod macros;
 pub mod menu;
 mod profile;
 mod reconnect;
+pub mod session_color;
 mod sessions;
 pub mod settings;
 mod shortcuts;
@@ -40,6 +41,7 @@ use macros::Macros;
 pub use macros::{MacroStore, NoMacroStore, StoredMacro, check_name as check_macro_name};
 use menu::Action;
 pub use profile::Profile;
+pub use session_color::SessionColor;
 use sessions::{Editor, Outcome};
 pub use settings::MoreSessions;
 pub use settings::{Settings, Theme};
@@ -372,6 +374,7 @@ impl ParleyUi {
             mac: is_mac(ui.ctx()),
             maps: &maps,
             clock: &self.clock,
+            color: self.current.as_ref().map(|p| p.color).unwrap_or_default(),
         };
         Panel::bottom("status_bar")
             .frame(frame)
@@ -483,6 +486,13 @@ impl ParleyUi {
         let status_frame = theme::bar(ui, Margin::symmetric(8, 5));
         let tab_frame = theme::bar(ui, Margin::symmetric(8, 2));
         actions.extend(self.menu_panel(ui, menu_frame, session.as_deref(), link.as_ref()));
+        // R-UI-35: the session in front's colour under the header.
+        let color = session
+            .is_some()
+            .then(|| self.current.as_ref().map(|p| p.color))
+            .flatten()
+            .and_then(|c| theme::session_color(ui, c));
+        session_color::header_line(ui, "session_line", color);
         let tab_action = self
             .tab_panel(ui, tab_frame, session.as_deref())
             .or_else(|| self.tab_keys(ui.ctx()));
@@ -604,6 +614,10 @@ impl ParleyUi {
                     );
                     asked =
                         terminal::show(ui, session, &mut self.key_input, map, grab, &mut self.view);
+                    // R-UI-35: a frame in the session's colour round the screen.
+                    let color = self.current.as_ref().map(|p| p.color).unwrap_or_default();
+                    let rect = ui.max_rect().expand(14.0);
+                    session_color::screen_frame(ui, rect, theme::session_color(ui, color));
                 });
         } else {
             CentralPanel::default().show(ui, |ui| {
@@ -1895,6 +1909,7 @@ mod tests {
                         mac: false,
                         maps: &maps,
                         clock: &clock,
+                        color: SessionColor::None,
                     },
                 );
             })
@@ -2759,6 +2774,22 @@ mod tests {
         let config = &harness.state().profiles()[0].config;
         assert!(config.keep_alive);
         assert_eq!(config.keep_alive_seconds, 60);
+    }
+
+    #[test]
+    fn the_session_dialog_saves_a_colour_and_old_sessions_have_none_r_ui_35() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("New session…").click();
+        harness.run();
+        type_into(&mut harness, "Name", "Prod æøå");
+        type_into(&mut harness, "Host", "prod");
+        harness.get_by_label("Orange").click();
+        harness.run();
+        harness.get_by_label("Apply").click();
+        harness.run();
+        assert_eq!(harness.state().profiles()[0].color, SessionColor::Orange);
+        let old: Profile = serde_json::from_str(r#"{"name":"Gammel"}"#).expect("reads");
+        assert_eq!(old.color, SessionColor::None);
     }
 
     #[test]

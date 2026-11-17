@@ -102,6 +102,49 @@ pub fn palette(ui: &Ui) -> Palette {
     if ui.visuals().dark_mode { DARK } else { LIGHT }
 }
 
+/// A session's colour (R-UI-35, R-SSH-61, D54) in the current light/dark mode: red, orange, yellow, green, teal,
+/// blue, purple and pink, light then dark, in [`crate::session_color::SessionColor::ALL`]'s order after None.
+const SESSION_COLORS: [(Color32, Color32); 8] = [
+    (
+        Color32::from_rgb(0xdc, 0x26, 0x26),
+        Color32::from_rgb(0xf8, 0x71, 0x71),
+    ),
+    (
+        Color32::from_rgb(0xea, 0x58, 0x0c),
+        Color32::from_rgb(0xfb, 0x92, 0x3c),
+    ),
+    (
+        Color32::from_rgb(0xca, 0x8a, 0x04),
+        Color32::from_rgb(0xfa, 0xcc, 0x15),
+    ),
+    (
+        Color32::from_rgb(0x16, 0xa3, 0x4a),
+        Color32::from_rgb(0x4a, 0xde, 0x80),
+    ),
+    (
+        Color32::from_rgb(0x0d, 0x94, 0x88),
+        Color32::from_rgb(0x2d, 0xd4, 0xbf),
+    ),
+    (
+        Color32::from_rgb(0x25, 0x63, 0xeb),
+        Color32::from_rgb(0x60, 0xa5, 0xfa),
+    ),
+    (
+        Color32::from_rgb(0x93, 0x33, 0xea),
+        Color32::from_rgb(0xc0, 0x84, 0xfc),
+    ),
+    (
+        Color32::from_rgb(0xdb, 0x27, 0x77),
+        Color32::from_rgb(0xf4, 0x72, 0xb6),
+    ),
+];
+
+/// `color` as drawn in `ui`'s light or dark mode; `None` for none (R-UI-35).
+pub fn session_color(ui: &Ui, color: crate::session_color::SessionColor) -> Option<Color32> {
+    let (light, dark) = *SESSION_COLORS.get(color.index()?)?;
+    Some(if ui.visuals().dark_mode { dark } else { light })
+}
+
 // ---------------------------------------------------------------- setup
 
 /// Installs Parley's fonts (with `terminal_font` for the screen) and light/dark styles.

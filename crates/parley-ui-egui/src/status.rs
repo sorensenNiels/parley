@@ -36,6 +36,8 @@ pub struct Status<'a> {
     pub mac: bool,
     pub maps: &'a [String],
     pub clock: &'a Clock,
+    /// The session's colour, as a block at the bar's left end (R-UI-35).
+    pub color: crate::session_color::SessionColor,
 }
 
 /// What was clicked in the status bar.
@@ -153,6 +155,10 @@ pub fn status_bar(ui: &mut Ui, status: &Status<'_>) -> Option<StatusAction> {
     ui.horizontal(|ui| {
         ui.set_min_height(22.0);
         ui.spacing_mut().item_spacing.x = 6.0;
+        if status.session.is_some() {
+            let color = theme::session_color(ui, status.color);
+            crate::session_color::status_block(ui, color);
+        }
         action = left(ui, status);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = CHIP_GAP;

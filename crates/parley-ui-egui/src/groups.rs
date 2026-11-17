@@ -283,6 +283,7 @@ impl ParleyUi {
             .map(|g| connect::Entry {
                 name: &g.name,
                 address: g.sessions.join(", "),
+                color: crate::SessionColor::None,
             })
             .collect();
         ui.add_space(16.0);

@@ -98,6 +98,8 @@ impl SqlConnection {
         Entry {
             name: &self.name,
             address,
+            // Session colours are Parley 5250's and Parley SSH's (R-UI-35, R-SSH-61).
+            color: parley_ui_egui::SessionColor::None,
         }
     }
 }

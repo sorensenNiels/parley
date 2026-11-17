@@ -47,6 +47,8 @@ pub struct SavedSession {
     pub compression: bool,
     /// Run instead of the shell; empty for the shell (R-SSH-28).
     pub remote_command: String,
+    /// The session's colour, shown as stripes, lines and frames, never as a background (R-SSH-61).
+    pub color: parley_ui_egui::SessionColor,
     /// `NAME=value` lines.
     pub environment: String,
     pub terminal_type: String,
@@ -80,6 +82,7 @@ impl Default for SavedSession {
             rekey_mb: 1024,
             compression: false,
             remote_command: String::new(),
+            color: parley_ui_egui::SessionColor::None,
             environment: String::new(),
             terminal_type: "xterm-256color".to_owned(),
             proxy: connection::ProxyKind::None,
@@ -329,6 +332,9 @@ impl Editor {
                     );
                 }
                 field(ui, "Port", &mut self.port, "22", 80.0);
+                ui.label("Colour");
+                parley_ui_egui::session_color::chooser(ui, &mut self.session.color);
+                ui.end_row();
                 field(ui, "User name", &mut self.session.user, "", 300.0);
                 let label = ui.label("Key files");
                 let edit = egui::TextEdit::multiline(&mut self.key_files)
@@ -626,6 +632,23 @@ mod tests {
         h.get_by_label("Delete").click();
         h.run_steps(2);
         assert_eq!(h.state().1, Some(Edited::Delete));
+    }
+
+    #[test]
+    fn a_colour_is_chosen_in_the_editor_and_old_sessions_have_none_r_ssh_61() {
+        let mut h = harness(Editor::new(prod(), Some(0)));
+        h.run_steps(2);
+        h.get_by_label("Purple").click();
+        h.run_steps(2);
+        h.get_by_label("Save").click();
+        h.run_steps(2);
+        let Some(Edited::Save(saved)) = &h.state().1 else {
+            panic!("not saved");
+        };
+        assert_eq!(saved.color, parley_ui_egui::SessionColor::Purple);
+        let old: SavedSession =
+            serde_json::from_str(r#"{"name":"Gammel æøå","host":"h"}"#).expect("reads");
+        assert_eq!(old.color, parley_ui_egui::SessionColor::None);
     }
 
     #[test]

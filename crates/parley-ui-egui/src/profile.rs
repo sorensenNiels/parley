@@ -29,6 +29,8 @@ pub struct Profile {
     pub reconnect: bool,
     /// The 5250 screen's colours; `None` for the settings' (R-UI-23).
     pub screen_colors: Option<crate::terminal::Scheme>,
+    /// The session's colour, shown as stripes and lines, never as a background (R-UI-35).
+    pub color: crate::session_color::SessionColor,
 }
 
 impl Default for Profile {
@@ -48,6 +50,7 @@ impl Default for Profile {
             keyboard_map: String::new(),
             reconnect: false,
             screen_colors: None,
+            color: crate::session_color::SessionColor::None,
         }
     }
 }
