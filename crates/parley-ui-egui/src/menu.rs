@@ -39,6 +39,12 @@ pub enum Action {
     /// Connect to the saved session at this index, closing the open one first.
     Connect(usize),
     Disconnect,
+    /// File ▸ Duplicate session (R-UI-30).
+    Duplicate,
+    /// File ▸ Start group ▸, or a group's Start on the start screen (R-UI-32).
+    StartGroup(usize),
+    /// File ▸ Session groups… (R-UI-31).
+    SessionGroups,
     Exit,
     /// Copy the selection, or the screen (R-UI-22).
     CopyScreen,
@@ -77,6 +83,8 @@ pub struct Header<'a> {
     /// The state of the open connection; `None` when there is none.
     pub link: Option<&'a LinkState>,
     pub profiles: &'a [Profile],
+    /// The session groups' names (R-UI-32).
+    pub groups: &'a [String],
     /// The session in use.
     pub current: Option<&'a Profile>,
     pub logo: Option<&'a egui::TextureHandle>,
@@ -176,6 +184,17 @@ fn file_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
         if let Some(i) = connect_menu(ui, can_connect, names, None) {
             action = Some(Action::Connect(i));
         }
+        let copy = (icons::COPY, "Duplicate session");
+        if item(ui, header, header.connected(), copy, None) {
+            action = Some(Action::Duplicate);
+        }
+        ui.separator();
+        if let Some(i) = group_menu(ui, header.groups) {
+            action = Some(Action::StartGroup(i));
+        }
+        if item(ui, header, true, (icons::LIST, "Session groups…"), None) {
+            action = Some(Action::SessionGroups);
+        }
         ui.separator();
         if item(
             ui,
@@ -192,6 +211,25 @@ fn file_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
         }
     });
     action
+}
+
+/// "Start group ▸" with every session group (R-UI-32); the index of the one chosen.
+fn group_menu(ui: &mut Ui, groups: &[String]) -> Option<usize> {
+    let mut chosen = None;
+    let enabled = !groups.is_empty();
+    ui.add_enabled_ui(enabled, |ui| {
+        let text = (icons::icon(icons::PLUGS_CONNECTED), "Start group");
+        ui.menu_button(text, |ui| {
+            for (i, name) in groups.iter().enumerate() {
+                if ui.button(name).clicked() {
+                    chosen = Some(i);
+                }
+            }
+        })
+        .response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, "Start group"));
+    });
+    chosen
 }
 
 /// "Connect to ▸" with every saved session (or connection, R-SQL-46) named in `names` but

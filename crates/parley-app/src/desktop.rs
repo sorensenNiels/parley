@@ -2,7 +2,7 @@
 
 use eframe::egui;
 use parley_core::SessionConfig;
-use parley_ui_egui::{ParleyUi, Profile};
+use parley_ui_egui::{NewWindow, ParleyUi, Profile};
 
 use crate::{App, OLD_CONFIG_KEY, PASSWORDS_REMOVED_KEY, SESSIONS_KEY, SETTINGS_KEY};
 
@@ -11,10 +11,14 @@ Usage: parley [OPTION] [HOST[:PORT]]
 
 Opens Parley, a TN5250 terminal for IBM i. With HOST, connects to it straight away,
 with the saved session for that host if there is one (else port 23, or 992 with --tls).
-Without HOST, connects to the session marked \"connect on program start\", if any.
+Without HOST, connects to the session marked \"connect on program start\", or starts
+the group marked so, if any.
 
 Options:
   --tls                Connect with TLS
+  --session NAME       Connect to the saved session NAME
+  --no-device-name     With --session: ask for no device name, so the IBM i gives
+                       one of its own (a duplicate session)
   --sql [ARGS]         Start Parley SQL instead, with ARGS (see parley-sql --help)
   --ssh [ARGS]         Start Parley SSH instead, with ARGS (see parley-ssh --help)
   --screenshot FILE    After a few seconds, save the window as a PPM image and quit
@@ -35,6 +39,10 @@ enum Command {
 struct Args {
     host: Option<(String, Option<u16>)>,
     tls: bool,
+    /// A saved session by its name (R-UI-34).
+    session: Option<String>,
+    /// The session asks for no device name (R-UI-30).
+    no_device_name: bool,
     screenshot: Option<String>,
 }
 
@@ -51,6 +59,13 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> {
             "--version" | "-V" => return Ok(Command::Version),
             "--help" | "-h" => return Ok(Command::Help),
             "--tls" => parsed.tls = true,
+            "--no-device-name" => parsed.no_device_name = true,
+            "--session" => {
+                let name = args
+                    .next()
+                    .ok_or_else(|| format!("'{arg}' needs a value"))?;
+                parsed.session = Some(name);
+            }
             "--screenshot" => {
                 let file = args
                     .next()
@@ -127,6 +142,8 @@ pub fn run() -> eframe::Result {
             // R-SSH-59: Tools ▸ SSH… starts Parley SSH, installed beside Parley.
             ui.set_ssh_starter(Box::new(parley_app::ssh_start::start));
             ui.set_beep(Box::new(parley_app::beep::beep));
+            // R-UI-34: a duplicate or a group's sessions in windows of their own.
+            ui.set_window_opener(Box::new(open_window));
             match parley_app::macros::MacroFolder::beside_settings() {
                 Some(folder) => ui.set_macro_store(Box::new(folder)),
                 None => eprintln!("parley: no folder for macros on this system"),
@@ -136,17 +153,24 @@ pub fn run() -> eframe::Result {
                 Ok(logo) => ui.set_logo(logo),
                 Err(e) => eprintln!("parley: could not load the menu bar icon: {e}"),
             }
-            let connect_on_start = match args.host {
-                Some((host, port)) => {
+            let asked = args.session.is_some() || args.host.is_some();
+            let connect_on_start = match (args.session, args.host) {
+                (Some(name), _) => named_profile(ui.profiles(), &name, args.no_device_name),
+                (None, Some((host, port))) => {
                     let saved = ui.profile_for_host(&host);
                     Some(command_line_profile(saved, host, port, args.tls))
                 }
-                None => ui.startup_profile().cloned(),
+                (None, None) => ui.startup_profile().cloned(),
             };
+            // R-UI-32: a group marked to start, unless the command line or a session says otherwise.
+            let start_group = (!asked && connect_on_start.is_none())
+                .then(|| ui.startup_group())
+                .flatten();
             Ok(Box::new(App {
                 ui,
                 title: String::new(),
                 connect_on_start,
+                start_group,
                 screenshot: args.screenshot.map(parley_app::screenshot::Pending::new),
                 passwords_removed,
             }))
@@ -205,6 +229,56 @@ fn command_line_profile(
     profile
 }
 
+/// The saved session called `name` (R-UI-34); without its device name for a duplicate (R-UI-30). One that is
+/// not there is said, and nothing connects.
+fn named_profile(profiles: &[Profile], name: &str, no_device_name: bool) -> Option<Profile> {
+    let Some(mut profile) = profiles.iter().find(|p| p.name == name).cloned() else {
+        eprintln!("parley: there is no saved session called \"{name}\"");
+        return None;
+    };
+    if no_device_name {
+        profile.config.device_name.clear();
+    }
+    Some(profile)
+}
+
+/// The arguments that open `new` in another Parley window (R-UI-34): a saved session by its name, another by its
+/// host; a duplicate asks for no device name (R-UI-30).
+fn window_args(new: &NewWindow) -> Vec<String> {
+    let config = &new.profile.config;
+    if new.saved {
+        let mut args = vec!["--session".to_owned(), new.profile.name.clone()];
+        if new.duplicate {
+            args.push("--no-device-name".to_owned());
+        }
+        return args;
+    }
+    let host = if config.host.contains(':') {
+        format!("[{}]", config.host)
+    } else {
+        config.host.clone()
+    };
+    let mut args = vec![format!("{host}:{}", config.port)];
+    if config.tls {
+        args.insert(0, "--tls".to_owned());
+    }
+    args
+}
+
+/// Starts another Parley window on `new` (R-UI-34): this program again, which runs on its own.
+fn open_window(new: &NewWindow) -> Result<(), String> {
+    let program = std::env::current_exe()
+        .map_err(|e| format!("Parley could not find its own program: {e}"))?;
+    let mut child = std::process::Command::new(program)
+        .args(window_args(new))
+        .spawn()
+        .map_err(|e| format!("Another Parley window could not be started: {e}"))?;
+    // It runs on its own; waiting on a thread only collects its exit status, so it leaves no zombie process
+    // behind on Unix. What it returns is of no use here.
+    std::thread::spawn(move || child.wait().ok());
+    Ok(())
+}
+
 /// `host`, `host:port`, or `[v6 address]:port`.
 fn host_port(arg: &str) -> (String, Option<u16>) {
     if let Some((host, port)) = arg.rsplit_once(':')
@@ -233,11 +307,73 @@ mod tests {
                 host: Some(("pub400.com".into(), Some(992))),
                 tls: true,
                 screenshot: Some("æøå.ppm".into()),
+                ..Args::default()
             }))
         );
         assert_eq!(run(&[]), Ok(Command::Run(Args::default())));
         assert_eq!(run(&["--version"]), Ok(Command::Version));
         assert_eq!(run(&["-h", "--bogus"]), Ok(Command::Help));
+    }
+
+    /// What `new`'s window arguments read back as.
+    fn reread(new: &NewWindow) -> Args {
+        match parse(window_args(new)) {
+            Ok(Command::Run(args)) => args,
+            other => panic!("not a run: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_saved_session_opens_in_another_window_by_its_name_r_ui_34() {
+        let mut profile = saved(992, true);
+        profile.name = "Prod æøå".into();
+        profile.config.device_name = "DSP01".into();
+        let new = NewWindow {
+            profile: profile.clone(),
+            saved: true,
+            duplicate: false,
+        };
+        let args = reread(&new);
+        assert_eq!(args.session.as_deref(), Some("Prod æøå"));
+        assert!(!args.no_device_name);
+        let found = named_profile(&[profile], "Prod æøå", args.no_device_name);
+        assert_eq!(found.map(|p| p.config.device_name), Some("DSP01".into()));
+    }
+
+    #[test]
+    fn a_duplicate_asks_for_no_device_name_r_ui_30() {
+        let mut profile = saved(23, false);
+        profile.config.device_name = "DSP01".into();
+        let new = NewWindow {
+            profile: profile.clone(),
+            saved: true,
+            duplicate: true,
+        };
+        let args = reread(&new);
+        assert!(args.no_device_name);
+        let found = named_profile(&[profile.clone()], &profile.name, args.no_device_name);
+        assert_eq!(found.map(|p| p.config.device_name), Some(String::new()));
+        assert!(named_profile(&[profile], "No such", false).is_none());
+    }
+
+    #[test]
+    fn a_session_not_saved_opens_by_its_host_port_and_tls_r_ui_34() {
+        for (host, tls) in [("ibmi.example.com", true), ("::1", false)] {
+            let profile = Profile::for_config(SessionConfig {
+                host: host.into(),
+                port: 2323,
+                tls,
+                ..SessionConfig::default()
+            });
+            let args = reread(&NewWindow {
+                profile,
+                saved: false,
+                duplicate: true,
+            });
+            assert_eq!(args.host, Some((host.into(), Some(2323))));
+            assert_eq!(args.tls, tls);
+            assert_eq!(args.session, None);
+        }
     }
 
     #[test]

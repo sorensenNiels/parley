@@ -182,14 +182,15 @@ fn config_group(ui: &mut Ui, openssh: &openssh::Hosts, shown: &[usize]) -> Optio
         })
         .collect();
     ui.add_space(16.0);
-    let choice = connect::group(ui, CONFIG_GROUP, &entries, "Save as session…").and_then(|c| {
-        match c {
-            connect::Choice::Connect(i) => Some(Choice::ConfigConnect(shown[i])),
-            connect::Choice::Edit(i) => Some(Choice::ConfigSave(shown[i])),
-            // A group has no New button.
-            connect::Choice::New => None,
-        }
-    });
+    let choice = connect::group(ui, CONFIG_GROUP, &entries, "Connect", "Save as session…")
+        .and_then(|c| {
+            match c {
+                connect::Choice::Connect(i) => Some(Choice::ConfigConnect(shown[i])),
+                connect::Choice::Edit(i) => Some(Choice::ConfigSave(shown[i])),
+                // A group has no New button.
+                connect::Choice::New => None,
+            }
+        });
     if let Some(first) = problems.first() {
         ui.vertical_centered(|ui| {
             let more = match problems.len() {

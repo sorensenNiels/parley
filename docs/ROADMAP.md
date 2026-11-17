@@ -64,6 +64,13 @@ display device created fresh by that reply (PARLYGUI, type 3477 FC). Something e
 enhanced interface. Before R-DS-11: find IBM's rules for it (a system, user, job, device or display file setting, or
 how IBM's own emulators identify themselves), then check R-DS-10 live.
 
+### Phase 40 — More sessions at once (planned)
+
+From the owner, 2026-11-17 (D53), with IDEA-15: duplicate the session in use and start a named group of saved sessions
+at once. Where the extra sessions open is the user's setting: a window each, as today, or tabs in one window. Built in
+steps: tabs and the setting (R-UI-33, R-UI-34), then duplicate (R-UI-30) and groups (R-UI-31, R-UI-32), which open
+the way the setting says.
+
 ### Later (unordered, to be planned)
 
 Printer sessions (IDEA-18); see [IDEAS.md](IDEAS.md). SQL work is planned in [sql/ROADMAP.md](sql/ROADMAP.md).
@@ -81,6 +88,11 @@ the SQL window's add-on switches, probes and assistant, are in [sql/ROADMAP.md](
 | R-DS-11 | **GUI selection fields and the mouse** (2026-11-15, from IDEA-5; D38; SC30-3533-04 §15.6.13.5–6, §15.6.13.9). With the switch on: Define Selection Field (X'50') draws menus, single and multiple choice fields (radio buttons, check boxes) and push buttons with their choices, mnemonics and states; the arrow keys, the mnemonics and a click select a choice and the field's AID or Enter goes to the host with the selection as the manual says; Remove GUI Selection Field (X'58'); Write Data (X'5E') into a field. Details are taken from the manual when this is planned. | 22 |
 | R-DS-12 | **GUI scroll bars and mouse buttons** (2026-11-15, from IDEA-5; D38; SC30-3533-04 §15.6.13.7–8, §15.6.13.10). With the switch on: Define Scroll Bar Field (X'53'), drawn beside a list and sending the scroll AID with the new position when dragged or clicked; Remove GUI Scroll Bar Field; Programmable Mouse Buttons. Details are taken from the manual when this is planned. | 22 |
 | R-UI-29 | **Japanese, Chinese and Korean text** (2026-11-17; asked by the owner: a Japanese name in Parley SQL's results showed as boxes). The bundled fonts have no CJK glyphs, so the system's own fallback fonts for Han as Japanese, Han as Chinese and Hangul (fontique's fallback lookup: Yu Gothic, Microsoft YaHei and Malgun Gothic on Windows, Hiragino and the like on macOS, Noto CJK through fontconfig on Linux) are added last to the UI, heading, monospace and terminal families of all three programs, each font once; they are looked for once per run. With none installed, nothing changes. Checked on Windows: a Japanese name from a UTF-8 or UTF-16 column shows in the result grid. | Between phases |
+| R-UI-30 | **Duplicate the session** (2026-11-17, D53). File ▸ Duplicate session opens the session in use again, saved or not, with the same host, port, TLS, code page, size, keyboard map and macro, but no device name, so the IBM i gives it one of its own; it opens where R-UI-34 says. Disabled on the start screen. | Phase 40 |
+| R-UI-31 | **Session groups** (2026-11-17, D53). A group is a name and a list of saved sessions, in order; a session may be in several groups. File ▸ Session groups… (and Edit… on a group's card on the start screen) opens a dialog that makes, renames, orders and deletes groups and switches their sessions on and off. A group's sessions start in the saved sessions' order. Groups are saved with the settings; renaming a session keeps it in its groups, deleting it takes it out. | Phase 40 |
+| R-UI-32 | **Starting a group** (2026-11-17, D53). The start screen lists the groups under the saved sessions, each with Start and Edit…; File ▸ Start group ▸ lists them too. Starting opens every session of the group where R-UI-34 says; from the start screen the first takes the window it is started from. A group can be marked "start when Parley starts", as a session can (R-UI-5): at most one session or group is marked, and marking one unmarks the other. | Phase 40 |
+| R-UI-33 | **Sessions as tabs** (2026-11-17, IDEA-15, D53). One window holds several sessions as tabs, each with its own connection, screen, find bar, macros and status; a tab shows the session's name and a dot for message waiting or a lost connection. Ctrl+Tab and Ctrl+Shift+Tab move between tabs; a tab closes from its × (asking first while connected, as closing the window does); closing the window asks once for all connected tabs. With one session there is no tab bar. | Phase 40 |
+| R-UI-34 | **Where more sessions open** (2026-11-17, D53). Settings ▸ Terminal ▸ Sessions: "Open more sessions in" a new window (default, as before) or a new tab. A duplicate (R-UI-30) and a group's sessions (R-UI-32) open there; a new window is another Parley started with `--session NAME` (or the host, for a session not saved). | Phase 40 |
 
 ## 6. Ideas
 
@@ -105,4 +117,4 @@ The decisions, with the question, the choice and the alternatives, are in [DECIS
   (`D`), phases and ideas (`IDEA`, in [IDEAS.md](IDEAS.md)) take their next number here, whichever roadmap uses it,
   so a number never means two things.
 
-Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-12` · `R-DS-13` · `R-EBC-3` · `R-KEY-13` · `R-UI-30` · `R-ADD-4` · `R-NF-3` · `D53` · `Phase 40` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); `R-SSH`: [ssh/ROADMAP.md](ssh/ROADMAP.md); ideas: last line of IDEAS.md).
+Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-12` · `R-DS-13` · `R-EBC-3` · `R-KEY-13` · `R-UI-35` · `R-ADD-4` · `R-NF-3` · `D54` · `Phase 41` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); `R-SSH`: [ssh/ROADMAP.md](ssh/ROADMAP.md); ideas: last line of IDEAS.md).

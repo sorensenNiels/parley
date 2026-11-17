@@ -7,6 +7,7 @@ pub mod addons;
 pub mod connect;
 pub mod dialog;
 pub mod fonts;
+mod groups;
 pub mod icons;
 pub mod keymap;
 mod keys;
@@ -18,6 +19,7 @@ mod sessions;
 pub mod settings;
 mod shortcuts;
 pub mod status;
+mod tabs;
 mod terminal;
 /// The find bar, which Parley SSH's find in the scrollback uses too (R-SSH-24).
 pub mod find {
@@ -32,13 +34,16 @@ use egui::{CentralPanel, Frame, Margin, Panel, Ui, ViewportCommand};
 use parley_core::net::{Connection, LinkState};
 
 pub use addons::{AddOn, AddOnSettings, Toggle};
+pub use groups::SessionGroup;
 use keymap::{Function, KeyInput, KeyMap};
 use macros::Macros;
 pub use macros::{MacroStore, NoMacroStore, StoredMacro, check_name as check_macro_name};
 use menu::Action;
 pub use profile::Profile;
 use sessions::{Editor, Outcome};
+pub use settings::MoreSessions;
 pub use settings::{Settings, Theme};
+pub use tabs::{NewWindow, OpenWindow};
 pub use theme::Density;
 pub use updates::Checker;
 
@@ -152,6 +157,17 @@ pub struct ParleyUi {
     ssh_starter: Option<Starter>,
     /// Plays the alarm's beep (R-UI-25); without one (tests), the alarm only flashes.
     beep: Option<AlarmSound>,
+    /// Every session's tab (R-UI-33); the front one's slot is a placeholder, its state being in the fields
+    /// above. One tab: no tab bar.
+    tabs: Vec<tabs::Tab>,
+    /// The tab in front.
+    active: usize,
+    /// Asking whether to close the connected session in this tab (R-UI-33).
+    closing_tab: Option<usize>,
+    /// Opens another Parley window (R-UI-34); without one (tests), saying so.
+    window_opener: Option<tabs::WindowOpener>,
+    /// File ▸ Session groups…, while open (R-UI-31).
+    groups_dialog: Option<groups::Dialog>,
 }
 
 impl Default for ParleyUi {
@@ -194,6 +210,11 @@ impl ParleyUi {
             ssh_notice: None,
             ssh_starter: None,
             beep: None,
+            tabs: vec![tabs::Tab::default()],
+            active: 0,
+            closing_tab: None,
+            window_opener: None,
+            groups_dialog: None,
         }
     }
 
@@ -444,7 +465,10 @@ impl ParleyUi {
     /// Draws one frame.
     pub fn ui(&mut self, ui: &mut Ui) {
         self.apply_settings(ui.ctx());
-        self.follow_link(ui.ctx());
+        self.follow_background(ui.ctx());
+        if self.follow_link(ui.ctx()) {
+            self.session_over(ui.ctx());
+        }
         self.guard_exit(ui.ctx());
 
         let connection = self.connection.take();
@@ -457,7 +481,11 @@ impl ParleyUi {
         // Made before the panels borrow `ui`.
         let menu_frame = theme::bar(ui, Margin::symmetric(8, 3));
         let status_frame = theme::bar(ui, Margin::symmetric(8, 5));
+        let tab_frame = theme::bar(ui, Margin::symmetric(8, 2));
         actions.extend(self.menu_panel(ui, menu_frame, session.as_deref(), link.as_ref()));
+        let tab_action = self
+            .tab_panel(ui, tab_frame, session.as_deref())
+            .or_else(|| self.tab_keys(ui.ctx()));
         if let Some(chosen) = self.status_panel(ui, status_frame, session.as_deref(), link.as_ref())
         {
             self.status_action(chosen, &mut actions);
@@ -492,6 +520,11 @@ impl ParleyUi {
         }
         drop(session);
         self.finish_connection(ui.ctx(), connection, &next);
+        // Only now, with the front connection back in its field: these may change the front tab.
+        if let Some(action) = tab_action {
+            self.tab_action(action);
+        }
+        self.open_more(ui.ctx(), next.open);
         self.show_dialogs(ui.ctx());
     }
 
@@ -582,6 +615,7 @@ impl ParleyUi {
                     Some(connect::Choice::New) => actions.push(Action::NewSession),
                     None => {}
                 }
+                self.start_screen_groups(ui, actions);
             });
         }
         asked
@@ -629,6 +663,8 @@ impl ParleyUi {
         );
         self.show_shortcut_sheet(ctx);
         self.show_macro_dialogs(ctx);
+        self.show_groups(ctx);
+        self.show_close_tab_question(ctx);
         self.show_exit_question(ctx);
     }
 
@@ -646,9 +682,16 @@ impl ParleyUi {
             names: &macro_names,
         };
         let logo = self.logo.texture(ui.ctx()).cloned();
+        let groups: Vec<String> = self
+            .settings
+            .session_groups
+            .iter()
+            .map(|g| g.name.clone())
+            .collect();
         let header = menu::Header {
             link,
             profiles: &self.profiles,
+            groups: &groups,
             current: self.current.as_ref(),
             logo: logo.as_ref(),
             newer: self.updates.available(),
@@ -689,6 +732,9 @@ impl ParleyUi {
                     next.connect = Some(i);
                 }
                 Action::Disconnect => next.disconnect = true,
+                Action::Duplicate => next.open.extend(self.duplicate_of(connected)),
+                Action::StartGroup(i) => next.open.extend(self.group_openings(i)),
+                Action::SessionGroups => self.open_groups(None),
                 Action::Exit => ctx.send_viewport_cmd(ViewportCommand::Close),
                 Action::CopyScreen => {
                     if let Some(s) = session.as_deref() {
@@ -749,22 +795,25 @@ impl ParleyUi {
         next
     }
 
-    /// Notices the connection coming up or ending; a host that ends the session closes the
-    /// window if the session says so. A connection the network dropped is connected again
-    /// when the session says so (R-NET-10), and so is a try at it that failed.
-    fn follow_link(&mut self, ctx: &egui::Context) {
+    /// Notices the connection coming up or ending; true when the host ended the session and
+    /// the session says to close then (its tab, or the window, R-UI-33). A connection the
+    /// network dropped is connected again when the session says so (R-NET-10), and so is a
+    /// try at it that failed.
+    fn follow_link(&mut self, ctx: &egui::Context) -> bool {
         let now = std::time::Instant::now();
         match self.connection.as_ref().map(Connection::state) {
             Some(LinkState::Connected) => {
                 self.online = true;
                 self.reconnect = None;
+                false
             }
             Some(LinkState::Closed(reason)) => {
                 self.connection_ended(reason);
                 if let Some(trying) = self.reconnect {
                     self.reconnect = Some(trying.after_failure(now));
+                    false
                 } else {
-                    self.exit_when_host_ends(ctx);
+                    self.ends_with_host()
                 }
             }
             Some(LinkState::Dropped(reason)) => {
@@ -772,12 +821,16 @@ impl ParleyUi {
                 if self.current.as_ref().is_some_and(|p| p.reconnect) {
                     self.online = false;
                     self.reconnect = Some(reconnect::Reconnect::after_drop(now));
+                    false
                 } else {
-                    self.exit_when_host_ends(ctx);
+                    self.ends_with_host()
                 }
             }
-            Some(LinkState::Connecting) => {}
-            None => self.reconnect_when_due(ctx, now),
+            Some(LinkState::Connecting) => false,
+            None => {
+                self.reconnect_when_due(ctx, now);
+                false
+            }
         }
     }
 
@@ -788,12 +841,11 @@ impl ParleyUi {
         self.closed = Some(reason);
     }
 
-    fn exit_when_host_ends(&mut self, ctx: &egui::Context) {
+    /// Whether a session that was online closes now that the host ended it ("exit when the
+    /// host ends the session", R-UI-5).
+    fn ends_with_host(&mut self) -> bool {
         let exit = self.current.as_ref().is_some_and(|p| p.exit_on_close);
-        if std::mem::take(&mut self.online) && exit {
-            self.exit_confirmed = true;
-            ctx.send_viewport_cmd(ViewportCommand::Close);
-        }
+        std::mem::take(&mut self.online) && exit
     }
 
     /// Connects again once the wait is over, and draws the countdown each second until then.
@@ -814,8 +866,9 @@ impl ParleyUi {
     /// Holds a close request while connected to a session with "Confirm exit", to ask first.
     fn guard_exit(&mut self, ctx: &egui::Context) {
         let wants_close = ctx.input(|i| i.viewport().close_requested());
-        let confirm = self.current.as_ref().is_some_and(|p| p.confirm_exit);
-        if wants_close && self.connection.is_some() && confirm && !self.exit_confirmed {
+        // Every tab's session (R-UI-33).
+        let confirm = !self.sessions_asking_to_exit().is_empty();
+        if wants_close && confirm && !self.exit_confirmed {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             self.asking_to_exit = true;
         }
@@ -825,10 +878,14 @@ impl ParleyUi {
         if !self.asking_to_exit {
             return;
         }
-        let name = self.current.as_ref().map_or("", |p| p.name.as_str());
+        let names = self.sessions_asking_to_exit();
+        let text = match names.as_slice() {
+            [one] => format!("The session \"{one}\" is still connected."),
+            more => format!("{} sessions are still connected.", more.len()),
+        };
         let (close, (cancel, exit)) =
             dialog::dialog(ctx, "confirm_exit", "Exit Parley?", 380.0, |ui| {
-                ui.label(format!("The session \"{name}\" is still connected."));
+                ui.label(text);
                 dialog::actions(ui, theme::primary_button(ui, "Exit"), true)
             });
         if close || cancel {
@@ -950,7 +1007,11 @@ impl ParleyUi {
         let saved = editor.take_saved();
         if let Some(saved) = saved {
             self.session_saved(&saved.old_name, saved.index);
+            if let Some(profile) = self.profiles.get(saved.index).cloned() {
+                self.groups_follow_session(&saved.old_name, &profile);
+            }
         }
+        self.groups_forget_deleted();
         match outcome {
             Some(Outcome::Close) => self.editor = None,
             Some(Outcome::Connect(index)) => {
@@ -1101,6 +1162,8 @@ struct Next {
     disconnect: bool,
     /// Connect to the saved session at this index.
     connect: Option<usize>,
+    /// Sessions to open beside this one (R-UI-30, R-UI-32).
+    open: Vec<NewWindow>,
 }
 
 /// Whether to name keys as macOS does (Cmd+C).

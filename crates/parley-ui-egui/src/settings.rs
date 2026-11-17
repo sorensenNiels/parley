@@ -19,6 +19,7 @@ pub use layout::{Clicked, Closed, Rows, Sections, SettingsPage, group};
 
 use crate::addons::{AddOn, AddOnSettings, Toggle};
 use crate::fonts::{self, Installed};
+use crate::groups::SessionGroup;
 use crate::keymap::KeyMap;
 use crate::menu::Program;
 use crate::terminal;
@@ -65,6 +66,20 @@ pub struct Settings {
     pub addons: AddOnSettings,
     /// The operator's keyboard maps; the Default map is built in, not kept (R-KEY-2).
     pub keyboard_maps: Vec<KeyMap>,
+    /// Where a duplicate and a group's sessions open (R-UI-34).
+    pub more_sessions: MoreSessions,
+    /// Named groups of saved sessions (R-UI-31).
+    pub session_groups: Vec<SessionGroup>,
+}
+
+/// Where more sessions open (R-UI-34, D53).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MoreSessions {
+    /// Another Parley window each, as before.
+    #[default]
+    Window,
+    /// A tab each in this window (R-UI-33).
+    Tab,
 }
 
 impl Default for Settings {
@@ -86,6 +101,8 @@ impl Default for Settings {
             check_for_updates: true,
             addons: AddOnSettings::default(),
             keyboard_maps: Vec::new(),
+            more_sessions: MoreSessions::default(),
+            session_groups: Vec::new(),
         }
     }
 }
@@ -320,14 +337,18 @@ impl Dialog {
     }
 
     fn terminal_page(&self, ui: &mut Ui, settings: &mut Settings) {
+        sessions_group(ui, settings);
         let installed = self.installed.get();
+        Self::terminal_rest(ui, settings, installed.as_deref());
+    }
+
+    fn terminal_rest(ui: &mut Ui, settings: &mut Settings, installed: Option<&[String]>) {
         group(ui, "Font", None, |rows| {
             rows.row(
                 "Font",
                 Some("A bundled font, or a monospace font on this computer."),
                 |ui, name| {
-                    font_choice(ui, &mut settings.terminal_font, installed.as_deref())
-                        .labelled_by(name);
+                    font_choice(ui, &mut settings.terminal_font, installed).labelled_by(name);
                 },
             );
         });
@@ -480,4 +501,24 @@ fn preview(ui: &mut Ui, palette: &terminal::Palette) {
             });
         });
     ui.add_space(4.0);
+}
+
+/// Where more sessions open (R-UI-34).
+fn sessions_group(ui: &mut Ui, settings: &mut Settings) {
+    group(ui, "Sessions", None, |rows| {
+        rows.row(
+            "Open more sessions in",
+            Some("Where Duplicate session and a group's sessions open."),
+            |ui, _| {
+                theme::segmented(
+                    ui,
+                    &mut settings.more_sessions,
+                    &[
+                        (MoreSessions::Window, "A new window"),
+                        (MoreSessions::Tab, "A new tab"),
+                    ],
+                );
+            },
+        );
+    });
 }

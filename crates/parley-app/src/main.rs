@@ -31,6 +31,8 @@ struct App {
     ui: ParleyUi,
     title: String,
     connect_on_start: Option<Profile>,
+    /// The session group marked to start with Parley (R-UI-32).
+    start_group: Option<usize>,
     screenshot: Option<screenshot::Pending>,
     /// The saved passwords are gone from the keychain: don't look again (R-NET-7).
     passwords_removed: bool,
@@ -40,6 +42,9 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
         if let Some(profile) = self.connect_on_start.take() {
             self.ui.connect(ui.ctx(), profile);
+        }
+        if let Some(group) = self.start_group.take() {
+            self.ui.start_group(ui.ctx(), group);
         }
         self.ui.ui(ui);
         if let Some(pending) = &mut self.screenshot {
