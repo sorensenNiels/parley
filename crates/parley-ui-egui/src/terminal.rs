@@ -23,7 +23,7 @@ use egui::{
 use parley_core::screen::{Hotspot, Rectangle, Span, Target, hotspots, rectangle_text, table_text};
 use parley_core::{Color, Key, Session};
 
-use crate::keymap::{Function, KeyInput, KeyMap, PasteBreaks, Pasted, pasted};
+use crate::keymap::{Function, KeyInput, KeyMap, PasteBreaks, Pasted, Toward, pasted};
 
 /// What the operator has on the screen beside the session: the find bar and the selection.
 #[derive(Debug, Default)]
@@ -63,13 +63,29 @@ const FLASH: f64 = 0.3;
 /// Half a blink: shown this long, then hidden as long (R-UI-24).
 const HALF_BLINK: f64 = 0.5;
 
-/// A rectangle dragged over the screen (R-UI-22), with the screen it was made on: it goes
-/// when the host changes the screen.
+/// A rectangle dragged over the screen (R-UI-22) or grown with Shift and the arrow keys
+/// (R-UI-36), with the screen it was made on: it goes when the host changes the screen.
 #[derive(Debug)]
 struct Selection {
+    /// The corner it started at.
     anchor: (usize, usize),
-    area: Rectangle,
+    /// The corner the pointer or the arrow keys move.
+    head: (usize, usize),
     screen: Vec<u8>,
+}
+
+impl Selection {
+    fn new(anchor: (usize, usize), session: &Session) -> Self {
+        Self {
+            anchor,
+            head: anchor,
+            screen: session.screen().buffer().to_vec(),
+        }
+    }
+
+    fn area(&self) -> Rectangle {
+        Rectangle::spanning(self.anchor, self.head)
+    }
 }
 
 impl View {
@@ -96,7 +112,7 @@ impl View {
     fn area(&self, session: &Session) -> Rectangle {
         self.selection
             .as_ref()
-            .map_or_else(|| Rectangle::all(session.screen()), |s| s.area)
+            .map_or_else(|| Rectangle::all(session.screen()), Selection::area)
     }
 
     /// The selection as text, or the whole screen without one (R-UI-1, R-UI-22).
@@ -117,6 +133,27 @@ impl View {
             .is_some_and(|s| s.screen != session.screen().buffer())
         {
             self.selection = None;
+        }
+    }
+
+    /// Grows the selection one position `toward`, within the screen; without one, it starts
+    /// at the cursor (R-UI-36).
+    fn grow(&mut self, toward: Toward, session: &Session) {
+        let screen = session.screen();
+        let size = screen.size();
+        let (last_row, last_column) = (
+            usize::from(size.rows()).saturating_sub(1),
+            usize::from(size.columns()).saturating_sub(1),
+        );
+        let selection = self
+            .selection
+            .get_or_insert_with(|| Selection::new(screen.row_column(screen.cursor), session));
+        let (row, column) = &mut selection.head;
+        match toward {
+            Toward::Up => *row = row.saturating_sub(1),
+            Toward::Down => *row = (*row + 1).min(last_row),
+            Toward::Left => *column = column.saturating_sub(1),
+            Toward::Right => *column = (*column + 1).min(last_column),
         }
     }
 }
@@ -206,6 +243,7 @@ pub fn show(
                 }
                 Function::CopyTable => ui.ctx().copy_text(view.table_text(session)),
                 Function::Find => view.open_find(),
+                Function::Select(toward) => view.grow(toward, session),
                 // The text comes back as a paste event, read above next frame.
                 Function::Paste => ui
                     .ctx()
@@ -369,16 +407,12 @@ fn select(ui: &Ui, response: &egui::Response, grid: &Grid, session: &Session, vi
             .input(|i| i.pointer.press_origin())
             .and_then(|p| grid.cell_at(p))
     {
-        view.selection = Some(Selection {
-            anchor,
-            area: Rectangle::spanning(anchor, anchor),
-            screen: session.screen().buffer().to_vec(),
-        });
+        view.selection = Some(Selection::new(anchor, session));
     }
     if response.dragged()
         && let (Some(selection), Some(pos)) = (&mut view.selection, response.interact_pointer_pos())
     {
-        selection.area = Rectangle::spanning(selection.anchor, grid.nearest_cell(pos));
+        selection.head = grid.nearest_cell(pos);
     }
 }
 
@@ -409,7 +443,7 @@ impl Marks {
             blink,
             matches,
             current,
-            selection: view.selection.as_ref().map(|s| s.area),
+            selection: view.selection.as_ref().map(Selection::area),
         }
     }
 
@@ -782,6 +816,85 @@ mod tests {
             .state_mut()
             .0
             .receive(&crate::test_support::screen_record_showing("Other"));
+        harness.run();
+        assert!(harness.state().2.selection.is_none());
+    }
+
+    fn shift_arrow(harness: &mut Harness<'static, State>, key: egui::Key) {
+        harness.event(Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::SHIFT,
+        });
+        harness.run();
+    }
+
+    #[test]
+    fn shift_and_the_arrow_keys_select_from_the_cursor_r_ui_36() {
+        let mut harness = harness();
+        harness.state_mut().0.key(Key::MoveTo { row: 0, column: 1 });
+        harness.run();
+        shift_arrow(&mut harness, egui::Key::ArrowRight);
+        shift_arrow(&mut harness, egui::Key::ArrowRight);
+        shift_arrow(&mut harness, egui::Key::ArrowDown);
+        let (session, _, view) = harness.state();
+        assert_eq!(
+            view.copy_text(session),
+            "ell
+"
+        );
+        let cursor = session.screen().row_column(session.screen().cursor);
+        assert_eq!(cursor, (0, 1), "the cursor stays where it was");
+        harness.event(Event::Copy);
+        harness.step();
+        assert_eq!(
+            copied(&harness).as_deref(),
+            Some(
+                "ell
+"
+            )
+        );
+    }
+
+    #[test]
+    fn shift_and_the_arrow_keys_shrink_and_stop_at_the_screen_edge_r_ui_36() {
+        let mut harness = harness();
+        harness.state_mut().0.key(Key::MoveTo { row: 0, column: 0 });
+        harness.run();
+        shift_arrow(&mut harness, egui::Key::ArrowUp);
+        shift_arrow(&mut harness, egui::Key::ArrowLeft);
+        shift_arrow(&mut harness, egui::Key::ArrowRight);
+        shift_arrow(&mut harness, egui::Key::ArrowRight);
+        shift_arrow(&mut harness, egui::Key::ArrowLeft);
+        let (session, _, view) = harness.state();
+        assert_eq!(view.copy_text(session), "He");
+    }
+
+    #[test]
+    fn shift_and_an_arrow_key_grow_a_dragged_selection_r_ui_36() {
+        let mut harness = harness();
+        harness.run();
+        drag(&mut harness, (0, 0), (0, 2));
+        shift_arrow(&mut harness, egui::Key::ArrowRight);
+        let (session, _, view) = harness.state();
+        assert_eq!(view.copy_text(session), "Hell");
+    }
+
+    #[test]
+    fn an_arrow_key_without_shift_drops_the_selection_r_ui_36() {
+        let mut harness = harness();
+        harness.run();
+        shift_arrow(&mut harness, egui::Key::ArrowRight);
+        assert!(harness.state().2.selection.is_some());
+        harness.event(Event::Key {
+            key: egui::Key::ArrowRight,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
         harness.run();
         assert!(harness.state().2.selection.is_none());
     }

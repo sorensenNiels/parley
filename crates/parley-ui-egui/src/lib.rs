@@ -1060,6 +1060,7 @@ impl ParleyUi {
                 | Function::CopyTable
                 | Function::PasteText(_)
                 | Function::Find
+                | Function::Select(_)
                 | Function::Paste => {}
             }
         }

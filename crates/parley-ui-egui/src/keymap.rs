@@ -194,6 +194,8 @@ pub enum Function {
     Paste,
     /// Open the find bar (R-UI-21).
     Find,
+    /// Grow the selection one position this way (R-UI-36).
+    Select(Toward),
     /// Start recording a macro, or stop the recording (R-KEY-3).
     RecordMacro,
     /// Run the macro of this name (R-KEY-4).
@@ -205,6 +207,31 @@ pub enum Function {
     /// Start Parley SSH on the session's host (R-SSH-59), while the SSH add-on is on.
     Ssh,
 }
+
+/// A way the selection grows from the keyboard (R-UI-36).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Toward {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl Toward {
+    pub const ALL: [Self; 4] = [Self::Up, Self::Down, Self::Left, Self::Right];
+
+    /// Its name in a keyboard map's `select-…` id and in Settings.
+    const fn word(self) -> &'static str {
+        match self {
+            Self::Up => "up",
+            Self::Down => "down",
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+}
+
+const SELECT: &str = "select-";
 
 /// The 5250 keys that go to the host, beside F1–F24, in the order Settings lists them.
 const HOST_KEYS: [(Key, &str); 9] = [
@@ -252,6 +279,7 @@ impl Function {
             Self::CopyTable => "copy-table".to_owned(),
             Self::Paste => "paste".to_owned(),
             Self::Find => "find".to_owned(),
+            Self::Select(toward) => format!("{SELECT}{}", toward.word()),
             Self::RecordMacro => "record-macro".to_owned(),
             Self::RunMacro(name) => format!("{RUN_MACRO}{name}"),
             Self::Shortcuts => "shortcuts".to_owned(),
@@ -270,10 +298,15 @@ impl Function {
             "shortcuts" => Self::Shortcuts,
             "sql" => Self::Sql,
             "ssh" => Self::Ssh,
-            _ => match id.strip_prefix(RUN_MACRO) {
-                Some(name) => Self::RunMacro(name.to_owned()),
-                None => Self::Key(key_named(id)?),
-            },
+            _ => {
+                if let Some(name) = id.strip_prefix(RUN_MACRO) {
+                    Self::RunMacro(name.to_owned())
+                } else if let Some(word) = id.strip_prefix(SELECT) {
+                    Self::Select(Toward::ALL.into_iter().find(|t| t.word() == word)?)
+                } else {
+                    Self::Key(key_named(id)?)
+                }
+            }
         })
     }
 
@@ -295,6 +328,7 @@ impl Function {
             Self::CopyTable => "Copy as a table".to_owned(),
             Self::Paste => "Paste into fields".to_owned(),
             Self::Find => "Find on the screen".to_owned(),
+            Self::Select(toward) => format!("Select {}", toward.word()),
             Self::RecordMacro => "Record macro, stop recording".to_owned(),
             Self::RunMacro(name) => format!("Run macro {name}"),
             Self::Shortcuts => "Keyboard shortcuts".to_owned(),
@@ -316,6 +350,7 @@ impl Function {
                 | Self::PasteText(_)
                 | Self::CopyTable
                 | Self::Find
+                | Self::Select(_)
                 | Self::RecordMacro
                 | Self::RunMacro(_)
                 | Self::Shortcuts
@@ -350,6 +385,10 @@ pub fn groups(macros: Option<&[String]>, tools: &[Function]) -> Vec<(&'static st
                 Function::CopyTable,
                 Function::Paste,
                 Function::Find,
+                Function::Select(Toward::Up),
+                Function::Select(Toward::Down),
+                Function::Select(Toward::Left),
+                Function::Select(Toward::Right),
                 Function::Shortcuts,
             ],
         ),
@@ -411,6 +450,10 @@ static BUILT_IN: LazyLock<KeyMap> = LazyLock::new(|| {
         ("ArrowDown", "down"),
         ("ArrowLeft", "left"),
         ("ArrowRight", "right"),
+        ("Shift+ArrowUp", "select-up"),
+        ("Shift+ArrowDown", "select-down"),
+        ("Shift+ArrowLeft", "select-left"),
+        ("Shift+ArrowRight", "select-right"),
     ]
     .iter()
     .map(|(k, f)| ((*k).to_owned(), (*f).to_owned()))

@@ -73,6 +73,7 @@
 | R-UI-33 | Sessions as tabs | [Phase 40](phases/phase-40-more-sessions-at-once.md) |
 | R-UI-34 | Where more sessions open | [Phase 40](phases/phase-40-more-sessions-at-once.md) |
 | R-UI-35 | A colour for each session | [Between phases](phases/between-phases.md) |
+| R-UI-36 | Select with Shift and the arrow keys | [Between phases](phases/between-phases.md) |
 | R-ADD-1 | Settings ▸ Add-ons | [Phase 3](phases/phase-03-keyboard-maps-and-macros.md) |
 | R-ADD-2 | Macros are an add-on, on by default | [Phase 3](phases/phase-03-keyboard-maps-and-macros.md) |
 | R-NF-1 | Installers for every platform, built by the Release … | [Phase 1](phases/phase-01-connect-and-show-a-screen.md) |
