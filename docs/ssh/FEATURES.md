@@ -8,6 +8,16 @@
 
 ## In progress
 
+### Between phases: the user name asked when the session has none (R-SSH-62 built 2026-11-19, Linux under WSL)
+
+Automated (all pass): `parley-ssh-core`'s `tests/net.rs` against an in-process russh server (no user: the host key,
+then "User name" shown as typed, blank asked again, `Event::User` with the trimmed name, the password prompt and the
+server's sign-on as that user, `æøå`; Cancel on the user name ends quietly). Not yet seen in the running app.
+
+| ID | Built | Still to check in the running app |
+|---|---|---|
+| R-SSH-62 | `sign_on::ask_user` before signing on when `Target::user` is empty, `Event::User` taken into the session's target and source, `Target::label` without `user@` while unknown, the editor's hint. | A saved session without a user: the dialog, the tab title after signing on, Restart not asking again. |
+
 ### Phase 34: hosts from `~/.ssh/config` (R-SSH-43 built 2026-11-16, Linux under WSL)
 
 Automated (all pass): `parley-ssh-core`'s `net/jump.rs` (OpenSSH's syntax with `ssh://`, IPv6 and `none`, what

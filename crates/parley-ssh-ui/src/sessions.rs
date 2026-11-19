@@ -335,7 +335,13 @@ impl Editor {
                 ui.label("Colour");
                 parley_ui_egui::session_color::chooser(ui, &mut self.session.color);
                 ui.end_row();
-                field(ui, "User name", &mut self.session.user, "", 300.0);
+                field(
+                    ui,
+                    "User name",
+                    &mut self.session.user,
+                    "empty: asked when connecting",
+                    300.0,
+                );
                 let label = ui.label("Key files");
                 let edit = egui::TextEdit::multiline(&mut self.key_files)
                     .desired_rows(2)

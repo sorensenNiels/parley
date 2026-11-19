@@ -178,6 +178,7 @@ planned, as Phase 22's rows were.
 | R-SSH-55 | **Desktop and server** (2026-11-16, IDEA-43, D48). With the desktop's rsync, Parley SSH as its transport; where the desktop has no rsync (Windows by default) this is said with how to get it, and what then is decided when Phase 31 is planned. | 31 |
 | R-SSH-56 | **The Transfer panel** (2026-11-16, IDEA-43, D48). A source and a target, each an open session (or the desktop) and a path; a dry run first (`--dry-run --itemize-changes`) listed as what will be added, changed and deleted; then progress, speed and time left (`--info=progress2`), Cancel, and resume (`--partial`); switches for deleting extra files, keeping permissions and excludes; transfers saved by name to run again, also from the palette (R-SSH-48). | 31 |
 | R-SSH-57 | **rsync is checked first** (2026-11-16, IDEA-43, D48). Both ends need rsync 3.1 or later (`rsync --version`); when one has none or an older one, this is said in plain words before anything is copied. | 31 |
+| R-SSH-62 | **The user name asked when the session has none** (2026-11-19, asked by the owner). A session with no user name (a saved session, a restored tab, Restart) connects, checks the host key, then asks "User name" in the sign-on dialog, shown as typed and asked again while empty; Cancel ends the connection quietly. It signs on as that user, which the tab, the status bar, Restart and reconnecting (R-SSH-51) keep without asking again; the saved session is not changed. A jump host with no user anywhere asks for its own, naming its hop. The session editor's User name says "empty: asked when connecting". Quick connect and R-SSH-59 still ask for the user in the start screen. | Between phases |
 
 ## 6. Open questions
 
@@ -202,4 +203,4 @@ D36–D38 in [../DECISIONS.md](../DECISIONS.md) bind this work too.
   `phases/phase-NN-<slug>.md`, and its §3 row links to it.
 - An idea is not a plan: it goes in [IDEAS.md](IDEAS.md) (by theme in [ideas/](ideas/)) until it is picked, then becomes requirements here.
 
-Next free ID: `R-SSH-62` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).
+Next free ID: `R-SSH-63` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).

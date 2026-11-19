@@ -185,6 +185,32 @@ async fn keyboard_interactive(
     }
 }
 
+/// The user name to sign on to `target` as, asked when the session names none (R-SSH-62): shown as typed, asked
+/// again while empty; Cancel ends the sign-on.
+pub(super) async fn ask_user(
+    target: &Target,
+    commands: &Commands,
+    link: &Link,
+) -> Result<String, Error> {
+    loop {
+        let prompt = Prompt {
+            host: target.label(),
+            name: String::new(),
+            instructions: String::new(),
+            fields: vec![PromptField {
+                label: "User name".to_owned(),
+                echo: true,
+            }],
+        };
+        let answer = ask(prompt, commands, link).await?.pop().unwrap_or_default();
+        let user = answer.expose().trim();
+        if !user.is_empty() {
+            link.log(format!("Signing on as {user}"));
+            return Ok(user.to_owned());
+        }
+    }
+}
+
 /// Shows `prompt` and waits for the user's answers; Cancel ends the sign-on.
 async fn ask(prompt: Prompt, commands: &Commands, link: &Link) -> Result<Vec<Secret>, Error> {
     ask_or_skip(prompt, commands, link)

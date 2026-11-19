@@ -337,6 +337,11 @@ impl Session {
                 Event::Prompt(prompt) => {
                     self.prompt = Some(dialogs::Prompt::new(prompt, self.banner.take()));
                 }
+                // Kept for the tab, Restart and reconnecting, which then do not ask again (R-SSH-62).
+                Event::User(user) => {
+                    self.target.user.clone_from(&user);
+                    self.source.user = user;
+                }
                 Event::Secured {
                     algorithms,
                     fingerprint,

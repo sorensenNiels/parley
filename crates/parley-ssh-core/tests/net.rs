@@ -97,6 +97,8 @@ struct Seen {
     /// The command asked for instead of a shell, and the environment set (R-SSH-28).
     command: Option<String>,
     env: Vec<(String, String)>,
+    /// The user names passwords were tried for (R-SSH-62).
+    users: Vec<String>,
 }
 
 struct Server {
@@ -132,7 +134,12 @@ impl server::Handler for Server {
         Ok(true)
     }
 
-    async fn auth_password(&mut self, _user: &str, password: &str) -> Result<Auth, Self::Error> {
+    async fn auth_password(&mut self, user: &str, password: &str) -> Result<Auth, Self::Error> {
+        self.seen
+            .lock()
+            .expect("not poisoned")
+            .users
+            .push(user.to_owned());
         // As OpenSSH: a refusal names the methods that can go on, so the client may try again.
         let again = Auth::Reject {
             proceed_with_methods: Some(password_only()),
@@ -556,6 +563,77 @@ fn cancelling_the_password_ends_the_connection_quietly_r_ssh_4() {
 }
 
 #[test]
+fn a_session_without_a_user_asks_for_one_and_signs_on_as_it_r_ssh_62() {
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let address = start_server(Arc::clone(&seen));
+    let known = known_hosts("no-user");
+    let target = Target {
+        user: String::new(),
+        ..target_of(address)
+    };
+    let terminal = Arc::new(Mutex::new(Terminal::new(80, 24)));
+    let connection = Connection::open(target, Options::default(), known, terminal, || {});
+    let Event::HostKey(_) = next(&connection) else {
+        panic!("host key question first")
+    };
+    connection.send(Command::HostKey(HostKeyAnswer::ConnectOnce));
+    assert!(matches!(next(&connection), Event::Secured { .. }));
+
+    let ask = |answer: &str| {
+        let Event::Prompt(prompt) = next(&connection) else {
+            panic!("user name prompt")
+        };
+        assert_eq!(prompt.fields.len(), 1);
+        assert_eq!(prompt.fields[0].label, "User name");
+        assert!(prompt.fields[0].echo, "a user name is shown as typed");
+        assert_eq!(prompt.host, format!("127.0.0.1:{}", address.port()));
+        connection.send(Command::Answers(Some(vec![Secret::new(answer.into())])));
+    };
+    ask("  ");
+    ask(" æøå ");
+    assert_eq!(next(&connection), Event::User("æøå".into()));
+
+    let Event::Prompt(prompt) = next(&connection) else {
+        panic!("password prompt")
+    };
+    assert!(
+        prompt.fields[0].label.contains("æøå@127.0.0.1"),
+        "{prompt:?}"
+    );
+    connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
+    assert_eq!(next(&connection), Event::Started);
+    assert_eq!(seen.lock().expect("not poisoned").users, ["æøå"]);
+    connection.send(Command::Disconnect);
+}
+
+#[test]
+fn cancelling_the_user_name_ends_the_connection_quietly_r_ssh_62() {
+    let address = start_server(Arc::new(Mutex::new(Seen::default())));
+    let target = Target {
+        user: String::new(),
+        ..target_of(address)
+    };
+    let terminal = Arc::new(Mutex::new(Terminal::new(80, 24)));
+    let connection = Connection::open(
+        target,
+        Options::default(),
+        known_hosts("no-user-cancel"),
+        terminal,
+        || {},
+    );
+    let Event::HostKey(_) = next(&connection) else {
+        panic!("host key question first")
+    };
+    connection.send(Command::HostKey(HostKeyAnswer::ConnectOnce));
+    assert!(matches!(next(&connection), Event::Secured { .. }));
+    let Event::Prompt(_) = next(&connection) else {
+        panic!("user name prompt")
+    };
+    connection.send(Command::Answers(None));
+    assert_eq!(next(&connection), Event::Ended(Ending::Disconnected));
+}
+
+#[test]
 fn a_port_nobody_listens_on_is_said_in_plain_words_r_ssh_2() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let address = listener.local_addr().expect("address");
@@ -879,6 +957,7 @@ fn through_to_started(connection: &Connection) {
             Event::Prompt(prompt) => panic!("unexpected prompt {prompt:?}"),
             Event::Started => return,
             Event::Ended(ending) => panic!("ended: {ending:?}"),
+            Event::User(user) => panic!("asked for a user, got {user}"),
             Event::Secured { .. } | Event::Banner(_) | Event::Problem(_) | Event::Log(_) => {}
         }
     }

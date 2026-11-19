@@ -36,12 +36,17 @@ pub struct Target {
 }
 
 impl Target {
-    /// `user@host`, with `:port` when it is not 22.
+    /// `user@host`, with `:port` when it is not 22; without `user@` while the user is not known (R-SSH-62).
     pub fn label(&self) -> String {
-        if self.port == 22 {
-            format!("{}@{}", self.user, self.host)
+        let user = if self.user.is_empty() {
+            String::new()
         } else {
-            format!("{}@{}:{}", self.user, self.host, self.port)
+            format!("{}@", self.user)
+        };
+        if self.port == 22 {
+            format!("{user}{}", self.host)
+        } else {
+            format!("{user}{}:{}", self.host, self.port)
         }
     }
 }
@@ -185,6 +190,8 @@ pub enum Event {
     /// The server's banner, shown before signing on (R-SSH-4).
     Banner(String),
     Prompt(Prompt),
+    /// The user name the target was asked for, because the session named none (R-SSH-62).
+    User(String),
     /// Key exchange is done.
     Secured {
         algorithms: Algorithms,
@@ -518,6 +525,21 @@ async fn hop_connect(
                 CONNECT_TIMEOUT.as_secs(),
             ));
         }
+    };
+    // A session without a user asks for one once the host is known, as PuTTY's "login as:" (R-SSH-62).
+    let asked;
+    let target = if target.user.is_empty() {
+        let user = sign_on::ask_user(target, commands, link).await?;
+        if hop == Hop::Target {
+            link.send(Event::User(user.clone()));
+        }
+        asked = Target {
+            user,
+            ..target.clone()
+        };
+        &asked
+    } else {
+        target
     };
     sign_on::sign_on(&mut handle, target, options, commands, link).await?;
     Ok(handle)
