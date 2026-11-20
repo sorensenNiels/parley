@@ -1,7 +1,8 @@
 //! A whole connection against a small SSH server in this process (russh's own): the host key question
 //! (R-SSH-3), signing on with a password and its retries (R-SSH-4), with key files (R-SSH-12) and an agent and its
 //! forwarding (R-SSH-13), jump hosts (R-SSH-43), the shell with its pseudo-terminal, output into
-//! the terminal and the terminal's replies back, typing, resizing and the exit status (R-SSH-5). No real server.
+//! the terminal and the terminal's replies back, typing, resizing and the exit status (R-SSH-5), and commands on
+//! side channels beside the shell (Phase 31, R-SSH-57, D58). No real server.
 
 #![expect(
     clippy::unused_async_trait_impl,
@@ -17,9 +18,11 @@ use parley_ssh_core::known_hosts::{HostKeyStatus, KnownHosts};
 use parley_ssh_core::net::agent::AgentAddress;
 use parley_ssh_core::net::jump::Jump;
 use parley_ssh_core::net::{
-    AddressFamily, Command, Connection, Ending, Event, HostKeyAnswer, Options, Proxy, Target, lock,
+    AddressFamily, Command, Connection, Ending, Event, Exec, HostKeyAnswer, JobEnding, JobId,
+    Options, Proxy, Stream, Target, lock,
 };
 use parley_ssh_core::term::Terminal;
+use parley_ssh_core::transfer::{self, Check};
 use russh::keys::agent::client::AgentClient;
 use russh::keys::{PrivateKey, PublicKey};
 use russh::server::{self, Auth, Msg, Session};
@@ -225,6 +228,9 @@ impl server::Handler for Server {
     ) -> Result<(), Self::Error> {
         let command = String::from_utf8_lossy(data).into_owned();
         session.channel_success(channel)?;
+        if side_job(&command, channel, session)? {
+            return Ok(());
+        }
         session.data(channel, format!("ran: {command}\r\n").into_bytes())?;
         self.seen.lock().expect("not poisoned").command = Some(command);
         Ok(())
@@ -320,6 +326,50 @@ impl server::Handler for Server {
             .sizes
             .push((columns, rows));
         Ok(())
+    }
+}
+
+/// The commands the side-channel tests run (Phase 31); `false` for any other command.
+fn side_job(
+    command: &str,
+    channel: ChannelId,
+    session: &mut Session,
+) -> Result<bool, russh::Error> {
+    if command == transfer::check_command() {
+        session.data(
+            channel,
+            b"rsync  version 3.2.7  protocol version 31\nparley-rsync: /QOpenSys/pkgs/bin/rsync\n"
+                .to_vec(),
+        )?;
+        session.extended_data(channel, 1, "advarsel: æøå\n".as_bytes().to_vec())?;
+        session.exit_status_request(channel, 0)?;
+        session.eof(channel)?;
+        session.close(channel)?;
+        return Ok(true);
+    }
+    match command {
+        // Runs until the client ends it.
+        "sleep forever" => Ok(true),
+        // As a program on the server would: ask the forwarded agent for its keys, and say how many.
+        "agent keys" => {
+            let handle = session.handle();
+            tokio::spawn(async move {
+                let count = match handle.channel_open_agent().await {
+                    Ok(agent) => AgentClient::connect(agent.into_stream())
+                        .request_identities()
+                        .await
+                        .map_or(0, |ids| ids.len()),
+                    Err(_) => 0,
+                };
+                // The client may be gone; the test then fails on what it did not get.
+                let _ = handle.data(channel, format!("{count}").into_bytes()).await;
+                let _ = handle.exit_status_request(channel, 0).await;
+                let _ = handle.eof(channel).await;
+                let _ = handle.close(channel).await;
+            });
+            Ok(true)
+        }
+        _ => Ok(false),
     }
 }
 
@@ -958,6 +1008,7 @@ fn through_to_started(connection: &Connection) {
             Event::Started => return,
             Event::Ended(ending) => panic!("ended: {ending:?}"),
             Event::User(user) => panic!("asked for a user, got {user}"),
+            Event::JobOutput { .. } | Event::JobEnded { .. } => panic!("a job before the shell"),
             Event::Secured { .. } | Event::Banner(_) | Event::Problem(_) | Event::Log(_) => {}
         }
     }
@@ -1216,4 +1267,122 @@ fn ipv6_only_to_a_name_with_only_ipv4_says_so_r_ssh_26() {
         panic!("failed")
     };
     assert!(why.contains("no IPv6 address"), "{why}");
+}
+
+/// Signs on with the password up to the running shell.
+fn started(name: &str, options: Options) -> (Connection, Arc<Mutex<Terminal>>) {
+    let (connection, terminal, _) = signing_on(name, options);
+    if let Event::Prompt(_) = next(&connection) {
+        connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
+        assert_eq!(next(&connection), Event::Started);
+    }
+    (connection, terminal)
+}
+
+/// What job `id` wrote to stdout and stderr, and how it ended.
+fn job(connection: &Connection, id: JobId) -> (String, String, JobEnding) {
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    loop {
+        match next(connection) {
+            Event::JobOutput {
+                id: of,
+                stream,
+                data,
+            } if of == id => match stream {
+                Stream::Out => out.extend(data),
+                Stream::Err => err.extend(data),
+            },
+            Event::JobEnded { id: of, ending } if of == id => {
+                return (
+                    String::from_utf8_lossy(&out).into_owned(),
+                    String::from_utf8_lossy(&err).into_owned(),
+                    ending,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+fn exec(id: u64, command: &str, agent: bool) -> Command {
+    Command::Exec(Exec {
+        id: JobId(id),
+        command: command.to_owned(),
+        agent,
+    })
+}
+
+#[test]
+fn a_command_on_a_side_channel_reports_its_output_and_leaves_the_screen_alone_r_ssh_57() {
+    let (connection, terminal) = started("side", Options::default());
+    wait_until("the greeting", || {
+        screen_text(&terminal).contains("Velkommen")
+    });
+    let before = screen_text(&terminal);
+    connection.send(exec(1, &transfer::check_command(), false));
+    let (out, err, ending) = job(&connection, JobId(1));
+    assert_eq!(ending, JobEnding::Exited(0));
+    assert_eq!(err, "advarsel: æøå\n");
+    let Check::Usable { version, path } = transfer::check(Some(0), &out) else {
+        panic!("a usable rsync: {out}")
+    };
+    assert_eq!(
+        (version.to_string().as_str(), path.as_str()),
+        ("3.2.7", "/QOpenSys/pkgs/bin/rsync")
+    );
+    assert_eq!(
+        screen_text(&terminal),
+        before,
+        "nothing of it on the screen"
+    );
+    connection.send(Command::Input(b"ls\r".to_vec()));
+    wait_until("the shell still answers", || {
+        screen_text(&terminal).contains("ls")
+    });
+}
+
+#[test]
+fn ending_a_job_stops_it_and_says_so_r_ssh_56() {
+    let (connection, _) = started("stop", Options::default());
+    connection.send(exec(7, "sleep forever", false));
+    connection.send(Command::EndJob(JobId(7)));
+    let (_, _, ending) = job(&connection, JobId(7));
+    assert_eq!(ending, JobEnding::Stopped);
+    connection.send(Command::EndJob(JobId(7)));
+    connection.send(exec(8, &transfer::check_command(), false));
+    assert_eq!(
+        job(&connection, JobId(8)).2,
+        JobEnding::Exited(0),
+        "ending it twice is harmless"
+    );
+}
+
+#[test]
+fn a_job_cannot_use_an_agent_that_is_not_running_d58() {
+    let (connection, _) = started("no-agent", Options::default());
+    connection.send(exec(2, "agent keys", true));
+    let (_, _, ending) = job(&connection, JobId(2));
+    assert!(
+        matches!(ending, JobEnding::Refused(ref why) if why.contains("No agent")),
+        "{ending:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn the_agent_is_forwarded_only_while_a_job_that_asked_runs_d58() {
+    let socket = start_agent("job");
+    let options = Options {
+        agent: Some(AgentAddress::Socket(socket)),
+        ..Options::default()
+    };
+    let (connection, _) = started("job-agent", options);
+    connection.send(exec(1, "agent keys", true));
+    assert_eq!(job(&connection, JobId(1)).0, "1", "the job's agent answers");
+    connection.send(exec(2, "agent keys", false));
+    assert_eq!(
+        job(&connection, JobId(2)).0,
+        "0",
+        "refused once no job asks for it"
+    );
 }

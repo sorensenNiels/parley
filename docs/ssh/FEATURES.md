@@ -8,4 +8,13 @@
 
 ## In progress
 
-Nothing at the moment.
+- **R-SSH-57, Phase 31 step 1** (2026-11-20, Linux under WSL): side channels and the check for the servers; the
+  desktop's rsync comes with step 5 and the panel that shows the check with step 2. `parley-ssh-core`'s `net/jobs.rs`
+  runs commands on exec channels beside the shell (`Command::Exec`, `Command::EndJob`, `Event::JobOutput`,
+  `Event::JobEnded`), and lets the server use the agent only while a job that asked for it runs (D58);
+  `transfer.rs` finds the server's rsync (on the `PATH`, then `/QOpenSys/pkgs/bin` and `/usr/local/bin`) and reads
+  its version. **Automated** (`make test-ssh`): `transfer::tests` (GNU rsync 3.1–3.4, 2.6.9, openrsync, none, a
+  shell that is not Bourne's, nonsense), `tests/net.rs` (a job's stdout and stderr and exit status with the shell's
+  screen untouched; ending a job; a job asking for an agent that is not running; the agent forwarded during a job
+  and refused after it). **To check on the owner's servers**: the check's script through OpenSSH, which runs it the
+  same way (an exec channel without a terminal), on a Linux server and the IBM i.

@@ -9,6 +9,7 @@ pub mod openssh_config;
 pub mod secret;
 pub mod snippet;
 pub mod term;
+pub mod transfer;
 
 pub use error::Error;
 pub use secret::Secret;

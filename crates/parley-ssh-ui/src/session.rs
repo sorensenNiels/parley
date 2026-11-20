@@ -364,6 +364,8 @@ impl Session {
                     self.problem = None;
                     self.grab_focus = true;
                 }
+                // Nothing here starts a job yet: the Transfer panel will (Phase 31, R-SSH-56).
+                Event::JobOutput { .. } | Event::JobEnded { .. } => {}
                 Event::Ended(ending) => {
                     self.log.push(LogLine::now(ending_text(&ending)));
                     self.host_key = None;

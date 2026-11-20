@@ -4,6 +4,7 @@
 
 pub mod agent;
 mod client;
+mod jobs;
 pub mod jump;
 mod public_key;
 mod sign_on;
@@ -18,6 +19,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use crate::known_hosts::{HostKeyStatus, KnownHosts};
 use crate::term::Terminal;
 use crate::{Error, Secret};
+pub use jobs::{Exec, JobEnding, JobId, Stream};
 pub use transport::{AddressFamily, Proxy};
 
 /// How long connecting may take before it is given up.
@@ -133,6 +135,10 @@ pub enum Command {
     HostKey(HostKeyAnswer),
     /// The answers to [`Event::Prompt`], one per field; `None` cancels signing on.
     Answers(Option<Vec<Secret>>),
+    /// Runs a command on a side channel beside the shell, once signed on (Phase 31).
+    Exec(Exec),
+    /// Ends a job started with [`Command::Exec`].
+    EndJob(JobId),
     Disconnect,
 }
 
@@ -201,6 +207,17 @@ pub enum Event {
     Started,
     /// Something went wrong that did not end the connection, in plain words (a key file that cannot be read).
     Problem(String),
+    /// Output of a job started with [`Command::Exec`], as it comes.
+    JobOutput {
+        id: JobId,
+        stream: Stream,
+        data: Vec<u8>,
+    },
+    /// A job ended, or never started; nothing more comes from it.
+    JobEnded {
+        id: JobId,
+        ending: JobEnding,
+    },
     Ended(Ending),
 }
 
@@ -382,7 +399,7 @@ async fn session(
             &jump.target,
             &hop,
             jumps.last(),
-            Hop::Jump,
+            (Hop::Jump, jobs::AgentGate::default()),
             known_hosts.clone(),
             commands,
             link,
@@ -390,11 +407,12 @@ async fn session(
         .await?;
         jumps.push((handle, jump.target.label()));
     }
+    let gate = jobs::AgentGate::new(options.agent_forwarding);
     let handle = hop_connect(
         target,
         options,
         jumps.last(),
-        Hop::Target,
+        (Hop::Target, gate.clone()),
         known_hosts,
         commands,
         link,
@@ -410,6 +428,7 @@ async fn session(
 
     let mut started = false;
     let mut ending = Ending::Closed;
+    let mut side = jobs::Jobs::default();
     // The handler no longer needs the commands once signed on: the session loop keeps them to the end.
     let mut commands = commands.lock().await;
     loop {
@@ -444,6 +463,8 @@ async fn session(
                     let _ = handle.disconnect(russh::Disconnect::ByApplication, "", "en").await;
                     return Ok(Ending::Disconnected);
                 }
+                Some(Command::Exec(exec)) => side.start(&handle, exec, &gate, options.agent.is_some(), link).await,
+                Some(Command::EndJob(id)) => side.end(id),
                 Some(Command::HostKey(_) | Command::Answers(_)) => {}
             },
         }
@@ -467,7 +488,7 @@ async fn hop_connect(
     target: &Target,
     options: &Options,
     through: Option<&Through>,
-    hop: Hop,
+    (hop, gate): (Hop, jobs::AgentGate),
     known_hosts: KnownHosts,
     commands: &Commands,
     link: &Link,
@@ -479,11 +500,10 @@ async fn hop_connect(
         target.port,
         via.unwrap_or_default()
     ));
-    let forward_to = options.agent.clone().filter(|_| options.agent_forwarding);
     let handler = client::Client::new(
         target,
         known_hosts,
-        forward_to,
+        (options.agent.clone(), gate),
         hop,
         Arc::clone(commands),
         link.clone(),

@@ -102,8 +102,10 @@ pub(super) struct Client {
     host: String,
     port: u16,
     known_hosts: KnownHosts,
-    /// The agent the server may use, when forwarding is on (R-SSH-13).
+    /// The agent the server may use while the gate is open: forwarding on (R-SSH-13), or a job that asked
+    /// for it running (D58).
     forward_to: Option<AgentAddress>,
+    gate: super::jobs::AgentGate,
     hop: Hop,
     commands: Commands,
     link: Link,
@@ -114,7 +116,7 @@ impl Client {
     pub(super) fn new(
         target: &Target,
         known_hosts: KnownHosts,
-        forward_to: Option<AgentAddress>,
+        (forward_to, gate): (Option<AgentAddress>, super::jobs::AgentGate),
         hop: Hop,
         commands: Commands,
         link: Link,
@@ -124,6 +126,7 @@ impl Client {
             port: target.port,
             known_hosts,
             forward_to,
+            gate,
             hop,
             commands,
             link,
@@ -226,7 +229,7 @@ impl ssh::Handler for Client {
         Ok(())
     }
 
-    /// The server opens a channel to the agent (R-SSH-13): only when forwarding is on, and each one is
+    /// The server opens a channel to the agent (R-SSH-13): only while the gate is open (D58), and each one is
     /// carried to the user's agent until either side closes it.
     async fn server_channel_open_agent_forward(
         &mut self,
@@ -234,12 +237,12 @@ impl ssh::Handler for Client {
         reply: ssh::ChannelOpenHandle,
         _session: &mut Session,
     ) -> Result<(), Error> {
-        let Some(address) = self.forward_to.clone() else {
+        let Some(address) = self.forward_to.clone().filter(|_| self.gate.open()) else {
             reply
                 .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
                 .await;
             self.link
-                .log("Refused the server's use of the agent: forwarding is off");
+                .log("Refused the server's use of the agent: forwarding is off and no transfer is running");
             return Ok(());
         };
         reply.accept().await;
