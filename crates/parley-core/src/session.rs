@@ -3,9 +3,11 @@
 //! to send back. [`crate::net::Connection`] runs one over a socket.
 
 mod checks;
+mod choices;
 mod datastream;
 mod gui;
 mod input;
+mod mouse;
 mod playback;
 mod reply;
 mod typeahead;
@@ -15,6 +17,7 @@ pub use typeahead::TYPE_AHEAD_KEYS;
 use serde::{Deserialize, Serialize};
 
 pub use input::{Aid, Key};
+pub use mouse::{MouseAction, MouseButton, MouseEvent};
 pub use playback::{MACRO_TIMEOUT, MacroState};
 
 use crate::macros::Step;
@@ -48,9 +51,8 @@ pub struct SessionConfig {
     /// How long without traffic before a keep-alive goes, in seconds (R-NET-11); see
     /// [`SessionConfig::keep_alive_interval`].
     pub keep_alive_seconds: u16,
-    /// Claim IBM i's GUI-like 5250 and draw its windows (R-DS-10, D38). Never stored: with
-    /// Phase 22 paused nothing turns it on, and sessions saved with it on read as off.
-    #[serde(skip)]
+    /// Claim IBM i's GUI-like 5250 and draw its windows, selection fields and scroll bars
+    /// (R-DS-10..12, D38, D57): the session dialog's "GUI elements (beta)", off by default.
     pub gui: bool,
 }
 
@@ -264,6 +266,10 @@ pub struct Session {
     type_ahead_on: bool,
     /// Keys kept while the keyboard waits for the host (R-KEY-11).
     typed_ahead: typeahead::TypedAhead,
+    /// The host's programmable mouse buttons (R-DS-12), and the two-event one whose first
+    /// event came.
+    mouse_buttons: Vec<mouse::MouseDefinition>,
+    mouse_first: Option<usize>,
 }
 
 impl Session {
@@ -291,6 +297,8 @@ impl Session {
             unlocks: 0,
             type_ahead_on: false,
             typed_ahead: typeahead::TypedAhead::new(),
+            mouse_buttons: Vec::new(),
+            mouse_first: None,
         }
     }
 
@@ -409,5 +417,6 @@ impl Session {
         }
         self.locked = false;
         self.unlocks = self.unlocks.wrapping_add(1);
+        self.screen.reset_selections();
     }
 }

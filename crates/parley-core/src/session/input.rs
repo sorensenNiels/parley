@@ -123,6 +123,9 @@ impl Session {
         if self.error.is_some() || self.locked {
             return;
         }
+        if self.choice_key(key) {
+            return;
+        }
         let result = match key {
             Key::Char(c) => self.type_char(c),
             Key::Aid(aid) => self.check_before_aid(aid).map(|()| self.send_aid(aid)),

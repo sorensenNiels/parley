@@ -1206,13 +1206,14 @@ fn the_keep_alive_interval_defaults_to_a_minute_and_stays_in_range_r_net_11() {
 }
 
 #[test]
-fn a_session_saved_with_the_gui_switch_on_reads_as_off_d38() {
+fn the_gui_switch_is_stored_and_old_sessions_read_as_off_d57() {
     let saved: SessionConfig =
         serde_json::from_str(r#"{"host": "dksoft00", "port": 23, "gui": true}"#).expect("reads");
-    assert!(!saved.gui);
-    assert_eq!(saved.port, 23, "the rest is kept");
+    assert!(saved.gui);
+    let old: SessionConfig = serde_json::from_str(r#"{"host": "dksoft00"}"#).expect("reads");
+    assert!(!old.gui, "off by default");
     let stored = serde_json::to_string(gui_session(true).config()).expect("writes");
-    assert!(!stored.contains("gui"), "{stored}");
+    assert!(stored.contains(r#""gui":true"#), "{stored}");
 }
 
 #[test]
@@ -1228,10 +1229,10 @@ fn the_query_reply_claims_the_gui_only_with_the_switch_on_r_ds_10() {
     );
     assert_eq!(reply.len(), 3 + 0x40);
     assert_eq!(
-        reply[53], 0x07,
-        "byte 4: GUI-like characters, level 1, error to window"
+        reply[53], 0x0F,
+        "byte 4: pointer device (D57), GUI-like characters, level 1, error to window"
     );
-    assert_eq!(reply[54], 0x08, "byte 5: level 3");
+    assert_eq!(reply[54], 0x88, "byte 5: levels 2 (D57) and 3");
     let mut off = gui_session(false);
     off.receive(&query);
     let reply = sent_one(&mut off).2;

@@ -192,6 +192,8 @@ impl Session {
         self.insert_cursor = None;
         self.error_row = None;
         self.saved_error_line = None;
+        self.mouse_buttons.clear();
+        self.mouse_first = None;
     }
 
     fn read_address(&self, r: &mut Reader<'_>, order: &str) -> Result<usize> {

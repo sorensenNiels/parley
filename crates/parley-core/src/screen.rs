@@ -10,10 +10,15 @@ use crate::CodePage;
 mod extended;
 mod hotspots;
 mod region;
+mod selection;
 mod windows;
 pub use extended::ExtendedKind;
 pub use hotspots::{Hotspot, Target, hotspots};
 pub use region::{Rectangle, Span, find, rectangle_text, table_text};
+pub use selection::{
+    Choice, ChoiceColors, ChoiceState, Direction, GuiInput, Indicator, ScrollBar, SelectionField,
+    SelectionKind,
+};
 pub use windows::{
     Align, BorderChars, Caption, DEFAULT_BORDER_ATTRIBUTE, MAX_WINDOWS, Window, WindowSpec,
 };
@@ -288,6 +293,10 @@ pub struct Screen {
     windows: Vec<Window>,
     /// The inside of the window the cursor must stay in (R-DS-10).
     cursor_limit: Option<Rectangle>,
+    /// GUI selection fields (R-DS-11) and scroll bars (R-DS-12), by address: part of the
+    /// format table.
+    selections: Vec<SelectionField>,
+    scroll_bars: Vec<ScrollBar>,
     /// The cursor's buffer position.
     pub cursor: usize,
 }
@@ -302,6 +311,8 @@ impl Screen {
             extended: extended::Extended::new(size.positions()),
             windows: Vec::new(),
             cursor_limit: None,
+            selections: Vec::new(),
+            scroll_bars: Vec::new(),
             cursor: 0,
         }
     }
@@ -323,9 +334,12 @@ impl Screen {
         *self = Self::new(size);
     }
 
-    /// Clears the format table: its fields and the command key switches (R-DS-8).
+    /// Clears the format table: its fields, the command key switches (R-DS-8), and the GUI
+    /// selection fields and scroll bars (R-DS-11, R-DS-12).
     pub fn clear_fields(&mut self) {
         self.fields.clear();
+        self.selections.clear();
+        self.scroll_bars.clear();
         self.keys_without_data = 0;
     }
 

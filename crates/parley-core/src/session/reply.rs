@@ -4,7 +4,7 @@ use super::datastream::SBA;
 use super::input::Aid;
 use super::{ReadKind, Session};
 use crate::record::Opcode;
-use crate::screen::{BLANK, Field, MINUS, ScreenSize, negative_zone};
+use crate::screen::{BLANK, Field, GuiInput, MINUS, ScreenSize, negative_zone};
 
 // Device capability byte 1 of the query reply (table 12-39; bit 0 is the high-order bit).
 const SIZE_27X132: u8 = 0x20;
@@ -14,10 +14,12 @@ const COLOUR: u8 = 0x01;
 const EXTENDED_PRIMARY: u8 = 0x04;
 const EXTENDED_COLOURS_MAPPED: u8 = 0x01;
 // Device capability byte 4.
+const POINTER_DEVICE: u8 = 0x08;
 const GUI_CHARACTERS: u8 = 0x04;
 const ENHANCED_UI_1: u8 = 0x02;
 const ERROR_TO_WINDOW: u8 = 0x01;
 // Device capability byte 5.
+const ENHANCED_UI_2: u8 = 0x80;
 const ENHANCED_UI_3: u8 = 0x08;
 
 impl Session {
@@ -38,18 +40,32 @@ impl Session {
                 return;
             }
         }
-        let any_modified = self.screen.fields().iter().any(|f| f.modified);
-        let with_address = matches!(
-            kind,
-            ReadKind::MdtFields | ReadKind::MdtFieldsAlternate | ReadKind::ImmediateAlternate
-        );
         let keep_nulls = matches!(
             kind,
             ReadKind::MdtFieldsAlternate | ReadKind::ImmediateAlternate
         );
-        for field in self.screen.fields() {
+        // The format table's fields and the GUI selection fields and scroll bars (R-DS-11,
+        // R-DS-12), in address order.
+        let mut inputs: Vec<GuiInput> = self
+            .screen
+            .fields()
+            .iter()
+            .map(|field| GuiInput {
+                start: field.start,
+                modified: field.modified,
+                data: self.field_data(field, !keep_nulls),
+            })
+            .chain(self.screen.gui_inputs())
+            .collect();
+        inputs.sort_by_key(|input| input.start);
+        let any_modified = inputs.iter().any(|input| input.modified);
+        let with_address = matches!(
+            kind,
+            ReadKind::MdtFields | ReadKind::MdtFieldsAlternate | ReadKind::ImmediateAlternate
+        );
+        for input in inputs {
             let include = if with_address {
-                field.modified
+                input.modified
             } else {
                 any_modified
             };
@@ -57,10 +73,10 @@ impl Session {
                 continue;
             }
             if with_address {
-                let (row, column) = self.screen.row_column(field.start);
+                let (row, column) = self.screen.row_column(input.start);
                 data.extend([SBA, one_based(row), one_based(column)]);
             }
-            data.extend(self.field_data(field, !keep_nulls));
+            data.extend(input.data);
         }
         self.send_record(0, Opcode::PutGet, &data);
     }
@@ -158,13 +174,18 @@ impl Session {
             // bit 5), enhanced user interface level 1 (bit 6), Write Error Code to Window (bit
             // 7), and level 3 (byte 5 bit 4: window titles and footers), as tn5250j's enhanced
             // mode claims; with level 1 alone IBM i sent no windows (DKSOFT00, 2026-11-15).
-            // No pointer device until the mouse is handled (R-DS-11).
+            // A pointer device (byte 4 bit 4, R-DS-11) and level 2 (byte 5 bit 0: Write Data
+            // and programmable mouse buttons, R-DS-12) since Phase 22 resumed (D57).
             if gui {
-                GUI_CHARACTERS | ENHANCED_UI_1 | ERROR_TO_WINDOW
+                POINTER_DEVICE | GUI_CHARACTERS | ENHANCED_UI_1 | ERROR_TO_WINDOW
             } else {
                 0x00
             },
-            if gui { ENHANCED_UI_3 } else { 0x00 },
+            if gui {
+                ENHANCED_UI_2 | ENHANCED_UI_3
+            } else {
+                0x00
+            },
         ]);
         // The rest of the device capabilities, zero; tn5250j's enhanced mode sends a 64-byte
         // reply, and so does Parley with the GUI switch on.

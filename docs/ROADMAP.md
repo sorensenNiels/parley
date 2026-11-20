@@ -45,18 +45,18 @@ modern take on what surrounds the screen: sessions, keyboard mapping, copy and p
 | [Phase 24: more settings](phases/phase-24-more-settings.md) | Done (2026-11-16), checked by the owner on Windows, macOS, Linux and WSL: R-NET-11, R-UI-28, R-KEY-12, R-EBC-2; Parley SQL's are Phase 25 in [sql/ROADMAP.md](sql/ROADMAP.md). |
 | [Phase 40: more sessions at once](phases/phase-40-more-sessions-at-once.md) | Done (2026-11-17), checked by the owner: duplicate (R-UI-30), session groups (R-UI-31, R-UI-32), tabs (R-UI-33) and where more sessions open (R-UI-34), D53. |
 | Phases 26–39: SSH | Parley SSH's phases: [ssh/ROADMAP.md](ssh/ROADMAP.md). |
-| Phase 22: GUI elements (beta) | Paused (2026-11-15): R-DS-10 windows built but never sent by DKSOFT00 (see §4); then R-DS-11 selection fields and the mouse, R-DS-12 scroll bars, behind a session switch (D38). |
+| Phase 22: GUI elements (beta) | In progress (resumed 2026-11-20, D57): R-DS-10 windows, R-DS-11 selection fields and the mouse, R-DS-12 scroll bars, Write Data and mouse buttons built and tested behind a session switch (D38) ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
 
 ## 4. Phases
 
 Finished phases are in [phases/](phases/), one file each.
 
-### Phase 22 — GUI elements (planned)
+### Phase 22 — GUI elements
 
 From IDEA-5 (the owner, 2026-11-15): IBM i's GUI-like 5250 (enhanced user interface level 1) draws pop-up windows,
 menus, radio buttons, check boxes, push buttons and scroll bars. A display that claims it gets all of them, so
 Parley claims it only behind a session switch, off by default, while it is built in steps (D38): windows (R-DS-10),
-selection fields and the mouse (R-DS-11), scroll bars (R-DS-12). Each step is checked on DKSOFT00 with a trace and a
+selection fields and the mouse (R-DS-11), scroll bars, Write Data and mouse buttons (R-DS-12). Each step is checked on DKSOFT00 with a trace and a
 macro the owner runs.
 
 **Paused (2026-11-15).** R-DS-10 is built and tested, but DKSOFT00 never sent a GUI structured field: not with level 1
@@ -64,6 +64,9 @@ claimed in a 58-byte reply, not with tn5250j's enhanced claim (byte 4 X'07', byt
 display device created fresh by that reply (PARLYGUI, type 3477 FC). Something else on IBM i decides when it uses the
 enhanced interface. Before R-DS-11: find IBM's rules for it (a system, user, job, device or display file setting, or
 how IBM's own emulators identify themselves), then check R-DS-10 live.
+
+**Resumed (2026-11-20, D57).** Built without a live check: R-DS-11 and R-DS-12 from the manual, each
+tested with records built by hand from it; the switch comes back to the session dialog.
 
 ### Later (unordered, to be planned)
 
@@ -79,8 +82,8 @@ the SQL window's add-on switches, probes and assistant, are in [sql/ROADMAP.md](
 | ID | Requirement | Phase |
 |---|---|---|
 | R-DS-10 | **GUI windows, behind a switch** (2026-11-15, from IDEA-5; D38; *the switch was taken out of the session dialog again on 2026-11-15, as IBM i never sent windows; the engine part stays, see Phase 22*; SC30-3533-04 §15.6.13.1–4). A session setting "GUI elements (beta)", off by default; when on, the query reply claims what tn5250j's enhanced mode claims: GUI-like characters, enhanced user interface level 1 and Write Error Code to Window (device capability byte 4 bits 5–7) and level 3 (byte 5 bit 4), in a 64-byte reply (with level 1 alone, DKSOFT00 sent no windows); the pointer device (byte 4 bit 4) waits for R-DS-11. Write to Display Structured Field (WDSF) then carries out Create Window (X'51': a window of the given depth and width at the current address, with its border and optional title as the border and title minor structures say, drawn as a framed panel over the screen; the cursor kept inside when its flag says so; up to 128 windows, one of the same place and size replacing the other), Unrestricted Window Cursor Movement (X'52'), Remove GUI Window (X'59') and Remove All GUI Constructs (X'5F'); Clear Unit, Clear Unit Alternate and Restore Screen remove them too. Text written inside a window shows in it. Off, nothing changes. | 22 |
-| R-DS-11 | **GUI selection fields and the mouse** (2026-11-15, from IDEA-5; D38; SC30-3533-04 §15.6.13.5–6, §15.6.13.9). With the switch on: Define Selection Field (X'50') draws menus, single and multiple choice fields (radio buttons, check boxes) and push buttons with their choices, mnemonics and states; the arrow keys, the mnemonics and a click select a choice and the field's AID or Enter goes to the host with the selection as the manual says; Remove GUI Selection Field (X'58'); Write Data (X'5E') into a field. Details are taken from the manual when this is planned. | 22 |
-| R-DS-12 | **GUI scroll bars and mouse buttons** (2026-11-15, from IDEA-5; D38; SC30-3533-04 §15.6.13.7–8, §15.6.13.10). With the switch on: Define Scroll Bar Field (X'53'), drawn beside a list and sending the scroll AID with the new position when dragged or clicked; Remove GUI Scroll Bar Field; Programmable Mouse Buttons. Details are taken from the manual when this is planned. | 22 |
+| R-DS-11 | **GUI selection fields and the mouse** (2026-11-15, from IDEA-5; D38; *details 2026-11-20, D57: from IBM i's own bytes in IBM's TRC5250 traces and the names Wireshark and other emulators took from the manual, which was not at hand*; SC30-3533-04 §15.6.13.5–6). With the switch on, the query reply also claims a pointer device (byte 4 bit 4). Define Selection Field (X'50') defines an input field at the current address: a menu bar, radio buttons (single choice), check boxes (multiple choice), single and multiple choice lists and pull-downs, and push buttons, with their choices' text, state (bits B'10' selected and B'11' not available, as IBM i's menu bar bytes show), mnemonic and AID, and the colours of the presentation minor structure; only the minor structures meant for a GUI display count, and a field meant only for a display without a mouse is skipped. Choices are written into the screen, `columns` to a row (a menu bar in one row, a new one where a choice says), each as its state's attribute, an indicator (`/` selected, `_` not) or a push button's blanks, the text and a normal attribute; Parley draws radio buttons, check boxes, push-button boxes and mnemonic underlines over them. On a choice the cursor keys go to the next choice (or send the choice's Roll AID when it asks), Space or `/` selects (a check box toggles), a mnemonic selects its choice, Enter on a menu bar or push button selects it, and a click selects; a choice's own AID, or Enter for an auto-enter field, then goes to the host. The read commands send the field with the others in address order: one choice as its number plus X'1F' in two bytes (X'0000' for none), several as X'F1' or X'00' a choice. Selected choices go back when the keyboard unlocks if the field asks. Remove GUI Selection Field (X'58') blanks it; clearing the format table, Remove All GUI Constructs and removing the window it is in forget it. | 22 |
+| R-DS-12 | **GUI scroll bars, Write Data and mouse buttons** (2026-11-15, from IDEA-5; D38; *details 2026-11-20, D57, as R-DS-11*; SC30-3533-04 §15.6.13.7–10). With the switch on, the query reply also claims enhanced user interface level 2 (byte 5 bit 0). Define Scroll Bar Field (X'53'): a vertical or horizontal bar of the given size at the current address, with the rows to scroll through and the slider's position, drawn with arrows; a click on an arrow moves it one row, beside the slider a page, and dragging the slider anywhere; then Roll Down (back) or Roll Up (on) goes to the host, and the read commands send the new position in four bytes at the bar's address (what IBM i expects back was in no source at hand). Remove GUI Scroll Bar Field (X'5B'). Write Data (X'54') puts its data into the entry field at the current address. Programmable Mouse Buttons (X'55'): each definition's event (left, right or middle pressed, released or double-clicked, with Shift or not), or two events, sends its AID, moving the cursor to the mouse first if it says; the click then does nothing else. | 22 |
 
 ## 6. Ideas
 
@@ -105,4 +108,4 @@ The decisions, with the question, the choice and the alternatives, are in [DECIS
   (`D`), phases and ideas (`IDEA`, in [IDEAS.md](IDEAS.md)) take their next number here, whichever roadmap uses it,
   so a number never means two things.
 
-Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-12` · `R-DS-13` · `R-EBC-3` · `R-KEY-13` · `R-UI-37` · `R-ADD-4` · `R-NF-6` · `D57` · `Phase 42` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); `R-SSH`: [ssh/ROADMAP.md](ssh/ROADMAP.md); ideas: last line of IDEAS.md).
+Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-12` · `R-DS-13` · `R-EBC-3` · `R-KEY-13` · `R-UI-37` · `R-ADD-4` · `R-NF-6` · `D58` · `Phase 42` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); `R-SSH`: [ssh/ROADMAP.md](ssh/ROADMAP.md); ideas: last line of IDEAS.md).

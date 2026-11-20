@@ -6,6 +6,7 @@
 mod colors;
 mod cursor;
 mod find;
+mod gui;
 mod windows;
 
 pub use colors::{COLORS, CustomColors, Palette, Scheme};
@@ -47,6 +48,8 @@ pub struct View {
     /// (R-UI-25).
     flash_until: f64,
     selection: Option<Selection>,
+    /// The scroll bar whose slider is being dragged (R-DS-12).
+    bar_drag: Option<usize>,
 }
 
 /// How a position with the blink attribute shows in this frame (R-UI-24).
@@ -196,26 +199,7 @@ pub fn show(
         response.request_focus();
     }
     view.forget_old_selection(session);
-    select(ui, &response, &grid, session, view);
-    let spots = hotspots(session.screen(), session.code_page());
-    let spot_at = |pos: Option<Pos2>| {
-        let (row, column) = grid.cell_at(pos?)?;
-        spots.iter().find(|h| h.contains(row, column))
-    };
-    let hovered = spot_at(response.hover_pos());
-    if hovered.is_some() {
-        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
-    }
-    if response.clicked() {
-        response.request_focus();
-        view.selection = None;
-        let pos = response.interact_pointer_pos();
-        if let Some(spot) = spot_at(pos) {
-            press(ui, session, spot);
-        } else if let Some((row, column)) = pos.and_then(|p| grid.cell_at(p)) {
-            session.key(Key::MoveTo { row, column });
-        }
-    }
+    let hovered = pointer(ui, &response, &grid, session, view);
     if response.has_focus() {
         ui.memory_mut(|m| {
             m.set_focus_lock_filter(
@@ -279,8 +263,9 @@ pub fn show(
             &view.palette,
         );
     }
+    gui::draw(&painter, &grid, session.screen(), &view.palette);
     flash_border(ui, &painter, response.rect, view, now);
-    if let Some(spot) = hovered {
+    if let Some(spot) = &hovered {
         underline_hotspot(&painter, &grid, &cells, spot, palette);
     }
     let look = cursor_look(ui, view, response.has_focus(), session.insert_mode(), now);
@@ -398,6 +383,79 @@ fn paste(session: &mut Session, text: &str, breaks: PasteBreaks) {
             }
         }
     }
+}
+
+/// The pointer over the screen: the host's mouse buttons (R-DS-12), a scroll bar's slider
+/// dragged or a selection (R-UI-22), the hand over a hotspot (R-UI-20) or a choice (R-DS-11),
+/// and a click on them or elsewhere. Gives the hotspot under the pointer.
+fn pointer(
+    ui: &Ui,
+    response: &egui::Response,
+    grid: &Grid,
+    session: &mut Session,
+    view: &mut View,
+) -> Option<Hotspot> {
+    let mouse_taken = gui::mouse(ui, response, grid, session);
+    if response.drag_started() {
+        view.bar_drag = ui
+            .input(|i| i.pointer.press_origin())
+            .and_then(|p| gui::bar_at(session.screen(), grid, p))
+            .map(|(bar, _)| bar);
+    }
+    if view.bar_drag.is_none() {
+        select(ui, response, grid, session, view);
+    } else if response.drag_stopped() {
+        drop_slider(session, grid, response, view);
+    }
+    let spots = hotspots(session.screen(), session.code_page());
+    let spot_at = |pos: Option<Pos2>| {
+        let (row, column) = grid.cell_at(pos?)?;
+        spots.iter().find(|h| h.contains(row, column))
+    };
+    let hovered = spot_at(response.hover_pos()).cloned();
+    let over_choice = response
+        .hover_pos()
+        .and_then(|p| grid.cell_at(p))
+        .is_some_and(|(r, c)| gui::on_choice(session.screen(), r, c, grid.columns));
+    if hovered.is_some() || over_choice {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    if response.clicked() && !mouse_taken {
+        response.request_focus();
+        view.selection = None;
+        let pos = response.interact_pointer_pos();
+        let bar = pos.and_then(|p| gui::bar_at(session.screen(), grid, p));
+        if let Some(spot) = spot_at(pos) {
+            press(ui, session, spot);
+        } else if let Some((i, part)) = bar {
+            if let Some(b) = session.screen().scroll_bars().get(i) {
+                let to = gui::clicked(b, part);
+                session.scroll(i, to);
+            }
+        } else if let Some((row, column)) = pos.and_then(|p| grid.cell_at(p)) {
+            session.click(row, column);
+        }
+    }
+    hovered
+}
+
+/// Moves the dragged scroll bar's slider to where the pointer let go (R-DS-12).
+fn drop_slider(session: &mut Session, grid: &Grid, response: &egui::Response, view: &mut View) {
+    let Some(i) = view.bar_drag.take() else {
+        return;
+    };
+    let Some(pos) = response.interact_pointer_pos() else {
+        return;
+    };
+    let Some(bar) = session.screen().scroll_bars().get(i) else {
+        return;
+    };
+    let part = gui::bar_at(session.screen(), grid, pos).map_or_else(
+        || gui::BarPart::Track(gui::along(bar, grid, pos)),
+        |(_, part)| part,
+    );
+    let to = gui::dragged(bar, part);
+    session.scroll(i, to);
 }
 
 /// Starts, grows or ends a selection as the pointer is dragged over the screen (R-UI-22).
@@ -982,5 +1040,98 @@ mod tests {
                 "{breaks:?}"
             );
         }
+    }
+
+    /// A session with the GUI switch on, showing `orders` and waiting for input (R-DS-11).
+    fn gui_harness(orders: &[u8]) -> Harness<'static, State> {
+        let mut session = Session::new(parley_core::SessionConfig {
+            gui: true,
+            ..parley_core::SessionConfig::default()
+        });
+        let mut data = vec![0x04, 0x40, 0x04, 0x11, 0x00, 0x00];
+        data.extend(orders);
+        data.extend([0x04, 0x52, 0x00, 0x00]);
+        session.receive(&parley_core::telnet::Telnet::frame(
+            &parley_core::record::build(0, parley_core::record::Opcode::PutGet, &data),
+        ));
+        harness_with(session)
+    }
+
+    fn wdsf(kind: u8, rest: &[u8]) -> Vec<u8> {
+        let mut o = vec![0x15];
+        o.extend(u16::try_from(4 + rest.len()).expect("short").to_be_bytes());
+        o.extend([0xD9, kind]);
+        o.extend(rest);
+        o
+    }
+
+    #[test]
+    fn a_click_on_a_radio_button_selects_it_r_ds_11() {
+        let mut rest = vec![
+            0x00, 0x00, 0x00, 0x11, 0x01, 0, 0, 0, 0, 5, 2, 1, 0, 0, 0, 0,
+        ];
+        for text in ["Ja", "Nej"] {
+            let mut choice = vec![0x10, 0x00, 0x00, 0x80];
+            choice.extend(text.chars().filter_map(|c| CodePage::Ccsid37.to_byte(c)));
+            rest.push(u8::try_from(choice.len() + 1).expect("short"));
+            rest.extend(choice);
+        }
+        let mut orders = vec![0x11, 5, 10];
+        orders.extend(wdsf(0x50, &rest));
+        let mut harness = gui_harness(&orders);
+        harness.run();
+        click_cell(&harness, 5, 13);
+        harness.run();
+        let field = &harness.state().0.screen().selection_fields()[0];
+        assert_eq!(field.selected().collect::<Vec<_>>(), [1]);
+        assert!(field.modified);
+    }
+
+    /// A scroll bar at row 5 column 80: 100 rows, ten high.
+    fn scroll_bar_harness() -> Harness<'static, State> {
+        let mut orders = vec![0x11, 5, 80];
+        orders.extend(wdsf(0x53, &[0x00, 0x00, 0, 0, 0, 100, 0, 0, 0, 0, 10]));
+        let mut harness = gui_harness(&orders);
+        harness.run();
+        harness.state_mut().0.take_outbound();
+        harness
+    }
+
+    #[test]
+    fn a_click_on_a_scroll_bar_s_arrow_scrolls_a_row_r_ds_12() {
+        let mut harness = scroll_bar_harness();
+        click_cell(&harness, 13, 79);
+        harness.run();
+        assert_eq!(harness.state().0.screen().scroll_bars()[0].position, 1);
+        let sent = harness.state_mut().0.take_outbound();
+        assert!(sent.contains(&0xF5), "Roll Up in {sent:02X?}");
+    }
+
+    #[test]
+    fn dragging_the_slider_to_the_end_scrolls_to_the_last_screenful_r_ds_12() {
+        let mut harness = scroll_bar_harness();
+        let from = cell_centre(&harness, 4, 79);
+        let to = cell_centre(&harness, 13, 79);
+        let button = |pos, pressed| Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        harness.event(Event::PointerMoved(from));
+        harness.event(button(from, true));
+        harness.run();
+        for step in [1.0_f32, 2.0, 3.0, 4.0] {
+            harness.event(Event::PointerMoved(from + (to - from) * (step / 4.0)));
+            harness.run();
+        }
+        harness.event(button(to, false));
+        harness.run();
+        let (session, _, view) = harness.state();
+        assert_eq!(session.screen().scroll_bars()[0].position, 90);
+        assert!(
+            view.selection.is_none(),
+            "the drag selects nothing (R-UI-22)"
+        );
     }
 }

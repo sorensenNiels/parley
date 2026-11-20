@@ -15,6 +15,23 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
+- **R-DS-11, R-DS-12** (built 2026-11-20, Linux under WSL; D57): GUI selection fields and the mouse; scroll bars,
+  Write Data and programmable mouse buttons, behind the session switch "GUI elements (beta)", which is back in the
+  session dialog and stored. **Automated** (`make test`): `parley-core`'s `screen/selection.rs` (radio buttons, check
+  boxes and a menu bar laid out and written, selecting and its reply bytes, a field or scroll bar that does not fit,
+  removing and clearing, a slider kept inside), `session/mouse.rs` (the event codes), `tests/gui.rs` with IBM i's own
+  bytes where published (a host's radio buttons chosen with Down and Space and sent as X'0021'; IBM i's menu bar
+  clicked and a mnemonic, sent as X'0023' and X'0021'; IBM i's push buttons by mnemonic as X'0022', Enter, and the
+  Roll Right AID; Remove GUI Selection Field; a field only for displays without a mouse skipped; a choice not
+  available; a field cut short; a scroll bar moved and sent with Roll Up, one past the bottom, removed; Write Data
+  with æøå; one- and two-event mouse buttons; nothing without the switch), `tests/session.rs` (the query reply's
+  pointer device and level 2; the switch stored), `parley-ui-egui`'s `terminal.rs` (kittest: a click on a radio
+  button; a scroll bar's arrow; its slider dragged to the end without selecting), `terminal/gui.rs` (arrows, pages
+  and drags), `lib.rs` (the session dialog's switch). **Seen** (`--screenshot`, Linux under WSL, a fake host sending a
+  menu bar, radio buttons, check boxes, a list with a scroll bar and push buttons: `scripts/gui-demo-host.py`).
+  **To check in the running app**: choosing with keys, mnemonics and clicks, the scroll bar's arrows and slider, and
+  what the fake host prints that Parley sent. Not seen from a real IBM i (D57).
+
 - **R-DS-10** (2026-11-15): GUI windows behind the session switch "GUI elements (beta)" (D38). **Automated** (`make
   test`): a window is written as the 5494 writes it (border attribute and characters, centred title `Æble`, cleared
   inside) and kept; removing it puts back what it covered and frees the cursor; Remove All and Clear Unit take every
@@ -27,7 +44,8 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
   (byte 4 X'07', byte 5 X'08' level 3, 64 bytes); two more tries, the second on a device created fresh by that
   reply (PARLYGUI, 3477 FC), and the host still sent no WDSF. **Not seen live**: Phase 22 is paused until IBM i's
   rules for the enhanced interface are known (ROADMAP §4). The switch was then taken out of the session dialog
-  and is no longer stored (D38); window frames come from R-UI-26 instead.
+  and is no longer stored (D38); window frames come from R-UI-26 instead. *Resumed 2026-11-20 (D57)*: the switch is
+  back and stored; to be checked in the running app with `scripts/gui-demo-host.py` once it sends a window.
 
 ## Verified
 

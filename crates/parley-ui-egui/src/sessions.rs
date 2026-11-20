@@ -26,6 +26,9 @@ Reconnect when the connection drops: when the network fails (not when the IBM i 
 session), connect again after 2, 4, 8 … up to 60 seconds; the session's macro runs again.
 Send keep-alive: send a telnet no-operation after the seconds given without traffic (60 \
 unless changed), so firewalls keep an idle connection open.
+GUI elements (beta): tell the IBM i that Parley can show its GUI-like windows, menus, buttons \
+and scroll bars, and draw them. Built from IBM's manual and not yet seen from a real IBM i, \
+which may not use them; leave it off for daily work.
 Connect on program start: connect to this session when Parley starts.
 Run macro: on connecting, run a macro recorded with Record macro in the Tools menu, from \
 the first screen (it may sign on, asking for the password).";
@@ -178,6 +181,7 @@ impl Editor {
             &mut profile.reconnect,
         );
         keep_alive(ui, &mut profile.config);
+        theme::switch_row(ui, "GUI elements (beta)", &mut profile.config.gui);
         theme::switch_row(
             ui,
             "Connect to this session on program start",

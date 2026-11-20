@@ -146,17 +146,24 @@ impl Screen {
         let newest = i + 1 == self.windows.len();
         let window = self.windows.remove(i);
         self.uncover(&window);
+        self.forget_gui_fields_in(window.outer());
         if newest {
             self.cursor_limit = None;
         }
         true
     }
 
-    /// Removes every window, newest first, and lets the cursor go anywhere (§15.6.13.4).
-    pub fn remove_all_windows(&mut self) {
+    /// Removes every window, newest first, and every selection field and scroll bar, and lets
+    /// the cursor go anywhere (§15.6.13.4, Remove All GUI Constructs).
+    pub fn remove_all_gui(&mut self) {
         while let Some(window) = self.windows.pop() {
             self.uncover(&window);
         }
+        let starts: Vec<usize> = self.selections.iter().map(|f| f.start).collect();
+        for start in starts {
+            self.remove_selection(start);
+        }
+        self.scroll_bars.clear();
         self.cursor_limit = None;
     }
 
@@ -395,7 +402,7 @@ mod tests {
         let mut screen = Screen::new(ScreenSize::Standard);
         screen.create_window(spec(1, 1, 2, 6));
         screen.create_window(spec(10, 10, 3, 20));
-        screen.remove_all_windows();
+        screen.remove_all_gui();
         assert!(screen.windows().is_empty() && screen.cursor_limit().is_none());
         assert_eq!(screen.text(PAGE).trim(), "");
         screen.create_window(spec(1, 1, 2, 6));
