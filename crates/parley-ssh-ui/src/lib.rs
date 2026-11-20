@@ -516,6 +516,26 @@ impl ParleySshUi {
                     self.connect_pane(ctx, pane, source, false);
                 }
             }
+            start::Choice::Favourite(i) => {
+                if let Some(session) = self.settings.sessions.get_mut(i) {
+                    session.favourite = !session.favourite;
+                }
+            }
+            start::Choice::Recent(r) => {
+                if let Some((source, saved)) =
+                    palette::recent_source(&self.settings.sessions, &self.settings.recent, r)
+                {
+                    self.connect_pane(ctx, pane, source, saved);
+                }
+            }
+            start::Choice::RecentSave(r) => {
+                if let Some((session, false)) =
+                    palette::recent_source(&self.settings.sessions, &self.settings.recent, r)
+                {
+                    self.editor = Some(Editor::new(session, None));
+                }
+            }
+            start::Choice::AllSessionsOpen(open) => self.settings.all_sessions_open = open,
             start::Choice::ConfigSave(i) => {
                 if let Some(host) = self.openssh.hosts().get(i) {
                     let session = openssh::session(&self.settings.defaults, host);

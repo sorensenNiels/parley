@@ -45,13 +45,14 @@ pub const RECORD: &str = "\u{E3EE}";
 pub const RESET: &str = "\u{E038}";
 pub const SIGN_OUT: &str = "\u{E42A}";
 pub const SQUARES_FOUR: &str = "\u{E464}";
+pub const STAR: &str = "\u{E46A}";
 pub const STOP: &str = "\u{E46C}";
 pub const TERMINAL: &str = "\u{EAE8}";
 pub const UPLOAD_SIMPLE: &str = "\u{E4C0}";
 
 /// Every icon above, for the test that the font has them.
 #[cfg(test)]
-pub const ALL: [&str; 38] = [
+pub const ALL: [&str; 39] = [
     ARROWS_CLOCKWISE,
     ARROW_DOWN,
     ARROW_UP,
@@ -87,6 +88,7 @@ pub const ALL: [&str; 38] = [
     RESET,
     SIGN_OUT,
     SQUARES_FOUR,
+    STAR,
     STOP,
     TERMINAL,
     UPLOAD_SIMPLE,

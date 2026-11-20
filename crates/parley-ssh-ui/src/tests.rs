@@ -183,15 +183,27 @@ fn a_new_session_is_saved_from_the_editor_and_listed_r_ssh_11() {
         ("Web æøå", "web.lan", 22)
     );
     assert!(
+        h.query_by_label("Web æøå").is_none(),
+        "All sessions starts folded (R-SSH-65)"
+    );
+    pointer_click(&mut h, "ALL SESSIONS (1)", 0);
+    assert!(
         h.query_by_label("Web æøå").is_some(),
         "listed on the start screen"
     );
+    assert!(
+        h.state().settings.all_sessions_open,
+        "kept in the settings for the next start"
+    );
+    pointer_click(&mut h, "ALL SESSIONS (1)", 0);
+    assert!(!h.state().settings.all_sessions_open, "and folded again");
 }
 
 #[test]
 fn edit_and_delete_change_the_saved_sessions_r_ssh_11() {
     let mut h = app(Settings {
         sessions: vec![prod()],
+        all_sessions_open: true,
         ..Settings::default()
     });
     h.run_steps(2);
@@ -588,7 +600,7 @@ fn config_hosts_are_listed_and_saved_as_sessions_r_ssh_42() {
         .with_size(egui::vec2(900.0, 900.0))
         .build_ui_state(|ui, app: &mut ParleySshUi| app.ui(ui), app);
     h.run_steps(2);
-    h.get_by_label("FROM ~/.SSH/CONFIG");
+    h.get_by_label("FROM ~/.SSH/CONFIG (1)");
     h.get_by_label("cfg@web1.lan:2200");
     assert!(
         h.query_by_label_contains("Match blocks are not used")
@@ -924,8 +936,8 @@ fn a_session_from_the_palette_connects_in_the_start_screen_or_a_new_tab_and_is_r
     assert_eq!(h.state().settings.recent.len(), 1, "one address once");
     assert_eq!(
         h.state().settings.recent[0].name,
-        "",
-        "kept without its name"
+        "Wait",
+        "a saved session is kept with its name (R-SSH-64)"
     );
 }
 
@@ -964,4 +976,144 @@ fn a_click_on_a_tab_brings_it_to_the_front_with_and_without_a_colour_r_ssh_39_r_
             "{color:?}: the first tab came to the front"
         );
     }
+}
+
+/// Sessions named `names`, each at an address that does not answer.
+fn many(names: &[&str]) -> Vec<SavedSession> {
+    names
+        .iter()
+        .map(|name| SavedSession {
+            name: (*name).into(),
+            ..waiting()
+        })
+        .collect()
+}
+
+#[test]
+fn the_star_makes_a_session_a_favourite_listed_first_and_back_r_ssh_63() {
+    let mut h = app(Settings {
+        sessions: many(&["Alpha", "Beta æøå"]),
+        all_sessions_open: true,
+        ..Settings::default()
+    });
+    h.run_steps(2);
+    assert!(h.query_by_label("FAVOURITES").is_none());
+    h.get_all_by_label("Add to favourites")
+        .nth(1)
+        .expect("Beta's star")
+        .click();
+    h.run_steps(2);
+    let favourites: Vec<bool> = h
+        .state()
+        .settings
+        .sessions
+        .iter()
+        .map(|s| s.favourite)
+        .collect();
+    assert_eq!(favourites, [false, true]);
+    h.get_by_label("FAVOURITES");
+    h.get_by_label("ALL SESSIONS (2)");
+    let palette: Vec<String> = h
+        .state()
+        .palette_items(false)
+        .into_iter()
+        .filter(|i| i.kind == "Session")
+        .map(|i| i.label)
+        .collect();
+    assert_eq!(
+        palette,
+        ["Beta æøå", "Alpha"],
+        "the palette lists favourites first"
+    );
+    assert_eq!(
+        h.get_all_by_label("Beta æøå").count(),
+        2,
+        "a favourite is listed under All sessions too"
+    );
+    h.get_all_by_label("Remove from favourites")
+        .next()
+        .expect("Beta's star")
+        .click();
+    h.run_steps(2);
+    assert!(!h.state().settings.sessions[1].favourite);
+    assert!(h.query_by_label("FAVOURITES").is_none());
+}
+
+#[test]
+fn recent_connections_are_listed_and_a_saved_one_connects_as_it_is_now_r_ssh_64() {
+    let quick = SavedSession {
+        name: String::new(),
+        host: "quick.lan".into(),
+        ..waiting()
+    };
+    let mut h = app(Settings {
+        sessions: many(&["Wait"]),
+        recent: vec![quick, waiting()],
+        ..Settings::default()
+    });
+    h.run_steps(2);
+    h.get_by_label("RECENT");
+    h.get_by_label("me@quick.lan");
+    h.get_by_label("Not saved");
+    assert_eq!(
+        h.get_all_by_label("Wait").count(),
+        1,
+        "in Recent; All sessions is folded"
+    );
+    h.get_by_label("Save as session…");
+
+    h.state_mut().settings.sessions[0].port = 2200;
+    let ctx = h.ctx.clone();
+    let pane = h.state().tabs[0].active;
+    h.state_mut().chosen(&ctx, pane, start::Choice::Recent(1));
+    let session = h.state().active_session().expect("connecting");
+    assert!(session.saved);
+    assert_eq!(session.source.port, 2200, "the saved session as it is now");
+}
+
+#[test]
+fn the_search_has_the_keyboard_and_up_down_and_enter_connect_a_match_r_ssh_65() {
+    let mut h = app(Settings {
+        sessions: many(&["Web one", "Database", "Web two", "Mail"]),
+        ..Settings::default()
+    });
+    h.run_steps(3);
+    h.event(egui::Event::Text("web".into()));
+    h.run_steps(2);
+    assert_eq!(h.state().active_session().map(|s| s.saved), None);
+    assert!(h.query_by_label("Database").is_none(), "only the matches");
+    press(&mut h, egui::Key::ArrowDown, egui::Modifiers::NONE);
+    press(&mut h, egui::Key::Enter, egui::Modifiers::NONE);
+    h.run_steps(2);
+    let session = h.state().active_session().expect("connecting");
+    assert_eq!(session.source.name, "Web two");
+}
+
+#[test]
+fn escape_empties_the_search_and_a_long_list_folds_under_the_favourites_r_ssh_65() {
+    let names: Vec<String> = (1..=12).map(|n| format!("Host {n:02}")).collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let mut sessions = many(&names);
+    sessions[0].favourite = true;
+    let mut h = app(Settings {
+        sessions,
+        ..Settings::default()
+    });
+    h.run_steps(3);
+    h.get_by_label("ALL SESSIONS (12)");
+    assert!(
+        h.query_by_label("Host 05").is_none(),
+        "more than ten under a favourite start folded"
+    );
+    h.event(egui::Event::Text("05".into()));
+    h.run_steps(2);
+    h.get_by_label("Host 05");
+    press(&mut h, egui::Key::Escape, egui::Modifiers::NONE);
+    h.run_steps(2);
+    let tab = &h.state().tabs[0];
+    let Some(Pane::Start(form)) = tab.pane(tab.active) else {
+        panic!("the start screen");
+    };
+    assert_eq!(form.search, "");
+    h.get_by_label("ALL SESSIONS (12)");
 }

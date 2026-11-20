@@ -93,7 +93,11 @@ impl ParleySshUi {
                 choice: Choice::Tab(i),
             });
         }
-        for (i, s) in self.settings.sessions.iter().enumerate() {
+        // The favourites first (R-SSH-63), each group in the settings' order.
+        let mut sessions: Vec<(usize, &SavedSession)> =
+            self.settings.sessions.iter().enumerate().collect();
+        sessions.sort_by_key(|(_, s)| !s.favourite);
+        for (i, s) in sessions {
             items.push(Item {
                 key: format!("session:{}", s.name),
                 kind: "Session",
@@ -170,8 +174,10 @@ impl ParleySshUi {
                 }
             }
             Choice::Recent(i) => {
-                if let Some(source) = self.settings.recent.get(i).cloned() {
-                    self.open_source(ctx, source, false);
+                if let Some((source, saved)) =
+                    recent_source(&self.settings.sessions, &self.settings.recent, i)
+                {
+                    self.open_source(ctx, source, saved);
                 }
             }
         }
@@ -194,16 +200,53 @@ impl ParleySshUi {
     }
 }
 
-/// Keeps `source` first among the recent connections, at most ten, each address once (R-SSH-48).
-pub fn remember_connection(recent: &mut Vec<SavedSession>, source: &SavedSession) {
+/// Keeps `source` first among the recent connections, at most ten, each address once (R-SSH-48); a saved session
+/// keeps its name, to be found again (R-SSH-64), any other is kept without one.
+pub fn remember_connection(recent: &mut Vec<SavedSession>, source: &SavedSession, saved: bool) {
     let address = source.address();
     recent.retain(|s| s.address() != address);
+    let name = if saved {
+        source.name.clone()
+    } else {
+        String::new()
+    };
     recent.insert(
         0,
         SavedSession {
-            name: String::new(),
+            name,
             ..source.clone()
         },
     );
     recent.truncate(10);
+}
+
+/// The index of the saved session the recent connection `recent` was made with, while one is saved under its name;
+/// for one kept without a name (made otherwise, or before names were kept), the saved session at its address
+/// (R-SSH-64).
+pub fn recent_saved(sessions: &[SavedSession], recent: &SavedSession) -> Option<usize> {
+    if recent.name.is_empty() {
+        let address = recent.address();
+        return sessions.iter().position(|s| s.address() == address);
+    }
+    sessions.iter().position(|s| s.name == recent.name)
+}
+
+/// What recent connection `i` connects to, and whether that is a saved session: the saved one as it is now, else the
+/// connection as it was made, without a name (R-SSH-64).
+pub fn recent_source(
+    sessions: &[SavedSession],
+    recent: &[SavedSession],
+    i: usize,
+) -> Option<(SavedSession, bool)> {
+    let made = recent.get(i)?;
+    Some(match recent_saved(sessions, made) {
+        Some(saved) => (sessions[saved].clone(), true),
+        None => (
+            SavedSession {
+                name: String::new(),
+                ..made.clone()
+            },
+            false,
+        ),
+    })
 }

@@ -76,6 +76,8 @@ pub struct Settings {
     /// Open the tabs of last time on start (R-SSH-52, off by default), and those tabs.
     pub restore_tabs: bool,
     pub last_tabs: Vec<crate::restore::SavedTab>,
+    /// The start screen's "All sessions" is open; folded until the user opens it (R-SSH-65).
+    pub all_sessions_open: bool,
 }
 
 /// What the host's bell does (R-SSH-19, D46).
@@ -123,6 +125,7 @@ impl Default for Settings {
             palette_recent: Vec::new(),
             recent: Vec::new(),
             bell: BellStyle::Flash,
+            all_sessions_open: false,
         }
     }
 }

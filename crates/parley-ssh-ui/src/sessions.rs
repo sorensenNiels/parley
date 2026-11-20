@@ -61,6 +61,8 @@ pub struct SavedSession {
     /// A session log from the start (R-SSH-25), and where it goes.
     pub log_mode: crate::log::LogMode,
     pub log_pattern: String,
+    /// Listed first on the start screen and in the palette (R-SSH-63).
+    pub favourite: bool,
 }
 
 impl Default for SavedSession {
@@ -92,6 +94,7 @@ impl Default for SavedSession {
             proxy_command: String::new(),
             log_mode: crate::log::LogMode::Off,
             log_pattern: crate::log::DEFAULT_PATTERN.to_owned(),
+            favourite: false,
         }
     }
 }
@@ -104,6 +107,7 @@ impl SavedSession {
             host: target.host.clone(),
             port: target.port,
             user: target.user.clone(),
+            favourite: false,
             ..defaults.clone()
         }
     }

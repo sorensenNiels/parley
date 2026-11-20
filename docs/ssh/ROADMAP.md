@@ -42,6 +42,7 @@ Parley's principles apply ([../ROADMAP.md](../ROADMAP.md) §2), read for SSH:
 | [Phase 26: a first shell](phases/phase-26-a-first-shell.md) | Done (2026-11-16), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-1..10. |
 | [Phase 27: saved sessions and keys](phases/phase-27-saved-sessions-and-keys.md) | Done (2026-11-16), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-11..16, R-SSH-59. |
 | [Phase 33: tabs and split panes](phases/phase-33-tabs-and-split-panes.md) | Done (2026-11-16), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-39..41, R-SSH-58. |
+| Phase 41: many saved sessions | In progress (2026-11-20, asked by the owner): R-SSH-63..65 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
 | Phase 34: hosts from `~/.ssh/config` | In progress: R-SSH-42 done ([phase file](phases/phase-34-hosts-from-ssh-config.md)); R-SSH-43 built, to be checked in the running app. |
 | Phase 37: themes and fonts | In progress (2026-11-16; D49): R-SSH-20 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
 | Phase 38: snippets and broadcast | In progress (2026-11-16; D50): R-SSH-49, R-SSH-50 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
@@ -66,6 +67,13 @@ Cut down by D46 to what modern use needs: the mouse for vim, tmux and htop (R-SS
 (R-SSH-24), a simple bell (R-SSH-19) and session logs (R-SSH-25). Appearance moves to Phase 37 (R-SSH-20). Dropped:
 PuTTY's keyboard styles (R-SSH-17), selection options (R-SSH-21), character sets other than UTF-8 (R-SSH-22) and its
 terminal options (R-SSH-23).
+
+### Phase 41 — many saved sessions
+
+Hundreds of saved sessions on the start screen (the owner, 2026-11-20): favourites marked with a star and listed
+first, the recent connections under them, and a search at the top that forgives a typo and is driven by the
+keyboard; long lists fold and quick connect stays in view. R-SSH-63..65. Folders or tags may follow if this is not
+enough.
 
 ### Phase 34 — hosts from `~/.ssh/config`
 
@@ -179,6 +187,9 @@ planned, as Phase 22's rows were.
 | R-SSH-56 | **The Transfer panel** (2026-11-16, IDEA-43, D48). A source and a target, each an open session (or the desktop) and a path; a dry run first (`--dry-run --itemize-changes`) listed as what will be added, changed and deleted; then progress, speed and time left (`--info=progress2`), Cancel, and resume (`--partial`); switches for deleting extra files, keeping permissions and excludes; transfers saved by name to run again, also from the palette (R-SSH-48). | 31 |
 | R-SSH-57 | **rsync is checked first** (2026-11-16, IDEA-43, D48). Both ends need rsync 3.1 or later (`rsync --version`); when one has none or an older one, this is said in plain words before anything is copied. | 31 |
 | R-SSH-62 | **The user name asked when the session has none** (2026-11-19, asked by the owner). A session with no user name (a saved session, a restored tab, Restart) connects, checks the host key, then asks "User name" in the sign-on dialog, shown as typed and asked again while empty; Cancel ends the connection quietly. It signs on as that user, which the tab, the status bar, Restart and reconnecting (R-SSH-51) keep without asking again; the saved session is not changed. A jump host with no user anywhere asks for its own, naming its hop. The session editor's User name says "empty: asked when connecting". Quick connect and R-SSH-59 still ask for the user in the start screen. | Between phases |
+| R-SSH-63 | **Favourite sessions** (2026-11-20, asked by the owner). A star on each saved session's row on the start screen marks it as a favourite or not, kept with the session in the settings file; the favourites are listed first, under "Favourites", and also under "All sessions", which lists every saved session (the owner, 2026-11-20). The command palette (R-SSH-48) lists favourite sessions before the other saved sessions. A session made from the defaults or a config host is not a favourite. | 41 |
+| R-SSH-64 | **Recent connections on the start screen** (2026-11-20, asked by the owner). Under the favourites, "Recent" lists the last five connections made (saved sessions, `~/.ssh/config` hosts and quick connects: R-SSH-48's list), newest first. A saved session (found by its name, or by its address for a connection kept without one) is shown by its name, with its star and Edit…, and connects with its settings as they are now (also from the palette); one since renamed or deleted, and any other connection, is shown by its address with "Save as session…". Not shown while searching. | 41 |
+| R-SSH-65 | **A start screen for many sessions** (2026-11-20, asked by the owner). The search field (from four saved sessions and config hosts, R-SSH-11) is at the top and has the keyboard when a start screen opens in the pane in front. It looks in names, hosts, user names and jump hosts and forgives a typo as the palette does; the matches, saved sessions and config hosts, are one list, the best fits first; Up and Down choose one, Enter connects it, Escape empties the search. Each saved session or host is one line: star, name, address, Edit… (or Save as session…), Connect. Without a search, "All sessions" and "From ~/.ssh/config" show their count and fold under their heading. "All sessions" is folded until the user opens it, and stays as left, also after a restart (the owner, 2026-11-20); "From ~/.ssh/config" with more than ten hosts starts folded when a section above it shows something. Quick connect stays in view: beside the list when the pane is wide enough, above it when not. | 41 |
 
 ## 6. Open questions
 
@@ -203,4 +214,4 @@ D36–D38 in [../DECISIONS.md](../DECISIONS.md) bind this work too.
   `phases/phase-NN-<slug>.md`, and its §3 row links to it.
 - An idea is not a plan: it goes in [IDEAS.md](IDEAS.md) (by theme in [ideas/](ideas/)) until it is picked, then becomes requirements here.
 
-Next free ID: `R-SSH-63` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).
+Next free ID: `R-SSH-66` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).

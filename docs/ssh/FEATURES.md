@@ -8,6 +8,22 @@
 
 ## In progress
 
+### Phase 41: many saved sessions (R-SSH-63..65 built 2026-11-20, Linux under WSL)
+
+Automated (all pass): `start`'s unit tests (the search over names, hosts, users and jump hosts, a typo forgiven, the
+best fit then the favourites first, `æøå`; what a click in each kind of row chooses), `palette`'s (a saved session kept
+recent by name, found by address when kept without one, connected as it is now; one renamed connects as made), and
+kittest tests in `tests.rs` (the star, the Favourites heading and the palette's order; Recent with "Not saved" and
+Save as session…; the search having the keyboard, Down and Enter connecting the second match; Escape; All sessions
+folded at first, opened and folded by a click and kept in the settings). Seen once in a screenshot of the running app with the owner's sessions (Linux under WSL,
+dark): Recent, All sessions and quick connect beside them.
+
+| ID | Built | Still to check in the running app |
+|---|---|---|
+| R-SSH-63 | `SavedSession::favourite`, the star in `start/list.rs`, `start::Choice::Favourite`, favourites first in `palette/items.rs`. | Star and unstar; the favourite kept after a restart; the palette's order. |
+| R-SSH-64 | `remember_connection` keeps a saved session's name, `recent_saved`/`recent_source`, the Recent section, `Choice::Recent` and `RecentSave`. | A quick connect and a config host in Recent, Save as session… from it; a saved session renamed. |
+| R-SSH-65 | `start::found` with `palette::score`, the search's keys, `list::section` folding with counts, All sessions' state in `Settings::all_sessions_open`, quick connect beside the list from 1000 points wide and above it below that. | Many sessions; Up, Down, Enter and Escape; All sessions as left after a restart; a narrow split pane; light theme. |
+
 ### Between phases: the user name asked when the session has none (R-SSH-62 built 2026-11-19, Linux under WSL)
 
 Automated (all pass): `parley-ssh-core`'s `tests/net.rs` against an in-process russh server (no user: the host key,

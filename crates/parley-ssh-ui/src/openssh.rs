@@ -72,6 +72,7 @@ impl Hosts {
 pub fn session(defaults: &SavedSession, host: &Host) -> SavedSession {
     let mut session = defaults.clone();
     host.alias.clone_into(&mut session.name);
+    session.favourite = false;
     apply(&mut session, host);
     if session.user.trim().is_empty() {
         session.user = openssh_config::local_user();

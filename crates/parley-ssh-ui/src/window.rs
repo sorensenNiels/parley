@@ -45,7 +45,7 @@ impl ParleySshUi {
         source: SavedSession,
         saved: bool,
     ) {
-        crate::palette::remember_connection(&mut self.settings.recent, &source);
+        crate::palette::remember_connection(&mut self.settings.recent, &source, saved);
         let new = self.session_pane(ctx, source, saved);
         if let Some(tab) = self.tabs.get_mut(self.current)
             && let Some(slot) = tab.pane_mut(pane)
@@ -310,8 +310,12 @@ impl ParleySshUi {
         let broadcast_all = self.broadcast_all;
         let now = ui.input(|i| i.time);
         let mut shared = Vec::new();
-        let sessions = &self.settings.sessions;
-        let openssh = &self.openssh;
+        let lists = crate::start::Lists {
+            sessions: &self.settings.sessions,
+            recent: &self.settings.recent,
+            openssh: &self.openssh,
+            all_open: self.settings.all_sessions_open,
+        };
         let Some(tab) = self.tabs.get_mut(current) else {
             return;
         };
@@ -338,7 +342,7 @@ impl ParleySshUi {
                 match tab.pane_mut(id) {
                     Some(Pane::Start(form)) => {
                         child.painter().rect_filled(rect, 0.0, start_fill);
-                        if let Some(choice) = form.show(&mut child, sessions, openssh) {
+                        if let Some(choice) = form.show(&mut child, lists, active) {
                             choices.push((id, choice));
                         }
                     }

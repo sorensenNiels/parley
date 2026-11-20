@@ -4,7 +4,7 @@
 
 mod items;
 
-pub use items::remember_connection;
+pub use items::{recent_saved, recent_source, remember_connection};
 
 use egui::{Context, Key, RichText};
 use parley_ui_egui::{dialog, theme};
@@ -312,5 +312,56 @@ mod tests {
         remember(&mut recent, "x");
         assert_eq!(recent.len(), 2, "each key once");
         assert_eq!(recent[0], "x");
+    }
+
+    #[test]
+    fn a_saved_session_stays_recent_by_name_and_connects_as_it_is_now_r_ssh_64() {
+        use crate::sessions::SavedSession;
+        let saved = SavedSession {
+            name: "Prod æøå".into(),
+            host: "box.lan".into(),
+            user: "me".into(),
+            ..SavedSession::default()
+        };
+        let quick = SavedSession {
+            name: "typed".into(),
+            host: "other.lan".into(),
+            user: "me".into(),
+            ..SavedSession::default()
+        };
+        let mut recent = Vec::new();
+        remember_connection(&mut recent, &saved, true);
+        remember_connection(&mut recent, &quick, false);
+        assert_eq!(
+            recent[0].name, "",
+            "a connection not saved is kept without a name"
+        );
+        assert_eq!(recent[1].name, "Prod æøå");
+
+        let mut sessions = vec![SavedSession {
+            port: 2200,
+            ..saved.clone()
+        }];
+        let (source, is_saved) = recent_source(&sessions, &recent, 1).expect("recent");
+        assert!(is_saved);
+        assert_eq!(source.port, 2200, "the saved session as it is now");
+
+        sessions[0].name = "Renamed".into();
+        let (source, is_saved) = recent_source(&sessions, &recent, 1).expect("recent");
+        assert!(!is_saved, "renamed: the connection as it was made");
+        assert_eq!((source.name.as_str(), source.port), ("", 22));
+
+        let unnamed = SavedSession {
+            name: String::new(),
+            ..saved.clone()
+        };
+        sessions[0].port = 22;
+        let (source, is_saved) = recent_source(&sessions, &[unnamed], 0).expect("recent");
+        assert!(
+            is_saved,
+            "kept without a name: the saved session at its address"
+        );
+        assert_eq!(source.name, "Renamed");
+        assert_eq!(recent_source(&sessions, &recent, 9), None);
     }
 }
