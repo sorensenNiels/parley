@@ -15,19 +15,6 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
-- **R-NF-4, R-NF-5** (2026-11-20): one package per program on Linux and macOS (D56). **Automated** (`make test`): Parley
-  5250 looks for Parley SQL and Parley SSH beside it, and on macOS in their own apps beside its app, in
-  /Applications and ~/Applications (`siblings.rs`); Parley SQL finds its helper in `/usr/lib/parley-sql`.
-  **Checked on Linux (WSL)**: `scripts/package-split.sh deb` makes `parley-5250`, `parley-sql` (with the helper) and
-  `parley-ssh`, each with its own menu entry and icon; in a throwaway dpkg database, the three install over an
-  all-in-one `parley-5250` 0.14.0 without file conflicts, and removing `parley-5250` leaves the other two. **Not yet
-  run**: installing them with apt on a real system, and the macOS `.dmg` (needs a Mac or the release workflow).
-
-- **R-NF-3** (2026-11-20): choose the programs when installing on Windows (D55). **Automated** (`make test`): Parley 5250
-  without Parley SQL or Parley SSH beside it has no Tools ▸ SQL… or SSH…, no key for them and no switch in Settings ▸
-  Add-ons (`sql_and_ssh_not_installed_are_left_out_of_tools_and_add_ons_r_nf_3`). **Built, not yet run**: the WiX
-  template `crates/parley-app/windows/main.wxs` (WiX runs only on Windows); its check is in docs/RELEASING.md.
-
 - **R-DS-10** (2026-11-15): GUI windows behind the session switch "GUI elements (beta)" (D38). **Automated** (`make
   test`): a window is written as the 5494 writes it (border attribute and characters, centred title `Æble`, cleared
   inside) and kept; removing it puts back what it covered and frees the cursor; Remove All and Clear Unit take every

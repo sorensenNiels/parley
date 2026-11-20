@@ -78,3 +78,6 @@
 | R-ADD-2 | Macros are an add-on, on by default | [Phase 3](phases/phase-03-keyboard-maps-and-macros.md) |
 | R-NF-1 | Installers for every platform, built by the Release … | [Phase 1](phases/phase-01-connect-and-show-a-screen.md) |
 | R-NF-2 | Both commands after installing | [Phase 4](phases/phase-04-a-modern-look.md) |
+| R-NF-3 | Choose the programs when installing on Windows | [Between phases](phases/between-phases.md) |
+| R-NF-4 | Three Linux packages | [Between phases](phases/between-phases.md) |
+| R-NF-5 | Three Mac apps | [Between phases](phases/between-phases.md) |

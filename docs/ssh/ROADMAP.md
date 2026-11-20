@@ -42,15 +42,15 @@ Parley's principles apply ([../ROADMAP.md](../ROADMAP.md) §2), read for SSH:
 | [Phase 26: a first shell](phases/phase-26-a-first-shell.md) | Done (2026-11-16), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-1..10. |
 | [Phase 27: saved sessions and keys](phases/phase-27-saved-sessions-and-keys.md) | Done (2026-11-16), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-11..16, R-SSH-59. |
 | [Phase 33: tabs and split panes](phases/phase-33-tabs-and-split-panes.md) | Done (2026-11-16), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-39..41, R-SSH-58. |
-| Phase 41: many saved sessions | In progress (2026-11-20, asked by the owner): R-SSH-63..65 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
-| Phase 34: hosts from `~/.ssh/config` | In progress: R-SSH-42 done ([phase file](phases/phase-34-hosts-from-ssh-config.md)); R-SSH-43 built, to be checked in the running app. |
-| Phase 37: themes and fonts | In progress (2026-11-16; D49): R-SSH-20 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
-| Phase 38: snippets and broadcast | In progress (2026-11-16; D50): R-SSH-49, R-SSH-50 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
-| Phase 39: reconnect and restore | In progress (2026-11-16; D50): R-SSH-51, R-SSH-52 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
-| Phase 29: the connection, complete | In progress (2026-11-16; D51): R-SSH-26..29 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
-| Phase 35: shell integration | In progress (2026-11-16): R-SSH-44..47 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
-| Phase 36: the command palette | In progress (2026-11-16): R-SSH-48 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
-| Phase 28: the terminal, lean | In progress: R-SSH-18 done ([phase file](phases/phase-28-the-terminal-lean.md)); R-SSH-19, R-SSH-24 and R-SSH-25 built and tested ([FEATURES.md](FEATURES.md)); to be checked in the running app. |
+| [Phase 41: many saved sessions](phases/phase-41-many-saved-sessions.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-63..65. |
+| [Phase 34: hosts from `~/.ssh/config`](phases/phase-34-hosts-from-ssh-config.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-42 (2026-11-16), R-SSH-43. |
+| [Phase 37: themes and fonts](phases/phase-37-themes-and-fonts.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-20 (D49). |
+| [Phase 38: snippets and broadcast](phases/phase-38-snippets-and-broadcast.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-49, R-SSH-50 (D50). |
+| [Phase 39: reconnect and restore](phases/phase-39-reconnect-and-restore.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-51, R-SSH-52 (D50). |
+| [Phase 29: the connection, complete](phases/phase-29-the-connection-complete.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-26..29 (D51). |
+| [Phase 35: shell integration](phases/phase-35-shell-integration.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-44..47. |
+| [Phase 36: the command palette](phases/phase-36-the-command-palette.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-48. |
+| [Phase 28: the terminal, lean](phases/phase-28-the-terminal-lean.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-18 (2026-11-16), R-SSH-19, R-SSH-24, R-SSH-25; R-SSH-17, R-SSH-21..23 dropped (D46). |
 | Phase 31: transfers with rsync | Planned (D48; was file transfer with SFTP). |
 | Phase 30: tunnels | Later. |
 | Phase 32: keys made here | Later. |
@@ -60,54 +60,6 @@ The table is in the order the phases are built (the owner, 2026-11-16; 37, 38, 3
 ## 4. Phases
 
 Phase numbers continue the shared sequence; the next free one is on the last line of [../ROADMAP.md](../ROADMAP.md).
-
-### Phase 28 — the terminal, lean
-
-Cut down by D46 to what modern use needs: the mouse for vim, tmux and htop (R-SSH-18), find in the scrollback
-(R-SSH-24), a simple bell (R-SSH-19) and session logs (R-SSH-25). Appearance moves to Phase 37 (R-SSH-20). Dropped:
-PuTTY's keyboard styles (R-SSH-17), selection options (R-SSH-21), character sets other than UTF-8 (R-SSH-22) and its
-terminal options (R-SSH-23).
-
-### Phase 41 — many saved sessions
-
-Hundreds of saved sessions on the start screen (the owner, 2026-11-20): favourites marked with a star and listed
-first, the recent connections under them, and a search at the top that forgives a typo and is driven by the
-keyboard; long lists fold and quick connect stays in view. R-SSH-63..65. Folders or tags may follow if this is not
-enough.
-
-### Phase 34 — hosts from `~/.ssh/config`
-
-From IDEA-38: the hosts in OpenSSH's config on the start screen and in the palette, as OpenSSH reads them, and jump
-hosts (`ProxyJump`). R-SSH-42, R-SSH-43.
-
-### Phase 35 — shell integration
-
-Links you can click, the shell's prompts as marks to jump between commands and copy a command's output, a
-notification when a long command ends, and the clipboard from the server. R-SSH-44..47.
-
-### Phase 36 — the command palette
-
-One box (Ctrl+Shift+P) for every host, session, tab and action. R-SSH-48.
-
-### Phase 37 — themes and fonts
-
-Themes people know by look, following the system's light and dark, fonts with Nerd Font symbols and emoji. R-SSH-20
-(rewritten).
-
-### Phase 38 — snippets and broadcast
-
-From IDEA-39 and IDEA-40: commands kept by name and sent with a key, and typing into several panes at once.
-R-SSH-49, R-SSH-50.
-
-### Phase 39 — reconnect and restore
-
-A dropped connection comes back by itself after sleep or a network change, and the tabs of last time can open again
-on start. R-SSH-51, R-SSH-52.
-
-### Phase 29 — the connection, complete
-
-Made lean by D51: keepalives and the IP version, rekeying and compression, a remote command with environment
-variables and the terminal type, and proxies. No older algorithms. R-SSH-26..29.
 
 ### Phase 30 — tunnels
 
@@ -150,18 +102,6 @@ planned, as Phase 22's rows were.
 
 | ID | Requirement | Phase |
 |---|---|---|
-| R-SSH-17 | ~~**Keyboard settings** (PuTTY's Keyboard and Features pages): Backspace sends `DEL` or `^H`; Home/End as standard or rxvt; function keys as xterm, ESC[n~, Linux, Xterm R6, VT400, VT100+ or SCO; the initial state of the cursor keys and keypad; a switch to refuse application cursor/keypad mode; Alt as `ESC` prefix or as Meta; AltGr as AltGr or as Ctrl+Alt.~~ *Dropped 2026-11-16 (D46): legacy options; UTF-8 and xterm's keys and behaviour only.* | 28 |
-| R-SSH-19 | **The bell** (*made lean 2026-11-16, D46*): none, a sound (as D37's beep, played by the launcher) or a flash of the pane's border (default: flash); while the window is not focused, its taskbar entry asks for attention. | 28 |
-| R-SSH-20 | **Themes and fonts** (*rewritten 2026-11-16, D46; was PuTTY's Window, Appearance and Colours pages; details 2026-11-16, D49*). Settings ▸ Appearance: a terminal theme from a gallery, each shown as a small preview of coloured text: Parley dark and light, Solarized dark and light, Nord, Dracula, Gruvbox dark and light, Catppuccin Latte and Mocha, Tokyo Night and Tokyo Night Day. One theme for when the system is dark and one for when it is light (Parley SSH's theme setting, Light, Dark or System, chooses which); the theme colours the screen only (D49). The terminal font, bundled JetBrains Mono or an installed monospace font, with real bold, italic and bold italic (bundled faces, D49; an installed font's own faces when it has them); Nerd Font symbols and emoji drawn from bundled fallbacks (monochrome). The font size from 8 to 32 with Ctrl+= / Ctrl+- / Ctrl+0 (Cmd on macOS) for every pane, kept. The cursor: block, bar or underline, blinking or not. Padding around the screen (0–24 px). Every change shows at once. *Completes R-SSH-8's italic.* | 37 |
-| R-SSH-21 | ~~**Selection settings** (PuTTY's Selection page): copy on select with a right or middle click pasting (PuTTY's way) or the right-click menu (R-SSH-9); rectangular selection with Alt+drag; which characters make a word for a double click; copy with colours (HTML and RTF beside the text).~~ *Dropped 2026-11-16 (D46): legacy options; UTF-8 and xterm's keys and behaviour only.* | 28 |
-| R-SSH-22 | ~~**Character sets** (PuTTY's Translation page): the remote character set, UTF-8 by default, or ISO 8859-1..16, CP437, CP850, CP1252 or KOI8-R; ambiguous-width characters narrow or wide; line drawing as Unicode or as the font's.~~ *Dropped 2026-11-16 (D46): legacy options; UTF-8 and xterm's keys and behaviour only.* | 28 |
-| R-SSH-23 | ~~**Terminal options** (PuTTY's Terminal page): auto-wrap on at start, implicit CR in every LF and LF in every CR, the answerback to `^E`, whether the host may set the window title, and whether it may resize the window.~~ *Dropped 2026-11-16 (D46): legacy options; UTF-8 and xterm's keys and behaviour only.* | 28 |
-| R-SSH-24 | **Find in the scrollback** (Ctrl+Shift+F): the find bar of Parley 5250 (`terminal/find`), over the screen and the scrollback, with match case and next/previous. | 28 |
-| R-SSH-25 | **Session logs** (*made lean 2026-11-16, D46*): per session, off by default: the text as shown (without escape sequences) or the raw output, to a file named from a pattern with `&H` host, `&Y&M&D` date, `&T` time, appended to; Session ▸ Start/Stop log for the session open. | 28 |
-| R-SSH-26 | **Keeping the connection** (*made lean 2026-11-16, D51*): a session setting "Keepalive every N seconds" (`keepalive@openssh.com`; default 30, 0 for none); after three unanswered the connection counts as lost (R-SSH-51). TCP keepalives on and Nagle off always. IPv4, IPv6 or either (default either), also from `AddressFamily` in `~/.ssh/config`. A lost connection says so in the status bar, with Restart. | 29 |
-| R-SSH-27 | **Rekeying and compression** (*made lean 2026-11-16, D51*): a session setting to rekey after N minutes (default 60) and after N MB (default 1024); `zlib@openssh.com` compression as a switch, off by default (also `Compression yes` in `~/.ssh/config`). Algorithm lists and the older algorithms are not offered (D51). | 29 |
-| R-SSH-28 | **What runs on the server** (*made lean 2026-11-16, D51*): a session setting for a remote command run instead of the shell, still with a pseudo-terminal (e.g. `tmux new -A -s main`; `RemoteCommand` from `~/.ssh/config`, and a command after the host on the command line as `ssh host cmd`; *2026-11-16, while building: `RequestTTY` is not read, the terminal always gets a pseudo-terminal*); environment variables sent as `env` requests, `NAME=value` one per line (`SetEnv` from the config; the server may refuse them, which the event log says); the terminal type string (default `xterm-256color`). | 29 |
-| R-SSH-29 | **Proxies** (PuTTY's Proxy page; *made lean 2026-11-16, D51; jump hosts moved to R-SSH-43*): a session setting for a proxy: none, SOCKS 5 (RFC 1928, with user name and password, RFC 1929, the host name resolved by the proxy) or HTTP CONNECT (RFC 9110 §9.3.6, with Basic authentication), host and port; a proxy password is asked when the proxy wants one, never kept; or a local proxy command whose standard input and output carry the connection (`%h`, `%p`, `%r` replaced; `ProxyCommand` from `~/.ssh/config`). A proxy that refuses says why in plain words. A proxy and jump hosts together: the proxy reaches the first jump host. | 29 |
 | R-SSH-30 | **Local port forwarding** (`-L`, RFC 4254 §7.2): listen on a local port and forward each connection to a host and port seen from the server; bound to loopback unless "accept connections from other hosts" is on. | 30 |
 | R-SSH-31 | **Remote port forwarding** (`-R`, RFC 4254 §7.1): ask the server to listen and forward its connections to a local host and port. | 30 |
 | R-SSH-32 | **Dynamic forwarding** (`-D`): a local SOCKS 4 and 5 server whose connections go out through the server. | 30 |
@@ -171,25 +111,11 @@ planned, as Phase 22's rows were.
 | R-SSH-36 | ~~**SCP where there is no SFTP**: downloads and uploads through `scp -f`/`scp -t` when the server has no SFTP subsystem, in the same panel with fewer actions.~~ *Replaced 2026-11-16 by rsync (D48, R-SSH-53..57).* | 31 |
 | R-SSH-37 | **Make a key pair** (PuTTY's PuTTYgen): Ed25519 by default, ECDSA P-256/384/521 or RSA 3072/4096, with a comment and a passphrase (asked twice); save the private key as OpenSSH or `.ppk` v3 and the public key; show the public key line for `authorized_keys` with a Copy button and its SHA-256 fingerprint. | 32 |
 | R-SSH-38 | **Change a key**: load a private key file (both formats), change or remove its passphrase, and save it in the other format. | 32 |
-| R-SSH-43 | **Jump hosts** (2026-11-16; *moved here from R-SSH-29*). One or more jump hosts (`ProxyJump`, a session setting, and `-J` on the command line), reached through `direct-tcpip`, each with its own host-key check and sign-on. *Details 2026-11-16, while building:* written as OpenSSH writes them (`[user@]host[:port]` separated by commas, `ssh://` and `[…]` for IPv6 allowed, `none` for none), in the session editor's Jump hosts field and the defaults; a name that `~/.ssh/config` knows takes its `HostName`, `User`, `Port`, `IdentityFile`s and its own `ProxyJump` (followed 8 levels deep, then said as a loop); a config host's `ProxyJump` comes with it (R-SSH-42). A jump host with no user anywhere signs on as the session's user (OpenSSH uses the local one); it tries its `IdentityFile`s, then the session's key files and the agent's keys, and never forwards the agent. The host-key and sign-on dialogs name the hop that asks; only the target's algorithms go to the status bar, every hop's to the event log. A jump host that cannot reach the next says so; jump hosts that cannot be read are said by the editor and by `-J`, and a session whose jump hosts cannot be used fails at once with the reason. | 34 |
-| R-SSH-44 | **Links** (2026-11-16). OSC 8 hyperlinks and URLs in the text are underlined under the pointer; Ctrl+click (Cmd+click) opens them in the browser; the right-click menu copies one. | 35 |
-| R-SSH-45 | **Commands as marks** (2026-11-16). With a shell that sends OSC 133 (bash, zsh, fish with their integration; PowerShell), prompts are marked in the scroll bar; Ctrl+Shift+Up and Down jump between commands; the right-click menu selects or copies a command's output; a failed command's mark is red. | 35 |
-| R-SSH-46 | **Notifications** (2026-11-16). OSC 9 and OSC 777 notifications from the host, and a command that ran longer than 10 seconds ending (R-SSH-45), show as a desktop notification while the window is not focused. | 35 |
-| R-SSH-47 | **The clipboard from the server** (2026-11-16). OSC 52: the host may set the clipboard (on by default, a setting turns it off); it may never read it. | 35 |
-| R-SSH-48 | **The command palette** (2026-11-16). Ctrl+Shift+P (Cmd+Shift+P) opens a box over the window that finds, as one types and forgiving typos, saved sessions, `~/.ssh/config` hosts, open tabs, recent connections and every menu action, each with its shortcut; Enter runs the one chosen; recent ones first. | 36 |
-| R-SSH-49 | **Snippets** (2026-11-16, IDEA-40; *details 2026-11-16, D50*). Commands kept by name in Parley SSH's settings and edited in Settings ▸ Snippets (add, edit, delete asked first, reorder; name, text of one or more lines, send Enter after it or not, a key of its own if wanted, caught as the Keyboard page catches keys); exported to and imported from one JSON file. A Snippets menu in the header lists them; Ctrl+Shift+S opens a picker that finds them as one types (name and text); a snippet's own key sends it at once. A snippet goes to the pane in front, as pasted text (bracketed when the host asked, R-SSH-9). Placeholders `{{name}}` and `{{name:default}}` are asked for in one dialog before sending, each name once; `{{{{` sends a literal `{{`. They go into the palette when Phase 36 is built. | 38 |
-| R-SSH-50 | **Broadcast** (2026-11-16, IDEA-39). Type into several panes at once: Session ▸ Broadcast to this tab (Ctrl+Shift+B) or to every tab; keys and pastes typed in the pane in front go to every connected pane in scope; each pane that receives has a coloured border and a "Broadcast" badge, and the status bar says how many panes receive. Turned off from the menu again, or with Escape twice quickly. Snippets sent while broadcasting go to every pane too. | 38 |
-| R-SSH-51 | **Reconnect** (2026-11-16). A connection lost without the user ending it (the network dropped, the computer slept, keepalives unanswered, R-SSH-26) reconnects by itself with the same settings: after 1, 2, 4, 8 … seconds (at most 30 between tries) for 10 minutes (a setting: off, or 1–60 minutes), a line in the terminal for each try and the status bar counting down; Restart now and Stop in the status bar. Signing on again asks only for what it needs (a key or the agent needs nothing; a password is asked again, D16). On success the screen keeps its text and a line says it reconnected; the shell is a new one. Not when the shell exited or the server refused the sign-on. | 39 |
-| R-SSH-52 | **Restore** (2026-11-16; *details 2026-11-16, D50*). Settings: "Open the tabs of last time" (off by default). When on, Parley SSH saves its tabs, each tab's split panes and their sizes, and each pane's session (saved session by name, else host, port, user and options; never a password) when it closes, and on the next start without a host on the command line opens them again; each pane connects when its tab is first shown. Screens start empty (D50). A saved session since deleted opens with its host as it was. | 39 |
 | R-SSH-53 | **Server to server, direct** (2026-11-16, IDEA-43, D48). From a session on server A, rsync on A copies a path to server B (`rsync -az`), signing on to B with the user's agent through agent forwarding (R-SSH-13) for that transfer only: no key is copied to A and the data does not pass through the desktop. | 31 |
 | R-SSH-54 | **Server to server, through Parley SSH** (2026-11-16, IDEA-43, D48). When A cannot reach B, A's rsync goes to B through a port Parley SSH forwards back from A (remote forwarding, R-SSH-31, built with this). | 31 |
 | R-SSH-55 | **Desktop and server** (2026-11-16, IDEA-43, D48). With the desktop's rsync, Parley SSH as its transport; where the desktop has no rsync (Windows by default) this is said with how to get it, and what then is decided when Phase 31 is planned. | 31 |
 | R-SSH-56 | **The Transfer panel** (2026-11-16, IDEA-43, D48). A source and a target, each an open session (or the desktop) and a path; a dry run first (`--dry-run --itemize-changes`) listed as what will be added, changed and deleted; then progress, speed and time left (`--info=progress2`), Cancel, and resume (`--partial`); switches for deleting extra files, keeping permissions and excludes; transfers saved by name to run again, also from the palette (R-SSH-48). | 31 |
 | R-SSH-57 | **rsync is checked first** (2026-11-16, IDEA-43, D48). Both ends need rsync 3.1 or later (`rsync --version`); when one has none or an older one, this is said in plain words before anything is copied. | 31 |
-| R-SSH-62 | **The user name asked when the session has none** (2026-11-19, asked by the owner). A session with no user name (a saved session, a restored tab, Restart) connects, checks the host key, then asks "User name" in the sign-on dialog, shown as typed and asked again while empty; Cancel ends the connection quietly. It signs on as that user, which the tab, the status bar, Restart and reconnecting (R-SSH-51) keep without asking again; the saved session is not changed. A jump host with no user anywhere asks for its own, naming its hop. The session editor's User name says "empty: asked when connecting". Quick connect and R-SSH-59 still ask for the user in the start screen. | Between phases |
-| R-SSH-63 | **Favourite sessions** (2026-11-20, asked by the owner). A star on each saved session's row on the start screen marks it as a favourite or not, kept with the session in the settings file; the favourites are listed first, under "Favourites", and also under "All sessions", which lists every saved session (the owner, 2026-11-20). The command palette (R-SSH-48) lists favourite sessions before the other saved sessions. A session made from the defaults or a config host is not a favourite. | 41 |
-| R-SSH-64 | **Recent connections on the start screen** (2026-11-20, asked by the owner). Under the favourites, "Recent" lists the last five connections made (saved sessions, `~/.ssh/config` hosts and quick connects: R-SSH-48's list), newest first. A saved session (found by its name, or by its address for a connection kept without one) is shown by its name, with its star and Edit…, and connects with its settings as they are now (also from the palette); one since renamed or deleted, and any other connection, is shown by its address with "Save as session…". Not shown while searching. | 41 |
-| R-SSH-65 | **A start screen for many sessions** (2026-11-20, asked by the owner). The search field (from four saved sessions and config hosts, R-SSH-11) is at the top and has the keyboard when a start screen opens in the pane in front. It looks in names, hosts, user names and jump hosts and forgives a typo as the palette does; the matches, saved sessions and config hosts, are one list, the best fits first; Up and Down choose one, Enter connects it, Escape empties the search. Each saved session or host is one line: star, name, address, Edit… (or Save as session…), Connect. Without a search, "All sessions" and "From ~/.ssh/config" show their count and fold under their heading. "All sessions" is folded until the user opens it, and stays as left, also after a restart (the owner, 2026-11-20); "From ~/.ssh/config" with more than ten hosts starts folded when a section above it shows something. Quick connect stays in view: beside the list when the pane is wide enough, above it when not. | 41 |
 
 ## 6. Open questions
 
