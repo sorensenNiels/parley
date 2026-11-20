@@ -104,7 +104,9 @@ case $format in
     ;;
   dmg)
     # The three apps and a link to Applications, as cargo-packager's own .dmg holds one app.
-    arch=$(case "${target:-$(uname -m)}" in x86_64*) echo x64 ;; *) echo aarch64 ;; esac)
+    # Not a `case` inside `$( )`: macOS's bash 3.2 cannot parse its `)`.
+    arch=aarch64
+    if [[ "${target:-$(uname -m)}" == x86_64* ]]; then arch=x64; fi
     ln -sfn /Applications "$staging/Applications"
     dmg="$out/Parley_${version}_${arch}.dmg"
     rm -f "$dmg"
