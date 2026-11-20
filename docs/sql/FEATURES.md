@@ -13,7 +13,15 @@
 
 ## In progress
 
-Nothing at the moment.
+- **R-SQL-92** (built 2026-11-15 in the code audit, finished 2026-11-20; Linux under WSL, tests only). `text::segments`
+  skips the `;`s inside `BEGIN … END`, tells `END IF`/`WHILE`/`LOOP`/`FOR`/`REPEAT`/`CASE` and `CASE … END`
+  expressions apart, and ignores `BEGIN`/`END` in strings, quoted names and comments; an unclosed `BEGIN` runs to the
+  end. Tests in `parley-sql-core` (`text::tests::*_r_sql_92`: a procedure with nested blocks, `END IF`, `END CASE`,
+  `END WHILE` and comments; a trigger with `BEGIN ATOMIC`; a labelled function; CASE expressions; `æøå`; unclosed
+  text; the statement under the cursor) and in `parley-sql-ui` (`run_all_and_run_send_a_procedure_whole_r_sql_92`:
+  Run all queues the procedure whole, Run in its body picks the whole procedure). *Still to check in the running app:*
+  Run, Run all and Run selection on a `CREATE PROCEDURE` with a compound body, and a dynamic compound statement
+  (`BEGIN DECLARE X INT; SET X = 1; END`) on an IBM i; the ▶ marks in the gutter show one statement.
 
 ## Verified
 

@@ -823,6 +823,29 @@ mod tests {
     }
 
     #[test]
+    fn run_all_and_run_send_a_procedure_whole_r_sql_92() {
+        let procedure = "CREATE OR REPLACE PROCEDURE NODEJT400.TÆL (IN N INT) \
+                         BEGIN DECLARE I INT DEFAULT 0; \
+                         WHILE I < N DO SET I = I + 1; END WHILE; END";
+        // The DELETE first holds Run all at its question, with the rest still queued.
+        let script = format!("DELETE FROM LOG;\n{procedure};\nCALL NODEJT400.TÆL(3)");
+        let mut w = window();
+        w.scripts.set_text(&script, 0);
+        w.run_all();
+        assert!(w.confirm.is_some(), "the DELETE asks first");
+        assert_eq!(w.queue, [procedure, "CALL NODEJT400.TÆL(3)"]);
+
+        let mut w = window();
+        let inside = script.find("SET I").expect("in the body");
+        w.scripts.set_text(&script, inside);
+        assert_eq!(
+            w.scripts.current_statement().as_deref(),
+            Some(procedure),
+            "the cursor in the body runs the whole procedure"
+        );
+    }
+
+    #[test]
     fn a_bulk_change_waits_for_confirmation_r_sql_9() {
         let mut w = window();
         let script = "SELECT 1 FROM T; DELETE FROM T";
