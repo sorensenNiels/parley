@@ -27,20 +27,22 @@ jobs:
       matrix:
         include:
           # The oldest supported Ubuntu, so the packages run on its glibc and anything newer.
+          # formats: from Cargo.toml (all three programs in one); split: one package per program (R-NF-4, R-NF-5).
           - name: linux-x64
             os: ubuntu-22.04
-            formats: deb,appimage
+            formats: appimage
+            split: deb
           - name: windows-x64
             os: windows-latest
             formats: wix
           - name: macos-arm64
             os: macos-latest
             target: aarch64-apple-darwin
-            formats: dmg
+            split: dmg
           - name: macos-x64
             os: macos-latest
             target: x86_64-apple-darwin
-            formats: dmg
+            split: dmg
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -97,7 +99,13 @@ jobs:
         env:
           # linuxdeploy is itself an AppImage; this avoids needing FUSE for it.
           APPIMAGE_EXTRACT_AND_RUN: 1
-        run: cargo packager -p parley-app --release -f ${{ matrix.formats }} ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+        run: |
+          if [ -n "${{ matrix.formats }}" ]; then
+            cargo packager -p parley-app --release -f ${{ matrix.formats }} ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+          fi
+          if [ -n "${{ matrix.split }}" ]; then
+            bash scripts/package-split.sh ${{ matrix.split }} ${{ matrix.target }}
+          fi
 
       - uses: actions/upload-artifact@v7
         with:

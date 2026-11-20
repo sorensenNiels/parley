@@ -15,12 +15,12 @@ every command work in a terminal where the OS allows it (R-NF-2):
 
 | Package | Commands | Menu |
 |---|---|---|
-| `.msi` | The install folder goes on the system PATH (removed on uninstall): all three in a new terminal. | Parley 5250, Parley SQL and Parley SSH in the Start menu. |
-| `.deb` | All three in `/usr/bin`. | Parley 5250, Parley SQL (`linux/parley-sql.desktop`) and Parley SSH (`linux/parley-ssh.desktop`). |
+| `.msi` | The user chooses which of the three to install, all ticked (R-NF-3). The install folder goes on the system PATH (removed on uninstall): those installed in a new terminal. | Each one installed in the Start menu. |
+| `.deb` | One package per program (R-NF-4): `parley-5250`, `parley-sql`, `parley-ssh`, each in `/usr/bin`. | Each one installed, from `linux/<program>.desktop`. |
 | `.AppImage` | It starts `parley`; `--sql` or `--ssh`, or a link named `parley-sql` or `parley-ssh`, starts Parley SQL or Parley SSH (`siblings.rs`). The user makes the links. | Parley 5250 only. |
-| `.dmg` | All three in `Parley 5250.app/Contents/MacOS`; the user links them into `/usr/local/bin`. | Parley 5250 only. |
+| `.dmg` | Three apps (R-NF-5): `Parley 5250.app`, `Parley SQL.app`, `Parley SSH.app`; the user links their programs into `/usr/local/bin`. | Each app dragged to Applications. |
 
-The Windows PATH entry and Start menu shortcuts are a WiX fragment in `[package.metadata.packager.wix]`. The install
+The `.deb` files and the macOS apps come from `scripts/package-split.sh` (D56): it gives cargo-packager one config per program, adds Replaces and Breaks to the `.deb` files with `dpkg-deb`, and puts the apps in one `.dmg` with `hdiutil`. The AppImage and the `.msi` come from `[package.metadata.packager]`. The Windows installer uses Parley's own WiX template, `crates/parley-app/windows/main.wxs` (from cargo-packager 0.11.8's, D55: one feature per program); when cargo-packager is updated, compare its `main.wxs` with ours. The PATH entry and the SQL and SSH Start menu shortcuts are a WiX fragment in `[package.metadata.packager.wix]`. The install
 notes users see head every release's notes: `.github/release-install.md`.
 
 The installers are **not signed** yet (D10). macOS will say the app "cannot be opened because the developer
@@ -76,6 +76,15 @@ On each OS, after installing:
   `.github/release-install.md`; for the AppImage through its links, and `Parley….AppImage --sql --version` and
   `--ssh --version`).
 - Parley SQL and Parley SSH are in the Start menu (Windows) and the application menu (`.deb`), and start from there.
+- Windows (R-NF-3): the installer's Custom Setup page lists Parley 5250, Parley SQL and Parley SSH, all ticked; with
+  none chosen, Next says to choose one. Install only Parley SSH: only `parley-ssh.exe` and its Start menu entry. Then
+  Settings ▸ Apps ▸ Parley 5250 ▸ Modify ▸ Change adds Parley 5250; its Tools menu and Settings ▸ Add-ons have no SQL.
+  Upgrading from an earlier version keeps the install folder.
+- Linux (R-NF-4): `sudo apt install ./parley-ssh_*_amd64.deb` alone gives Parley SSH and its menu entry only; then
+  `sudo apt install ./parley*_amd64.deb` over an earlier all-in-one `parley-5250` replaces it without file conflicts;
+  `sudo apt remove parley-5250` leaves Parley SQL and Parley SSH working.
+- macOS (R-NF-5): the `.dmg` shows the three apps and Applications. Drag only Parley 5250: Tools has no SQL or SSH.
+  Drag Parley SSH too, to another folder or Applications: Tools ▸ SSH… starts it. Each has its own name in the Dock.
 - Connect to an IBM i (PUB400.COM works without an account up to the sign-on screen), over telnet and over TLS.
 - Close and reopen the app: the connection form still holds the last settings.
 - Uninstall: the app is removed, and on Windows its folder is gone from PATH; its saved settings are left alone.

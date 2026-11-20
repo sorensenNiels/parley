@@ -2,7 +2,7 @@
 Categories=Utility;Network;RemoteAccess;
 Comment=An SSH client
 Exec=parley-ssh
-Icon=parley
+Icon=parley-ssh
 Name=Parley SSH
 StartupWMClass=parley-ssh
 Terminal=false

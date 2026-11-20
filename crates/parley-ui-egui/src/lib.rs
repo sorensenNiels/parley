@@ -284,9 +284,19 @@ impl ParleyUi {
         self.set_addons(addons);
     }
 
-    /// Whether `addon` is on (R-ADD-1): the one question the UI asks about an add-on.
+    /// Whether `addon` is on (R-ADD-1) and there: the one question the UI asks about an add-on.
     fn addon_on(&self, addon: AddOn) -> bool {
-        self.addons.enabled(addon)
+        self.addons.enabled(addon) && self.installed(addon)
+    }
+
+    /// Whether `addon` can be used here: SQL and SSH only while their program is installed beside Parley, as the
+    /// app says by giving a starter (R-NF-3).
+    fn installed(&self, addon: AddOn) -> bool {
+        match addon {
+            AddOn::Macros => true,
+            AddOn::Sql => self.sql_starter.is_some(),
+            AddOn::Ssh => self.ssh_starter.is_some(),
+        }
     }
 
     /// Puts `addons` into effect: an add-on turned on is loaded, one turned off is unloaded.
@@ -431,11 +441,13 @@ impl ParleyUi {
     /// The settings dialog, showing the session's keyboard map and the macros it can bind.
     fn open_settings(&self, ctx: &egui::Context) -> settings::Dialog {
         let macros = self.addon_on(AddOn::Macros).then(|| self.macro_names());
-        settings::Dialog::open(ctx, &self.settings).with_keyboard(
-            &self.keyboard_map().name,
-            macros,
-            self.tool_functions(),
-        )
+        let missing = AddOn::ALL
+            .into_iter()
+            .filter(|addon| !self.installed(*addon))
+            .collect();
+        settings::Dialog::open(ctx, &self.settings)
+            .with_keyboard(&self.keyboard_map().name, macros, self.tool_functions())
+            .without_addons(missing)
     }
 
     /// The functions of the Tools add-ons that are on, which can have a key (R-SQL-6, R-SSH-59).
@@ -2165,6 +2177,7 @@ mod tests {
     #[test]
     fn parleys_settings_have_none_of_parley_sqls_only_the_add_on_r_sql_69() {
         let mut harness = app_with(Vec::new());
+        harness.state_mut().set_sql_starter(Box::new(|_, _| Ok(())));
         switch_add_on_in_settings(&mut harness, "SQL");
         harness.get_by_label(settings::SQL_SETTINGS_ELSEWHERE);
         for gone in [
@@ -3008,13 +3021,53 @@ mod tests {
         assert!(harness.query_by_label("SQL…").is_none());
         harness.get_by_label("Tools").click(); // closes the menu again
         harness.run();
-        let mut settings = Settings::default();
-        settings.addons.set_enabled(AddOn::Sql, true);
-        harness.state_mut().set_settings(settings);
+        with_sql_starter(&mut harness);
         harness.run();
         harness.get_by_label("Tools").click();
         harness.run();
         harness.get_by_label("SQL…");
+    }
+
+    #[test]
+    fn sql_and_ssh_not_installed_are_left_out_of_tools_and_add_ons_r_nf_3() {
+        let (mut harness, _host) = connected_app();
+        let mut settings = Settings::default();
+        settings.addons.set_enabled(AddOn::Sql, true);
+        settings.addons.set_enabled(AddOn::Ssh, true);
+        harness.state_mut().set_settings(settings);
+        harness.run();
+        harness.get_by_label("Tools").click();
+        harness.run();
+        assert!(
+            harness.query_by_label("SQL…").is_none(),
+            "no Parley SQL beside Parley"
+        );
+        assert!(
+            harness.query_by_label("SSH…").is_none(),
+            "no Parley SSH beside Parley"
+        );
+        harness.get_by_label("Tools").click();
+        harness.run();
+        assert!(
+            !harness.state().tool_functions().contains(&Function::Sql),
+            "no key for it"
+        );
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("Add-ons").click();
+        harness.run();
+        let switch = |h: &Harness<'static, ParleyUi>, name: &str| {
+            h.query_by_role_and_label(egui::accesskit::Role::CheckBox, name)
+                .is_some()
+        };
+        assert!(switch(&harness, "Macros"));
+        assert!(!switch(&harness, "SQL"), "SQL left out of Add-ons");
+        assert!(!switch(&harness, "SSH"), "SSH left out of Add-ons");
+        assert!(
+            harness
+                .query_by_label(settings::SQL_SETTINGS_ELSEWHERE)
+                .is_none()
+        );
     }
 
     /// Settings with the SQL add-on on, and a starter that keeps what it was asked to open.
@@ -3136,7 +3189,9 @@ mod tests {
     fn when_parley_ssh_cannot_start_parley_says_why_r_ssh_59() {
         let (mut harness, _host) = connected_app();
         with_ssh_starter(&mut harness);
-        harness.state_mut().ssh_starter = None;
+        harness.state_mut().set_ssh_starter(Box::new(|_, _| {
+            Err("Windows cannot start Parley SSH.".into())
+        }));
         harness.state_mut().start_sibling(Sibling::Ssh, true);
         harness.run();
         harness.get_by_label("Parley SSH cannot start");

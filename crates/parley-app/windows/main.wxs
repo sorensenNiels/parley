@@ -1,0 +1,240 @@
+<?if $(sys.BUILDARCH)="x86"?>
+    <?define Win64 = "no" ?>
+    <?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>
+<?elseif $(sys.BUILDARCH)="x64"?>
+    <?define Win64 = "yes" ?>
+    <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
+<?else?>
+    <?error Unsupported value of sys.BUILDARCH=$(sys.BUILDARCH)?>
+<?endif?>
+
+<!--
+    Parley's Windows installer (R-NF-1, R-NF-2, R-NF-3, D55): cargo-packager 0.11.8's main.wxs (MIT/Apache-2.0),
+    changed so the user chooses which of Parley 5250, Parley SQL and Parley SSH to install:
+    - one feature per program, all three ticked, and a hidden one for what all need (folder, PATH, licences);
+    - WiX's Customize dialog in place of the install folder dialog (its Browse… still picks the folder), and a
+      message when nothing is chosen;
+    - Modify in Settings ▸ Apps, to add or remove a program later;
+    - the components of the inline fragment in Cargo.toml referenced here, by feature, not through
+      `component-refs`; merge modules, file associations, deep links and WebView2 left out (Parley uses none).
+    Handlebars fills it in: product_name, binaries (ids parley_sql and parley_ssh, from the binaries' names), etc.
+    The product name and upgrade code are cargo-packager's, so earlier installs of Parley 5250 upgrade.
+-->
+
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Product
+            Id="*"
+            Name="{{product_name}}"
+            UpgradeCode="{{upgrade_code}}"
+            Language="!(loc.CargoPackagerLanguage)"
+            Manufacturer="{{manufacturer}}"
+            Version="{{version}}">
+
+        <Package Id="*"
+                 Keywords="Installer"
+                 InstallerVersion="450"
+                 Languages="0"
+                 Compressed="yes"
+                 InstallScope="perMachine"
+                 SummaryCodepage="!(loc.CargoPackagerCodepage)"/>
+
+        <!-- https://docs.microsoft.com/en-us/windows/win32/msi/reinstallmode -->
+        <!-- reinstall all files; rewrite all registry entries; reinstall all shortcuts -->
+        <Property Id="REINSTALLMODE" Value="amus" />
+
+        {{#if allow_downgrades}}
+            <MajorUpgrade Schedule="afterInstallInitialize" AllowDowngrades="yes" />
+        {{else}}
+            <MajorUpgrade Schedule="afterInstallInitialize" DowngradeErrorMessage="!(loc.DowngradeErrorMessage)" AllowSameVersionUpgrades="yes" />
+        {{/if}}
+
+        <InstallExecuteSequence>
+            <RemoveShortcuts>Installed AND NOT UPGRADINGPRODUCTCODE</RemoveShortcuts>
+        </InstallExecuteSequence>
+
+        <Media Id="1" Cabinet="app.cab" EmbedCab="yes" />
+
+        {{#if banner_path}}
+        <WixVariable Id="WixUIBannerBmp" Value="{{banner_path}}" />
+        {{/if}}
+        {{#if dialog_image_path}}
+        <WixVariable Id="WixUIDialogBmp" Value="{{dialog_image_path}}" />
+        {{/if}}
+        {{#if license}}
+        <WixVariable Id="WixUILicenseRtf" Value="{{license}}" />
+        {{/if}}
+
+        {{#if icon_path}}
+        <Icon Id="ProductIcon" SourceFile="{{icon_path}}"/>
+        <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
+        {{/if}}
+        <!-- No Repair; Modify stays, to add or remove a program later (R-NF-3). -->
+        <Property Id="ARPNOREPAIR" Value="yes" Secure="yes" />
+
+        <!-- initialize with previous InstallDir -->
+        <Property Id="INSTALLDIR">
+            <RegistrySearch Id="PrevInstallDirReg" Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="InstallDir" Type="raw"/>
+        </Property>
+
+        <!-- launch app checkbox: Parley 5250, when it is installed -->
+        <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="!(loc.LaunchApp)" />
+        <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1"/>
+        <Property Id="WixShellExecTarget" Value="[!Path]" />
+        <CustomAction Id="LaunchApplication" BinaryKey="WixCA" DllEntry="WixShellExec" Impersonate="yes" />
+
+        <!-- WiX's feature tree dialogs (WixUIExtension), in the order of its WixUI_FeatureTree, with the check that
+             at least one program is chosen (R-NF-3). A feature stays or comes when it is asked for (&F = 3), or is
+             installed (!F = 3) and not asked to go (&F <> 2). -->
+        <UI Id="ParleyUI">
+            <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+            <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+            <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+            <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+            <Property Id="WixUI_Mode" Value="FeatureTree" />
+
+            <DialogRef Id="ErrorDlg" />
+            <DialogRef Id="FatalError" />
+            <DialogRef Id="FilesInUse" />
+            <DialogRef Id="MsiRMFilesInUse" />
+            <DialogRef Id="PrepareDlg" />
+            <DialogRef Id="ProgressDlg" />
+            <DialogRef Id="ResumeDlg" />
+            <DialogRef Id="UserExit" />
+
+            <Dialog Id="NothingChosenDlg" Width="260" Height="85" Title="[ProductName] Setup" NoMinimize="yes">
+                <Control Id="Text" Type="Text" X="15" Y="15" Width="230" Height="30" TabSkip="no"
+                         Text="Choose at least one of Parley 5250, Parley SQL and Parley SSH to install." />
+                <Control Id="OK" Type="PushButton" X="102" Y="57" Width="56" Height="17" Default="yes" Cancel="yes" Text="OK">
+                    <Publish Event="EndDialog" Value="Return">1</Publish>
+                </Control>
+            </Dialog>
+
+            <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication"><![CDATA[WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed AND &Parley5250 = 3]]></Publish>
+            <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999">1</Publish>
+
+            <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="LicenseAgreementDlg">NOT Installed</Publish>
+            <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg">Installed AND PATCH</Publish>
+
+            <Publish Dialog="LicenseAgreementDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg">1</Publish>
+            <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="CustomizeDlg">LicenseAccepted = "1"</Publish>
+
+            <Publish Dialog="CustomizeDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="1">Installed</Publish>
+            <Publish Dialog="CustomizeDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg" Order="2">NOT Installed</Publish>
+            <Publish Dialog="CustomizeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg"><![CDATA[(&Parley5250 = 3 OR (!Parley5250 = 3 AND &Parley5250 <> 2)) OR (&ParleySql = 3 OR (!ParleySql = 3 AND &ParleySql <> 2)) OR (&ParleySsh = 3 OR (!ParleySsh = 3 AND &ParleySsh <> 2))]]></Publish>
+            <Publish Dialog="CustomizeDlg" Control="Next" Event="SpawnDialog" Value="NothingChosenDlg"><![CDATA[NOT ((&Parley5250 = 3 OR (!Parley5250 = 3 AND &Parley5250 <> 2)) OR (&ParleySql = 3 OR (!ParleySql = 3 AND &ParleySql <> 2)) OR (&ParleySsh = 3 OR (!ParleySsh = 3 AND &ParleySsh <> 2)))]]></Publish>
+
+            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="CustomizeDlg" Order="1">NOT Installed OR WixUI_InstallMode = "Change"</Publish>
+            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="2">Installed AND NOT PATCH</Publish>
+            <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="3">Installed AND PATCH</Publish>
+
+            <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg">1</Publish>
+
+            <Publish Dialog="MaintenanceTypeDlg" Control="ChangeButton" Event="NewDialog" Value="CustomizeDlg">1</Publish>
+            <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+            <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+            <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg">1</Publish>
+        </UI>
+
+        <UIRef Id="WixUI_Common" />
+
+        <Directory Id="TARGETDIR" Name="SourceDir">
+            <Directory Id="DesktopFolder" Name="Desktop">
+                <Component Id="ApplicationShortcutDesktop" Guid="*">
+                    <Shortcut Id="ApplicationDesktopShortcut" Name="{{product_name}}" Description="Runs {{product_name}}" Target="[!Path]" WorkingDirectory="INSTALLDIR" />
+                    <RemoveFolder Id="DesktopFolder" On="uninstall" />
+                    <RegistryValue Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="Desktop Shortcut" Type="integer" Value="1" KeyPath="yes" />
+                </Component>
+            </Directory>
+            <Directory Id="$(var.PlatformProgramFilesFolder)" Name="PFiles">
+                <Directory Id="INSTALLDIR" Name="{{product_name}}"/>
+            </Directory>
+            <Directory Id="ProgramMenuFolder">
+                <Directory Id="ApplicationProgramsFolder" Name="{{product_name}}"/>
+            </Directory>
+        </Directory>
+
+        <DirectoryRef Id="INSTALLDIR">
+            <Component Id="RegistryEntries" Guid="*">
+                <RegistryKey Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}">
+                    <RegistryValue Name="InstallDir" Type="string" Value="[INSTALLDIR]" KeyPath="yes" />
+                </RegistryKey>
+            </Component>
+            <Component Id="Path" Guid="{{path_component_guid}}" Win64="$(var.Win64)">
+                <File Id="Path" Source="{{app_exe_source}}" KeyPath="yes" Checksum="yes"/>
+            </Component>
+            {{#each binaries as |bin| ~}}
+            <Component Id="{{ bin.id }}" Guid="{{bin.guid}}" Win64="$(var.Win64)">
+                <File Id="Bin_{{ bin.id }}" Source="{{bin.path}}" KeyPath="yes"/>
+            </Component>
+            {{/each~}}
+            {{resources}}
+            <Component Id="CMP_UninstallShortcut" Guid="*">
+                <Shortcut Id="UninstallShortcut"
+                          Name="Uninstall {{product_name}}"
+                          Description="Uninstalls {{product_name}}"
+                          Target="[System64Folder]msiexec.exe"
+                          Arguments="/x [ProductCode]" />
+                <RemoveFolder Id="INSTALLDIR" On="uninstall" />
+                <RegistryValue Root="HKCU"
+                               Key="Software\\{{manufacturer}}\\{{product_name}}"
+                               Name="Uninstaller Shortcut"
+                               Type="integer"
+                               Value="1"
+                               KeyPath="yes" />
+            </Component>
+        </DirectoryRef>
+
+        <DirectoryRef Id="ApplicationProgramsFolder">
+            <Component Id="ApplicationShortcut" Guid="*">
+                <Shortcut Id="ApplicationStartMenuShortcut"
+                    Name="{{product_name}}"
+                    Description="Runs {{product_name}}"
+                    Target="[!Path]"
+                    {{#if icon_path}}
+                    Icon="ProductIcon"
+                    {{/if}}
+                    WorkingDirectory="INSTALLDIR">
+                    <ShortcutProperty Key="System.AppUserModel.ID" Value="{{identifier}}"/>
+                </Shortcut>
+                <RegistryValue Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="Start Menu Shortcut" Type="integer" Value="1" KeyPath="yes"/>
+            </Component>
+            <!-- The Start menu folder goes on uninstall whichever programs were in it. -->
+            <Component Id="ProgramsFolderCleanup" Guid="6AE47C9C-DDF7-4FE7-8750-7858D84F9619">
+                <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall"/>
+                <RegistryValue Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="Programs Folder" Type="integer" Value="1" KeyPath="yes"/>
+            </Component>
+        </DirectoryRef>
+
+        <!-- What every choice needs: the folder, the uninstaller, PATH and the licences and SQL helper (resources). -->
+        <Feature Id="Common" Title="Common files" Level="1" Display="hidden" Absent="disallow" AllowAdvertise="no">
+            <ComponentRef Id="RegistryEntries"/>
+            <ComponentRef Id="CMP_UninstallShortcut"/>
+            <ComponentRef Id="ProgramsFolderCleanup"/>
+            <ComponentRef Id="ParleyOnPath"/>
+            {{#each resource_file_ids as |resource_file_id| ~}}
+            <ComponentRef Id="{{ resource_file_id }}"/>
+            {{/each~}}
+        </Feature>
+
+        <Feature Id="Parley5250" Title="Parley 5250" Description="The TN5250 terminal for IBM i." Level="1"
+                 ConfigurableDirectory="INSTALLDIR" AllowAdvertise="no" Absent="allow" Display="1">
+            <ComponentRef Id="Path"/>
+            <ComponentRef Id="ApplicationShortcut"/>
+            <ComponentRef Id="ApplicationShortcutDesktop"/>
+        </Feature>
+
+        <Feature Id="ParleySql" Title="Parley SQL" Description="SQL for IBM i. Needs Java 11 or later." Level="1"
+                 ConfigurableDirectory="INSTALLDIR" AllowAdvertise="no" Absent="allow" Display="2">
+            <ComponentRef Id="parley_sql"/>
+            <ComponentRef Id="ParleySqlShortcut"/>
+        </Feature>
+
+        <Feature Id="ParleySsh" Title="Parley SSH" Description="An SSH client." Level="1"
+                 ConfigurableDirectory="INSTALLDIR" AllowAdvertise="no" Absent="allow" Display="3">
+            <ComponentRef Id="parley_ssh"/>
+            <ComponentRef Id="ParleySshShortcut"/>
+        </Feature>
+
+        <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLDIR]" After="CostFinalize"/>
+    </Product>
+</Wix>

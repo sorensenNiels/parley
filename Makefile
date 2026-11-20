@@ -164,12 +164,20 @@ release:
 	cargo build -p $(APP) --release
 
 # Installers (R-NF-1): .deb and .AppImage on Linux, .msi on Windows, .dmg on macOS.
-PACKAGE_FORMATS_linux := deb,appimage
+# From Cargo.toml: the AppImage and the .msi, each with all three programs. From scripts/package-split.sh: one .deb per
+# program (R-NF-4) and the three Mac apps in one .dmg (R-NF-5).
+PACKAGE_FORMATS_linux := appimage
 PACKAGE_FORMATS_windows := wix
-PACKAGE_FORMATS_macos := dmg
+PACKAGE_SPLIT_linux := deb
+PACKAGE_SPLIT_macos := dmg
 
 package: release helper
+ifneq ($(PACKAGE_FORMATS_$(PLATFORM)),)
 	cargo packager -p $(APP) --release -f $(PACKAGE_FORMATS_$(PLATFORM))
+endif
+ifneq ($(PACKAGE_SPLIT_$(PLATFORM)),)
+	bash scripts/package-split.sh $(PACKAGE_SPLIT_$(PLATFORM))
+endif
 
 icons:
 	python3 scripts/render-icons.py

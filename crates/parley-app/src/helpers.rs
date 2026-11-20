@@ -17,13 +17,15 @@ pub fn sql_helpers() -> Option<PathBuf> {
 }
 
 /// Where to look, in order: `PARLEY_HELPERS`; beside the program (Windows); the macOS bundle's
-/// Resources; the .deb's `/usr/lib/parley`; inside an `AppImage` (`APPDIR`); and `target/helpers`
+/// Resources; the `parley-sql` package's `/usr/lib/parley-sql` (R-NF-4), the all-in-one .deb's
+/// `/usr/lib/parley` before it; inside an `AppImage` (`APPDIR`); and `target/helpers`
 /// of a development build (the program in `target/debug` or `target/release`).
 fn candidates(exe: &Path, configured: Option<PathBuf>, appdir: Option<PathBuf>) -> Vec<PathBuf> {
     let dir = exe.parent().unwrap_or_else(|| Path::new("."));
     let mut out: Vec<PathBuf> = configured.into_iter().collect();
     out.push(dir.join("helpers"));
     out.push(dir.join("../Resources/helpers"));
+    out.push(PathBuf::from("/usr/lib/parley-sql/helpers"));
     out.push(PathBuf::from("/usr/lib/parley/helpers"));
     if let Some(appdir) = appdir {
         out.push(appdir.join("usr/lib/parley/helpers"));
@@ -62,6 +64,11 @@ mod tests {
         assert!(mac.contains(&PathBuf::from(
             "/Applications/Parley.app/Contents/MacOS/../Resources/helpers"
         )));
+        let linux = candidates(Path::new("/usr/bin/parley-sql"), None, None);
+        assert!(
+            linux.contains(&PathBuf::from("/usr/lib/parley-sql/helpers")),
+            "the parley-sql package's (R-NF-4)"
+        );
         let windows = candidates(Path::new("C:/Program Files/Parley/parley.exe"), None, None);
         assert!(windows.contains(&PathBuf::from("C:/Program Files/Parley/helpers")));
     }

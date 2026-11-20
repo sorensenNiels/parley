@@ -207,6 +207,8 @@ pub struct Dialog {
     /// The settings when the dialog opened, for Cancel.
     original: Settings,
     installed: Installed,
+    /// Add-ons whose program is not installed, left out of the Add-ons page (R-NF-3).
+    missing: Vec<AddOn>,
     page: Page,
     keyboard: keyboard::Page,
     about: about::About,
@@ -218,6 +220,7 @@ impl Dialog {
         Self {
             original: settings.clone(),
             installed: Installed::search(move || ctx.request_repaint()),
+            missing: Vec::new(),
             page: Page::Appearance,
             keyboard: keyboard::Page::new(crate::keymap::DEFAULT_MAP, None, Vec::new()),
             about: about::About::default(),
@@ -241,6 +244,13 @@ impl Dialog {
     /// for a dialog closed with Save.
     pub fn take_map_renames(&mut self) -> Vec<(String, String)> {
         self.keyboard.take_renames()
+    }
+
+    /// Leaves `missing`, add-ons whose program is not installed, out of the Add-ons page (R-NF-3).
+    #[must_use]
+    pub fn without_addons(mut self, missing: Vec<AddOn>) -> Self {
+        self.missing = missing;
+        self
     }
 
     /// The same dialog on the Keyboard page ("Change keys…" in the shortcut sheet, R-UI-17).
@@ -301,7 +311,7 @@ impl Dialog {
             ),
             Page::Terminal => self.terminal_page(ui, settings),
             Page::Keyboard => self.keyboard.show(ui, settings),
-            Page::AddOns => Self::addons_page(ui, settings),
+            Page::AddOns => Self::addons_page(ui, settings, &self.missing),
             Page::About => {
                 self.about.show(
                     ui,
@@ -315,23 +325,23 @@ impl Dialog {
 
     /// A switch per add-on (R-ADD-1), as Tortuga's Settings → Add-ons; while SQL or SSH is on,
     /// where its settings are (R-SQL-69, R-SSH-59).
-    fn addons_page(ui: &mut Ui, settings: &mut Settings) {
+    fn addons_page(ui: &mut Ui, settings: &mut Settings, missing: &[AddOn]) {
         let note = (
             "An add-on that is off is not loaded. Changes take effect when you save.",
             "Add-ons are parts of Parley not everyone needs. Turning one on adds its menu items; \
              turning it off removes them and stops what it is doing.",
         );
         group(ui, "Add-ons", Some(note), |rows| {
-            for addon in AddOn::ALL {
+            for addon in AddOn::ALL.into_iter().filter(|a| !missing.contains(a)) {
                 let mut on = settings.addons.enabled(addon);
                 rows.switch(addon.name(), Some(addon.about()), &mut on);
                 settings.addons.set_enabled(addon, on);
             }
         });
-        if settings.addons.enabled(AddOn::Sql) {
+        if settings.addons.enabled(AddOn::Sql) && !missing.contains(&AddOn::Sql) {
             theme::hint(ui, SQL_SETTINGS_ELSEWHERE);
         }
-        if settings.addons.enabled(AddOn::Ssh) {
+        if settings.addons.enabled(AddOn::Ssh) && !missing.contains(&AddOn::Ssh) {
             theme::hint(ui, SSH_SETTINGS_ELSEWHERE);
         }
     }

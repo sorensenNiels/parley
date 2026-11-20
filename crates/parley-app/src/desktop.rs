@@ -1,6 +1,7 @@
 //! Desktop launch: command-line options and the window.
 
 use eframe::egui;
+use parley_app::siblings::Sibling;
 use parley_core::SessionConfig;
 use parley_ui_egui::{NewWindow, ParleyUi, Profile};
 
@@ -137,10 +138,14 @@ pub fn run() -> eframe::Result {
             if let Some(settings) = cc.storage.and_then(|s| eframe::get_value(s, SETTINGS_KEY)) {
                 ui.set_settings(settings);
             }
-            // R-SQL-70: Tools ▸ SQL… starts Parley SQL, installed beside Parley.
-            ui.set_sql_starter(Box::new(parley_app::sql_start::start));
-            // R-SSH-59: Tools ▸ SSH… starts Parley SSH, installed beside Parley.
-            ui.set_ssh_starter(Box::new(parley_app::ssh_start::start));
+            // R-SQL-70, R-SSH-59: Tools ▸ SQL… and SSH… start Parley SQL and Parley SSH, installed beside
+            // Parley; left out when the installer left them out (R-NF-3).
+            if Sibling::Sql.beside().is_ok() {
+                ui.set_sql_starter(Box::new(parley_app::sql_start::start));
+            }
+            if Sibling::Ssh.beside().is_ok() {
+                ui.set_ssh_starter(Box::new(parley_app::ssh_start::start));
+            }
             ui.set_beep(Box::new(parley_app::beep::beep));
             // R-UI-34: a duplicate or a group's sessions in windows of their own.
             ui.set_window_opener(Box::new(open_window));

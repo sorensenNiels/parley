@@ -2,7 +2,7 @@
 //! `parley --ssh …`, or an app image started through a link named `parley-sql` or `parley-ssh`, hand over to them,
 //! because an app image has one entry point.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A program of the release besides Parley 5250.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,27 +37,52 @@ impl Sibling {
         }
     }
 
-    /// Its program, installed beside this one.
+    /// Its program: beside this one (Windows, Linux, a development build), or on macOS in an app of its own
+    /// (R-NF-5).
     ///
     /// # Errors
     /// When it is not there, said for the user.
     pub fn beside(self) -> Result<PathBuf, String> {
-        let program = std::env::current_exe()
-            .map_err(|e| format!("Parley 5250 could not find its own folder: {e}"))?
-            .with_file_name(format!(
-                "{}{}",
-                self.command(),
-                std::env::consts::EXE_SUFFIX
-            ));
-        if program.is_file() {
-            Ok(program)
-        } else {
-            Err(format!(
-                "{} is not installed beside Parley (looked for {}).",
-                self.name(),
-                program.display()
-            ))
+        let exe = std::env::current_exe()
+            .map_err(|e| format!("Parley 5250 could not find its own folder: {e}"))?;
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let candidates = self.candidates(&exe, cfg!(target_os = "macos"), home.as_deref());
+        candidates
+            .iter()
+            .find(|program| program.is_file())
+            .cloned()
+            .ok_or_else(|| {
+                format!(
+                    "{} is not installed beside Parley (looked for {}).",
+                    self.name(),
+                    candidates[0].display()
+                )
+            })
+    }
+
+    /// Where its program may be, in order: beside `exe`; on macOS (`mac`) also in `<name>.app` in the folder of the
+    /// app `exe` is in, in /Applications and in `home`'s Applications (R-NF-5).
+    fn candidates(self, exe: &Path, mac: bool, home: Option<&Path>) -> Vec<PathBuf> {
+        let file = format!("{}{}", self.command(), std::env::consts::EXE_SUFFIX);
+        let mut out = vec![exe.with_file_name(&file)];
+        if !mac {
+            return out;
         }
+        let inside = Path::new(&format!("{}.app", self.name()))
+            .join("Contents/MacOS")
+            .join(&file);
+        // …/Parley 5250.app/Contents/MacOS/parley: the folder the app was put in.
+        let mut ancestors = exe.ancestors().skip(3);
+        if let (Some(app), Some(folder)) = (ancestors.next(), ancestors.next())
+            && app.extension().is_some_and(|e| e == "app")
+        {
+            out.push(folder.join(&inside));
+        }
+        out.push(Path::new("/Applications").join(&inside));
+        if let Some(home) = home {
+            out.push(home.join("Applications").join(&inside));
+        }
+        out
     }
 
     /// Runs it with `args` and waits for it; its exit code.
@@ -95,6 +120,46 @@ pub fn handed_over(args: &[String], argv0: Option<&str>) -> Option<(Sibling, Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn on_macos_the_other_programs_are_looked_for_in_apps_of_their_own_r_nf_5() {
+        let exe = Path::new("/Users/me/Downloads/Parley 5250.app/Contents/MacOS/parley");
+        let list = Sibling::Ssh.candidates(exe, true, Some(Path::new("/Users/me")));
+        // The tests run on every OS: Windows' program names end in .exe.
+        let file = format!("parley-ssh{}", std::env::consts::EXE_SUFFIX);
+        let ssh = |folder: &str| {
+            Path::new(folder)
+                .join("Parley SSH.app/Contents/MacOS")
+                .join(&file)
+        };
+        assert_eq!(
+            list,
+            [
+                exe.with_file_name(&file),
+                ssh("/Users/me/Downloads"),
+                ssh("/Applications"),
+                ssh("/Users/me/Applications"),
+            ]
+        );
+    }
+
+    #[test]
+    fn elsewhere_the_other_programs_are_beside_parley_r_nf_4() {
+        let exe = Path::new("/usr/bin/parley");
+        assert_eq!(
+            Sibling::Sql.candidates(exe, false, Some(Path::new("/home/me"))),
+            [PathBuf::from(format!(
+                "/usr/bin/parley-sql{}",
+                std::env::consts::EXE_SUFFIX
+            ))]
+        );
+        let outside_an_app = Path::new("/repo/target/release/parley");
+        assert_eq!(
+            Sibling::Sql.candidates(outside_an_app, true, None).len(),
+            2,
+            "beside it and /Applications"
+        );
+    }
 
     fn args(text: &str) -> Vec<String> {
         text.split_whitespace().map(str::to_owned).collect()

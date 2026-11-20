@@ -59,7 +59,9 @@ winresource.workspace = true
 [lints]
 workspace = true
 
-# Installers (R-NF-1), built with cargo-packager: `make package` (see docs/RELEASING.md).
+# Installers (R-NF-1), built with cargo-packager: `make package` (see docs/RELEASING.md). This config makes the
+# Windows .msi and the AppImage, each with all three programs; the .deb files and the macOS apps, one per program
+# (R-NF-4, R-NF-5, D56), come from scripts/package-split.sh.
 [package.metadata.packager]
 product-name = "Parley 5250"
 identifier = "dk.softdesign.parley"
@@ -84,23 +86,17 @@ resources = [
   { src = "../../helpers/sql/JTOpen-LICENSE.html", target = "helpers/JTOpen-LICENSE.html" },
 ]
 
-[package.metadata.packager.deb]
-# X11 keyboard and OpenGL/EGL are loaded at run time by the window library; fontconfig by
-# the settings, to list the installed fonts; GTK 3 by the macro file windows (R-KEY-7).
-depends = ["libgtk-3-0", "libasound2", "libxkbcommon-x11-0", "libegl1", "libgl1", "libfontconfig1"]
-section = "net"
-# R-NF-2: Parley SQL and Parley SSH (R-SSH-1) in the application menu beside Parley; the generated entry is Parley's only.
-files = { "linux/parley-sql.desktop" = "usr/share/applications/parley-sql.desktop", "linux/parley-ssh.desktop" = "usr/share/applications/parley-ssh.desktop" }
-
 [package.metadata.packager.appimage]
 # Loaded at run time by the window library on X11, and missing on some minimal systems.
 libs = ["libxkbcommon-x11.so.0"]
 
 [package.metadata.packager.wix]
+# R-NF-3, D55: Parley's own template (from cargo-packager's), where the user chooses which programs to install;
+# it puts the components below into its features by id, so they are not in `component-refs`.
+template = "windows/main.wxs"
 # R-NF-2: the install folder on the system PATH, so `parley`, `parley-sql` and `parley-ssh` work in a new
 # terminal (removed again on uninstall), and Parley SQL and Parley SSH in the Start menu beside Parley. Ids from
-# cargo-packager's main.wxs: INSTALLDIR, ApplicationProgramsFolder. Inline, so no path to resolve.
-component-refs = ["ParleyOnPath", "ParleySqlShortcut", "ParleySshShortcut"]
+# the template: INSTALLDIR, ApplicationProgramsFolder. Inline, so no path to resolve.
 fragments = ["""<?xml version="1.0" encoding="utf-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Fragment>
@@ -122,6 +118,3 @@ fragments = ["""<?xml version="1.0" encoding="utf-8"?>
   </Fragment>
 </Wix>
 """]
-
-[package.metadata.packager.macos]
-minimum-system-version = "11.0"

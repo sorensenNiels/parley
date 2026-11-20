@@ -1,0 +1,9 @@
+[Desktop Entry]
+Categories=Utility;Network;RemoteAccess;
+Comment=A TN5250 terminal for IBM i
+Exec=parley
+Icon=parley
+Name=Parley 5250
+StartupWMClass=parley
+Terminal=false
+Type=Application
