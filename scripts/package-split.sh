@@ -108,6 +108,8 @@ case $format in
     arch=aarch64
     if [[ "${target:-$(uname -m)}" == x86_64* ]]; then arch=x64; fi
     ln -sfn /Applications "$staging/Applications"
+    # target/packages holds the .msi and AppImage elsewhere, but nothing has made it on a Mac.
+    mkdir -p "$out"
     dmg="$out/Parley_${version}_${arch}.dmg"
     rm -f "$dmg"
     hdiutil create -volname "Parley $version" -srcfolder "$staging" -fs HFS+ -format UDZO -ov "$dmg"
