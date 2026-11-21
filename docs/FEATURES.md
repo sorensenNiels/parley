@@ -21,8 +21,19 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
   and looks the same; on a whole session (`tests/session.rs`) the sign-on screen is kept with the cursor's place, a
   write that leaves the keyboard locked keeps nothing and its unlock keeps the screen with "æøå"; a typed password
   is in the live screen but in no kept screen; the history and its limit go over to the session that replaces it.
-  **Still to build**: the view (R-UI-38), saving and the setting (R-UI-39), keeping the history across a reconnect in
-  the UI.
+  **Still to build**: saving and the setting (R-UI-39).
+
+- **R-UI-38** (step 2 of Phase 42 built 2026-11-21, Linux under WSL; D61): the history view. Screen history is in the
+  Edit menu beside Find (Parley has no View menu). **Automated** (`make test`): `parley-ui-egui`'s
+  `terminal/history.rs` (the view opens on the screen before the live one and stays on it as new screens come, the
+  oldest is as far back as it goes and past the newest is live, a shown screen dropped from the history becomes the
+  oldest, the bar's text and its buttons, kittest), `terminal.rs` (kittest: Ctrl+Page Up shows the screen before,
+  typed keys and Enter send nothing, a new screen with "æøå" is counted without moving the view, Copy takes the shown
+  screen, Ctrl+Page Down goes forward and Esc goes back to live without sending Attention; with no screen kept the
+  status bar says so for a while; Find counts on the shown screen; the history goes on after a reconnect to the same
+  session only). **To check in the running app**: the bar and the status bar in light and dark, a selection and
+  Ctrl+T on a kept screen, a reconnect (R-NET-10) keeping the history, and PUB400's sign-on screen with its password
+  field blank in the history.
 
 - **R-DS-11, R-DS-12** (built 2026-11-20, Linux under WSL; D57): GUI selection fields and the mouse; scroll bars,
   Write Data and programmable mouse buttons, behind the session switch "GUI elements (beta)", which is back in the

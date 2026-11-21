@@ -2,8 +2,8 @@
 //! the scrollback uses it too, with Match case (R-SSH-24).
 
 use egui::{Key, Role, TextEdit, Ui, WidgetInfo};
-use parley_core::Session;
-use parley_core::screen::{Span, find};
+use parley_core::CodePage;
+use parley_core::screen::{Screen, Span, find};
 
 use crate::{icons, theme};
 
@@ -38,8 +38,9 @@ impl FindBar {
         self.focus = true;
     }
 
-    pub fn matches(&self, session: &Session) -> Vec<Span> {
-        find(session.screen(), session.code_page(), &self.text)
+    /// Where the text is on `screen`: the live one, or a kept one (R-UI-38).
+    pub fn matches(&self, screen: &Screen, code_page: CodePage) -> Vec<Span> {
+        find(screen, code_page, &self.text)
     }
 
     /// The index of the current match among `count`, kept inside them as the screen changes.

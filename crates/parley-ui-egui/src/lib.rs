@@ -341,6 +341,9 @@ impl ParleyUi {
         self.reconnect = None;
         let ctx = ctx.clone();
         let connection = Connection::open(profile.config.clone(), move || ctx.request_repaint());
+        // R-UI-37: a connection to the same session goes on with the screens its last one kept.
+        self.view
+            .resume_history(&profile.name, &mut connection.session());
         if self.addon_on(AddOn::Macros) && !profile.run_macro.is_empty() {
             self.play(&mut connection.session(), &profile.run_macro);
         }
@@ -349,6 +352,13 @@ impl ParleyUi {
         self.online = false;
         self.closed = None;
         self.focus_terminal = true;
+    }
+
+    /// Keeps the screens `connection` kept, for the next connection to the same session (R-UI-37).
+    fn leave_history(&mut self, connection: &Connection) {
+        if let Some(name) = self.current.as_ref().map(|p| p.name.clone()) {
+            self.view.leave_history(&name, &mut connection.session());
+        }
     }
 
     fn connect_saved(&mut self, ctx: &egui::Context, index: usize) {
@@ -385,7 +395,12 @@ impl ParleyUi {
             maps: &maps,
             clock: &self.clock,
             color: self.current.as_ref().map(|p| p.color).unwrap_or_default(),
+            history: self.view.history_status(ui.input(|i| i.time)),
         };
+        if status.history == Some(terminal::HistoryStatus::NoneKept) {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(500));
+        }
         Panel::bottom("status_bar")
             .frame(frame)
             .show(ui, |ui| status::status_bar(ui, &status))
@@ -512,7 +527,10 @@ impl ParleyUi {
             self.status_action(chosen, &mut actions);
         }
         if let Some(session) = session.as_deref() {
+            self.history_panel(ui, session);
             self.find_panel(ui, session);
+        } else {
+            self.view.back_to_live();
         }
         self.view.palette = self.palette();
         self.view.blinking = self.settings.blinking_text;
@@ -583,10 +601,10 @@ impl ParleyUi {
     /// The find bar above the screen while it is open (R-UI-21); closing it gives the screen
     /// the keyboard back.
     fn find_panel(&mut self, ui: &mut Ui, session: &parley_core::Session) {
+        let count = self.view.find_count(session);
         let Some(bar) = &mut self.view.find else {
             return;
         };
-        let count = bar.matches(session).len();
         let frame = theme::bar(ui, Margin::symmetric(8, 3));
         let closed = Panel::top("find-bar")
             .frame(frame)
@@ -596,6 +614,27 @@ impl ParleyUi {
             self.view.find = None;
             self.focus_terminal = true;
         }
+    }
+
+    /// The history view's bar while it is open (R-UI-38); Back to live gives the screen the keyboard back.
+    fn history_panel(&mut self, ui: &mut Ui, session: &parley_core::Session) {
+        let Some(place) = self.view.history_place(session) else {
+            return;
+        };
+        let frame = theme::bar(ui, Margin::symmetric(8, 3));
+        let action = Panel::top("history-bar")
+            .frame(frame)
+            .show(ui, |ui| terminal::history_bar(ui, &place))
+            .inner;
+        match action {
+            Some(terminal::HistoryAction::Back) => {
+                self.view.history_back(session, ui.input(|i| i.time));
+            }
+            Some(terminal::HistoryAction::Forward) => self.view.history_forward(session),
+            Some(terminal::HistoryAction::Live) => self.view.back_to_live(),
+            None => return,
+        }
+        self.focus_terminal = true;
     }
 
     /// The session's screen, or the start screen without one; returns the functions the
@@ -653,6 +692,7 @@ impl ParleyUi {
         match connection {
             Some(connection) if next.disconnect => {
                 self.end_recording(&mut connection.session());
+                self.leave_history(&connection);
                 connection.close();
                 self.closed = Some("Disconnected.".to_owned());
                 self.reconnect = None;
@@ -768,6 +808,12 @@ impl ParleyUi {
                     }
                 }
                 Action::Find => self.view.open_find(),
+                Action::ScreenHistory => {
+                    if let Some(s) = session.as_deref() {
+                        self.view.history_back(s, ctx.input(|i| i.time));
+                        self.focus_terminal = true;
+                    }
+                }
                 Action::Paste => {
                     // The pasted text arrives as an input event, which the terminal takes.
                     ctx.send_viewport_cmd(ViewportCommand::RequestPaste);
@@ -858,6 +904,7 @@ impl ParleyUi {
     fn connection_ended(&mut self, reason: String) {
         if let Some(connection) = self.connection.take() {
             self.end_recording(&mut connection.session());
+            self.leave_history(&connection);
         }
         self.closed = Some(reason);
     }
@@ -1073,6 +1120,8 @@ impl ParleyUi {
                 | Function::PasteText(_)
                 | Function::Find
                 | Function::Select(_)
+                | Function::HistoryBack
+                | Function::HistoryForward
                 | Function::Paste => {}
             }
         }
@@ -1918,6 +1967,7 @@ mod tests {
                         maps: &maps,
                         clock: &clock,
                         color: SessionColor::None,
+                        history: None,
                     },
                 );
             })

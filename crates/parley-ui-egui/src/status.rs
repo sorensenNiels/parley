@@ -10,6 +10,7 @@ use parley_core::net::LinkState;
 use parley_core::{KeyboardState, MacroState, Session, SessionConfig};
 
 use crate::keymap::KeyMap;
+use crate::terminal::HistoryStatus;
 use crate::{icons, keys, theme};
 
 /// What the status bar shows besides the session.
@@ -38,6 +39,8 @@ pub struct Status<'a> {
     pub clock: &'a Clock,
     /// The session's colour, as a block at the bar's left end (R-UI-35).
     pub color: crate::session_color::SessionColor,
+    /// A kept screen is shown, or Ctrl+Page Up found none (R-UI-38).
+    pub history: Option<crate::terminal::HistoryStatus>,
 }
 
 /// What was clicked in the status bar.
@@ -207,6 +210,15 @@ fn left(ui: &mut Ui, status: &Status<'_>) -> Option<StatusAction> {
         }
     }
     processing_slot(ui, session.keyboard() == KeyboardState::Locked);
+    match status.history {
+        Some(HistoryStatus::Shown) => {
+            theme::badge(ui, "History", p.accent);
+        }
+        Some(HistoryStatus::NoneKept) => {
+            ui.label(RichText::new("No screen kept yet").color(p.muted));
+        }
+        None => {}
+    }
     // R-KEY-11: the keys waiting for the host to finish.
     let ahead = session.typed_ahead();
     if ahead > 0 {

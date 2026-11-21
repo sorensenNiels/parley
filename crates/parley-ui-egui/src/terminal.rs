@@ -7,10 +7,12 @@ mod colors;
 mod cursor;
 mod find;
 mod gui;
+mod history;
 mod windows;
 
 pub use colors::{COLORS, CustomColors, Palette, Scheme};
 pub use cursor::CursorShape;
+pub use history::{HistoryAction, HistoryStatus, bar as history_bar};
 
 pub use find::{
     FIELD as FIND_FIELD, FindAction, FindBar, bar as find_bar,
@@ -21,8 +23,11 @@ use egui::{
     Align2, Color32, CornerRadius, CursorIcon, EventFilter, FontId, Pos2, Rect, Sense, Stroke, Ui,
     Vec2, WidgetInfo,
 };
-use parley_core::screen::{Hotspot, Rectangle, Span, Target, hotspots, rectangle_text, table_text};
-use parley_core::{Color, Key, Session};
+use parley_core::screen::{
+    Hotspot, Rectangle, Screen, Span, Target, hotspots, rectangle_text, table_text,
+};
+use parley_core::session::History;
+use parley_core::{CodePage, Color, Key, Session};
 
 use crate::keymap::{Function, KeyInput, KeyMap, PasteBreaks, Pasted, Toward, pasted};
 
@@ -50,6 +55,12 @@ pub struct View {
     selection: Option<Selection>,
     /// The scroll bar whose slider is being dragged (R-DS-12).
     bar_drag: Option<usize>,
+    /// The kept screen shown in the live one's place (R-UI-38).
+    browse: Option<history::Browse>,
+    /// Until when the status bar says no screen is kept yet (egui's clock).
+    none_kept_until: f64,
+    /// The screens kept by the session's last connection, for its next one (R-UI-37).
+    left_history: Option<(String, History)>,
 }
 
 /// How a position with the blink attribute shows in this frame (R-UI-24).
@@ -78,11 +89,11 @@ struct Selection {
 }
 
 impl Selection {
-    fn new(anchor: (usize, usize), session: &Session) -> Self {
+    fn new(anchor: (usize, usize), screen: &Screen) -> Self {
         Self {
             anchor,
             head: anchor,
-            screen: session.screen().buffer().to_vec(),
+            screen: screen.buffer().to_vec(),
         }
     }
 
@@ -111,29 +122,120 @@ impl View {
         }
     }
 
-    /// The part of the screen to copy: the selection, or all of it.
-    fn area(&self, session: &Session) -> Rectangle {
+    /// The part of `screen` to copy: the selection, or all of it.
+    fn area(&self, screen: &Screen) -> Rectangle {
         self.selection
             .as_ref()
-            .map_or_else(|| Rectangle::all(session.screen()), Selection::area)
+            .map_or_else(|| Rectangle::all(screen), Selection::area)
     }
 
-    /// The selection as text, or the whole screen without one (R-UI-1, R-UI-22).
+    /// The selection as text, or the whole screen shown without one (R-UI-1, R-UI-22, R-UI-38).
     pub fn copy_text(&self, session: &Session) -> String {
-        rectangle_text(session.screen(), session.code_page(), self.area(session))
+        let screen = self.shown(session);
+        rectangle_text(screen, session.code_page(), self.area(screen))
     }
 
-    /// The selection, or the whole screen, as tab-separated columns (R-UI-22).
+    /// The selection, or the whole screen shown, as tab-separated columns (R-UI-22, R-UI-38).
     pub fn table_text(&self, session: &Session) -> String {
-        table_text(session.screen(), session.code_page(), self.area(session))
+        let screen = self.shown(session);
+        table_text(screen, session.code_page(), self.area(screen))
     }
 
-    /// Drops a selection made on a screen the host has changed since.
-    fn forget_old_selection(&mut self, session: &Session) {
+    /// The screen shown: a kept one while the history is open (R-UI-38), else the live one.
+    pub fn shown<'a>(&self, session: &'a Session) -> &'a Screen {
+        history::shown(self.browse.as_ref(), session)
+    }
+
+    /// How many matches the find bar has on the screen shown (R-UI-21, R-UI-38).
+    pub fn find_count(&self, session: &Session) -> usize {
+        self.find.as_ref().map_or(0, |f| {
+            f.matches(self.shown(session), session.code_page()).len()
+        })
+    }
+
+    /// Whether a kept screen is shown (R-UI-38).
+    pub const fn browsing(&self) -> bool {
+        self.browse.is_some()
+    }
+
+    /// Shows the kept screen before the one shown; with the history closed, opens it. With no screen kept,
+    /// the status bar says so for a while from `now` (egui's clock).
+    pub fn history_back(&mut self, session: &Session, now: f64) {
+        let history = session.history();
+        if let Some(browse) = &mut self.browse {
+            browse.back(history);
+        } else {
+            self.browse = history::Browse::open(history, session.screen());
+            if self.browse.is_none() {
+                self.none_kept_until = now + history::NONE_KEPT_FOR;
+            }
+        }
+        self.selection = None;
+    }
+
+    /// Shows the kept screen after the one shown, or the live screen past the newest.
+    pub fn history_forward(&mut self, session: &Session) {
+        if let Some(browse) = &mut self.browse
+            && !browse.forward(session.history())
+        {
+            self.back_to_live();
+        }
+        self.selection = None;
+    }
+
+    /// Closes the history: the live screen comes back, with its cursor where it was.
+    pub fn back_to_live(&mut self) {
+        if self.browse.take().is_some() {
+            self.selection = None;
+        }
+    }
+
+    /// What the history's bar says, while it is open.
+    pub fn history_place(&self, session: &Session) -> Option<history::Place> {
+        self.browse.as_ref()?.place(session.history())
+    }
+
+    /// What the status bar says about the history at `now` (egui's clock).
+    pub fn history_status(&self, now: f64) -> Option<HistoryStatus> {
+        if self.browsing() {
+            Some(HistoryStatus::Shown)
+        } else if now < self.none_kept_until {
+            Some(HistoryStatus::NoneKept)
+        } else {
+            None
+        }
+    }
+
+    /// Keeps the history of `session`, whose connection to the saved session `name` ended, for the next one
+    /// (R-UI-37); the view closes.
+    pub fn leave_history(&mut self, name: &str, session: &mut Session) {
+        self.back_to_live();
+        self.left_history = Some((name.to_owned(), session.take_history()));
+    }
+
+    /// Gives `session`, a new connection to the saved session `name`, the history its last connection left,
+    /// if it was to the same one (R-UI-37).
+    pub fn resume_history(&mut self, name: &str, session: &mut Session) {
+        self.back_to_live();
+        if let Some((left, history)) = self.left_history.take()
+            && left == name
+        {
+            session.adopt_history(history);
+        }
+    }
+
+    /// Forgets the history kept between connections: the tab shows the start screen.
+    pub fn forget_history(&mut self) {
+        self.back_to_live();
+        self.left_history = None;
+    }
+
+    /// Drops a selection made on a screen that has changed since.
+    fn forget_old_selection(&mut self, screen: &Screen) {
         if self
             .selection
             .as_ref()
-            .is_some_and(|s| s.screen != session.screen().buffer())
+            .is_some_and(|s| s.screen != screen.buffer())
         {
             self.selection = None;
         }
@@ -141,8 +243,7 @@ impl View {
 
     /// Grows the selection one position `toward`, within the screen; without one, it starts
     /// at the cursor (R-UI-36).
-    fn grow(&mut self, toward: Toward, session: &Session) {
-        let screen = session.screen();
+    fn grow(&mut self, toward: Toward, screen: &Screen) {
         let size = screen.size();
         let (last_row, last_column) = (
             usize::from(size.rows()).saturating_sub(1),
@@ -150,7 +251,7 @@ impl View {
         );
         let selection = self
             .selection
-            .get_or_insert_with(|| Selection::new(screen.row_column(screen.cursor), session));
+            .get_or_insert_with(|| Selection::new(screen.row_column(screen.cursor), screen));
         let (row, column) = &mut selection.head;
         match toward {
             Toward::Up => *row = row.saturating_sub(1),
@@ -179,8 +280,9 @@ fn cursor_look(ui: &Ui, view: &View, focused: bool, insert: bool, now: f64) -> c
 }
 
 /// Draws the session's screen in all the space there is and passes the keyboard to it, read
-/// with `map` (R-KEY-2). `grab_focus` takes the keyboard focus (after a toolbar button, for
-/// example). Returns what the keys asked of Parley beside the session: macros.
+/// with `map` (R-KEY-2); while the history is open, a kept screen instead, which no key reaches (R-UI-38).
+/// `grab_focus` takes the keyboard focus (after a toolbar button, for example). Returns what the keys asked of
+/// Parley beside the session: macros.
 pub fn show(
     ui: &mut Ui,
     session: &mut Session,
@@ -191,15 +293,20 @@ pub fn show(
 ) -> Vec<Function> {
     let mut asked = Vec::new();
     let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
-    let size = session.screen().size();
+    let size = view.shown(session).size();
     let (rows, columns) = (usize::from(size.rows()), usize::from(size.columns()));
     let grid = Grid::fit(ui.ctx(), response.rect, rows, columns);
 
     if grab_focus || ui.memory(|m| m.focused().is_none()) {
         response.request_focus();
     }
-    view.forget_old_selection(session);
-    let hovered = pointer(ui, &response, &grid, session, view);
+    view.forget_old_selection(view.shown(session));
+    let hovered = if view.browsing() {
+        select(ui, &response, &grid, view.shown(session), view);
+        None
+    } else {
+        pointer(ui, &response, &grid, session, view)
+    };
     if response.has_focus() {
         ui.memory_mut(|m| {
             m.set_focus_lock_filter(
@@ -212,68 +319,145 @@ pub fn show(
                 },
             );
         });
-        let (events, modifiers) = ui.input(|i| (i.events.clone(), i.modifiers));
-        for function in input.read(&events, modifiers, map) {
-            match function {
-                Function::Key(key) => {
-                    view.selection = None;
-                    view.last_key = ui.input(|i| i.time);
-                    session.key(key);
-                }
-                Function::CopyScreen => ui.ctx().copy_text(view.copy_text(session)),
-                Function::PasteText(text) => {
-                    view.selection = None;
-                    paste(session, &text, view.paste_breaks);
-                }
-                Function::CopyTable => ui.ctx().copy_text(view.table_text(session)),
-                Function::Find => view.open_find(),
-                Function::Select(toward) => view.grow(toward, session),
-                // The text comes back as a paste event, read above next frame.
-                Function::Paste => ui
-                    .ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::RequestPaste),
-                other @ (Function::RecordMacro
-                | Function::RunMacro(_)
-                | Function::Shortcuts
-                | Function::Sql
-                | Function::Ssh) => {
-                    asked.push(other);
-                }
-            }
+        let (events, modifiers, escape) = ui.input(|i| {
+            (
+                i.events.clone(),
+                i.modifiers,
+                i.key_pressed(egui::Key::Escape),
+            )
+        });
+        let functions = input.read(&events, modifiers, map);
+        if view.browsing() {
+            browse_keys(ui, session, view, functions, escape, &mut asked);
+        } else {
+            live_keys(ui, session, view, functions, &mut asked);
         }
     }
 
-    let cells = session.screen().cells(session.code_page());
+    draw(
+        ui,
+        &painter,
+        &response,
+        &grid,
+        session,
+        view,
+        hovered.as_ref(),
+    );
+    asked
+}
+
+/// What the keys do on the live screen.
+fn live_keys(
+    ui: &Ui,
+    session: &mut Session,
+    view: &mut View,
+    functions: Vec<Function>,
+    asked: &mut Vec<Function>,
+) {
+    for function in functions {
+        match function {
+            Function::Key(key) => {
+                view.selection = None;
+                view.last_key = ui.input(|i| i.time);
+                session.key(key);
+            }
+            Function::CopyScreen => ui.ctx().copy_text(view.copy_text(session)),
+            Function::PasteText(text) => {
+                view.selection = None;
+                paste(session, &text, view.paste_breaks);
+            }
+            Function::CopyTable => ui.ctx().copy_text(view.table_text(session)),
+            Function::Find => view.open_find(),
+            Function::Select(toward) => view.grow(toward, session.screen()),
+            Function::HistoryBack => view.history_back(session, ui.input(|i| i.time)),
+            // Forward of the live screen is the live screen.
+            Function::HistoryForward => {}
+            // The text comes back as a paste event, read above next frame.
+            Function::Paste => ui
+                .ctx()
+                .send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+            other @ (Function::RecordMacro
+            | Function::RunMacro(_)
+            | Function::Shortcuts
+            | Function::Sql
+            | Function::Ssh) => {
+                asked.push(other);
+            }
+        }
+    }
+}
+
+/// What the keys do while a kept screen is shown (R-UI-38): none reaches the host; Esc goes back to live.
+fn browse_keys(
+    ui: &Ui,
+    session: &Session,
+    view: &mut View,
+    functions: Vec<Function>,
+    escape: bool,
+    asked: &mut Vec<Function>,
+) {
+    for function in functions {
+        match function {
+            Function::HistoryBack => view.history_back(session, ui.input(|i| i.time)),
+            Function::HistoryForward => view.history_forward(session),
+            Function::CopyScreen => ui.ctx().copy_text(view.copy_text(session)),
+            Function::CopyTable => ui.ctx().copy_text(view.table_text(session)),
+            Function::Find => view.open_find(),
+            Function::Select(toward) => view.grow(toward, view.shown(session)),
+            other @ (Function::Shortcuts | Function::Sql | Function::Ssh) => asked.push(other),
+            // Keys, pastes and macros would reach the host.
+            Function::Key(_)
+            | Function::PasteText(_)
+            | Function::Paste
+            | Function::RecordMacro
+            | Function::RunMacro(_) => {}
+        }
+    }
+    if escape {
+        view.back_to_live();
+    }
+}
+
+/// Draws the screen shown, its marks, the hotspot under the pointer and the cursor.
+fn draw(
+    ui: &Ui,
+    painter: &egui::Painter,
+    response: &egui::Response,
+    grid: &Grid,
+    session: &Session,
+    view: &View,
+    hovered: Option<&Hotspot>,
+) {
+    let (screen, code_page) = (view.shown(session), session.code_page());
+    let cells = screen.cells(code_page);
     let palette = &view.palette;
     let now = ui.input(|i| i.time);
     let blink = blink_now(ui, view, &cells, now);
     draw_cells(
-        &painter,
+        painter,
         response.rect,
-        &grid,
+        grid,
         &cells,
-        &Marks::of(view, session, blink),
+        &Marks::of(view, screen, code_page, blink),
     );
     if view.frames {
-        windows::draw(
-            &painter,
-            &grid,
-            session.screen(),
-            session.code_page(),
-            &view.palette,
-        );
+        windows::draw(painter, grid, screen, code_page, palette);
     }
-    gui::draw(&painter, &grid, session.screen(), &view.palette);
-    flash_border(ui, &painter, response.rect, view, now);
-    if let Some(spot) = &hovered {
-        underline_hotspot(&painter, &grid, &cells, spot, palette);
+    gui::draw(painter, grid, screen, palette);
+    flash_border(ui, painter, response.rect, view, now);
+    if let Some(spot) = hovered {
+        underline_hotspot(painter, grid, &cells, spot, palette);
     }
-    let look = cursor_look(ui, view, response.has_focus(), session.insert_mode(), now);
-    cursor::draw(&painter, session, &grid, &cells, look, palette);
+    // A kept screen takes no keys: its cursor is an outline.
+    let look = if view.browsing() {
+        cursor::Look::Outline
+    } else {
+        cursor_look(ui, view, response.has_focus(), session.insert_mode(), now)
+    };
+    cursor::draw(painter, screen, grid, &cells, look, palette);
 
-    let text = session.screen().text(session.code_page());
+    let text = screen.text(code_page);
     response.widget_info(|| WidgetInfo::labeled(egui::accesskit::Role::Terminal, true, &text));
-    asked
 }
 
 /// How blinking text shows now, and a frame asked for when it changes, only while there is
@@ -403,7 +587,7 @@ fn pointer(
             .map(|(bar, _)| bar);
     }
     if view.bar_drag.is_none() {
-        select(ui, response, grid, session, view);
+        select(ui, response, grid, session.screen(), view);
     } else if response.drag_stopped() {
         drop_slider(session, grid, response, view);
     }
@@ -459,13 +643,13 @@ fn drop_slider(session: &mut Session, grid: &Grid, response: &egui::Response, vi
 }
 
 /// Starts, grows or ends a selection as the pointer is dragged over the screen (R-UI-22).
-fn select(ui: &Ui, response: &egui::Response, grid: &Grid, session: &Session, view: &mut View) {
+fn select(ui: &Ui, response: &egui::Response, grid: &Grid, screen: &Screen, view: &mut View) {
     if response.drag_started()
         && let Some(anchor) = ui
             .input(|i| i.pointer.press_origin())
             .and_then(|p| grid.cell_at(p))
     {
-        view.selection = Some(Selection::new(anchor, session));
+        view.selection = Some(Selection::new(anchor, screen));
     }
     if response.dragged()
         && let (Some(selection), Some(pos)) = (&mut view.selection, response.interact_pointer_pos())
@@ -485,11 +669,11 @@ struct Marks {
 }
 
 impl Marks {
-    fn of(view: &View, session: &Session, blink: Blink) -> Self {
+    fn of(view: &View, screen: &Screen, code_page: CodePage, blink: Blink) -> Self {
         let matches = view
             .find
             .as_ref()
-            .map(|f| f.matches(session))
+            .map(|f| f.matches(screen, code_page))
             .unwrap_or_default();
         let current = view
             .find
@@ -656,6 +840,107 @@ mod tests {
                 },
                 (session, KeyInput::default(), View::default()),
             )
+    }
+
+    fn screen_text(harness: &Harness<'static, State>) -> String {
+        let (session, _, view) = harness.state();
+        view.shown(session).text(session.code_page())
+    }
+
+    #[test]
+    fn ctrl_page_up_shows_the_screen_before_and_no_key_reaches_the_host_r_ui_38() {
+        let mut session = crate::test_support::waiting_session();
+        session.receive(&crate::test_support::screen_record_showing("Second"));
+        let mut harness = harness_with(session);
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::PageUp);
+        harness.run();
+        assert!(harness.state().2.browsing());
+        assert!(
+            screen_text(&harness).starts_with("Hello"),
+            "{}",
+            screen_text(&harness)
+        );
+
+        harness.event(Event::Text("abc".into()));
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        assert_eq!(harness.state_mut().0.take_outbound(), Vec::<u8>::new());
+        assert_eq!(harness.state().0.keyboard(), KeyboardState::Unlocked);
+
+        // A new screen from the host is kept without moving the view.
+        harness
+            .state_mut()
+            .0
+            .receive(&crate::test_support::screen_record_showing("Third æøå"));
+        harness.run();
+        let (session, _, view) = harness.state();
+        assert_eq!(
+            view.history_place(session).map(|p| (p.number, p.of, p.new)),
+            Some((1, 3, 1))
+        );
+        assert!(
+            view.copy_text(session).starts_with("Hello"),
+            "copies the screen shown"
+        );
+
+        harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::PageDown);
+        harness.run();
+        assert!(screen_text(&harness).starts_with("Second"));
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        assert!(!harness.state().2.browsing());
+        assert!(screen_text(&harness).starts_with("Third æøå"));
+        assert_eq!(
+            harness.state_mut().0.take_outbound(),
+            Vec::<u8>::new(),
+            "Esc was not Attention"
+        );
+    }
+
+    #[test]
+    fn with_no_screen_kept_ctrl_page_up_says_so_r_ui_38() {
+        let mut harness = harness_with(Session::new(parley_core::SessionConfig::default()));
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::PageUp);
+        harness.run();
+        let view = &harness.state().2;
+        assert!(!view.browsing());
+        let now = harness.ctx.input(|i| i.time);
+        assert_eq!(view.history_status(now), Some(HistoryStatus::NoneKept));
+        assert_eq!(view.history_status(now + 10.0), None);
+    }
+
+    #[test]
+    fn find_searches_the_kept_screen_shown_r_ui_38() {
+        let mut session = crate::test_support::session_showing("Hello hello");
+        session.receive(&crate::test_support::screen_record_showing("Other"));
+        let mut harness = harness_with(session);
+        harness.run();
+        harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::PageUp);
+        harness.key_press_modifiers(egui::Modifiers::CTRL, egui::Key::F);
+        harness.run();
+        let (session, _, view) = harness.state_mut();
+        view.find.as_mut().expect("the find bar opened").text = "HELLO".into();
+        assert_eq!(view.find_count(session), 2);
+        view.back_to_live();
+        assert_eq!(view.find_count(session), 0);
+    }
+
+    #[test]
+    fn the_history_goes_on_after_a_reconnect_to_the_same_session_only_r_ui_37() {
+        let mut view = View::default();
+        let mut old = crate::test_support::waiting_session();
+        view.leave_history("DKSOFT", &mut old);
+        let mut other = Session::new(parley_core::SessionConfig::default());
+        view.resume_history("PUB400", &mut other);
+        assert!(other.history().is_empty());
+
+        let mut old = crate::test_support::waiting_session();
+        view.leave_history("DKSOFT", &mut old);
+        let mut again = Session::new(parley_core::SessionConfig::default());
+        view.resume_history("DKSOFT", &mut again);
+        assert_eq!(again.history().len(), 1);
     }
 
     #[test]
@@ -982,7 +1267,7 @@ mod tests {
         let (session, _, view) = harness.state_mut();
         let bar = view.find.as_mut().expect("the find bar opened");
         bar.text = "HELLO".into();
-        assert_eq!(bar.matches(session).len(), 2);
+        assert_eq!(bar.matches(session.screen(), session.code_page()).len(), 2);
     }
 
     #[test]

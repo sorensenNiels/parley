@@ -3660,6 +3660,7 @@ dependencies = [
 name = "parley-ui-egui"
 version = "0.16.2"
 dependencies = [
+ "chrono",
  "egui",
  "egui_kittest",
  "fontique",

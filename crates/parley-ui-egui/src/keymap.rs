@@ -196,6 +196,10 @@ pub enum Function {
     Find,
     /// Grow the selection one position this way (R-UI-36).
     Select(Toward),
+    /// Show the kept screen before the one shown (R-UI-38).
+    HistoryBack,
+    /// Show the kept screen after the one shown, or the live screen past the newest (R-UI-38).
+    HistoryForward,
     /// Start recording a macro, or stop the recording (R-KEY-3).
     RecordMacro,
     /// Run the macro of this name (R-KEY-4).
@@ -280,6 +284,8 @@ impl Function {
             Self::Paste => "paste".to_owned(),
             Self::Find => "find".to_owned(),
             Self::Select(toward) => format!("{SELECT}{}", toward.word()),
+            Self::HistoryBack => "history-back".to_owned(),
+            Self::HistoryForward => "history-forward".to_owned(),
             Self::RecordMacro => "record-macro".to_owned(),
             Self::RunMacro(name) => format!("{RUN_MACRO}{name}"),
             Self::Shortcuts => "shortcuts".to_owned(),
@@ -294,6 +300,8 @@ impl Function {
             "copy-table" => Self::CopyTable,
             "paste" => Self::Paste,
             "find" => Self::Find,
+            "history-back" => Self::HistoryBack,
+            "history-forward" => Self::HistoryForward,
             "record-macro" => Self::RecordMacro,
             "shortcuts" => Self::Shortcuts,
             "sql" => Self::Sql,
@@ -329,6 +337,8 @@ impl Function {
             Self::Paste => "Paste into fields".to_owned(),
             Self::Find => "Find on the screen".to_owned(),
             Self::Select(toward) => format!("Select {}", toward.word()),
+            Self::HistoryBack => "Screen history: back".to_owned(),
+            Self::HistoryForward => "Screen history: forward".to_owned(),
             Self::RecordMacro => "Record macro, stop recording".to_owned(),
             Self::RunMacro(name) => format!("Run macro {name}"),
             Self::Shortcuts => "Keyboard shortcuts".to_owned(),
@@ -351,6 +361,8 @@ impl Function {
                 | Self::CopyTable
                 | Self::Find
                 | Self::Select(_)
+                | Self::HistoryBack
+                | Self::HistoryForward
                 | Self::RecordMacro
                 | Self::RunMacro(_)
                 | Self::Shortcuts
@@ -389,6 +401,8 @@ pub fn groups(macros: Option<&[String]>, tools: &[Function]) -> Vec<(&'static st
                 Function::Select(Toward::Down),
                 Function::Select(Toward::Left),
                 Function::Select(Toward::Right),
+                Function::HistoryBack,
+                Function::HistoryForward,
                 Function::Shortcuts,
             ],
         ),
@@ -433,6 +447,8 @@ static BUILT_IN: LazyLock<KeyMap> = LazyLock::new(|| {
         ("Shift+Tab", "back-tab"),
         ("PageUp", "roll-down"),
         ("PageDown", "roll-up"),
+        ("Ctrl+PageUp", "history-back"),
+        ("Ctrl+PageDown", "history-forward"),
         ("Ctrl", "reset"),
         ("Ctrl+R", "reset"),
         ("Escape", "attention"),

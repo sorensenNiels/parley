@@ -53,6 +53,8 @@ pub enum Action {
     Paste,
     /// Edit ▸ Find… (R-UI-21).
     Find,
+    /// Edit ▸ Screen history (R-UI-38).
+    ScreenHistory,
     /// Tools ▸ SQL… (R-SQL-6).
     Sql,
     /// Tools ▸ SSH… (R-SSH-59).
@@ -281,6 +283,10 @@ fn edit_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
         let find = (icons::MAGNIFYING_GLASS, "Find…");
         if item(ui, header, on, find, Some(&Function::Find)) {
             action = Some(Action::Find);
+        }
+        let history = (icons::CARET_LEFT, "Screen history");
+        if item(ui, header, on, history, Some(&Function::HistoryBack)) {
+            action = Some(Action::ScreenHistory);
         }
     });
     action

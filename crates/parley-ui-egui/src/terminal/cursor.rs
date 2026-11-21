@@ -4,7 +4,7 @@ use egui::{Align2, CornerRadius, Painter, Pos2, Rect, Stroke};
 use serde::{Deserialize, Serialize};
 
 use super::{Grid, Palette};
-use parley_core::Session;
+use parley_core::screen::Screen;
 
 /// The cursor's shape, as Settings ▸ Terminal chooses it (R-UI-28).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,16 +59,15 @@ pub(super) enum Look {
     Shape(CursorShape),
 }
 
-/// Draws the cursor at the session's cursor position as `look` says.
+/// Draws the cursor at the screen's cursor position as `look` says.
 pub(super) fn draw(
     painter: &Painter,
-    session: &Session,
+    screen: &Screen,
     grid: &Grid,
     cells: &[parley_core::screen::Cell],
     look: Look,
     palette: &Palette,
 ) {
-    let screen = session.screen();
     let (row, column) = screen.row_column(screen.cursor);
     let rect = grid.cell(row, column);
     let Some(cell) = cells.get(screen.cursor) else {

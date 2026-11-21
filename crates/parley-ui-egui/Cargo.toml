@@ -14,6 +14,8 @@ egui.workspace = true
 serde.workspace = true
 fontique.workspace = true
 skrifa.workspace = true
+# The history view's local time of day (R-UI-38).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [features]
 # The UI tests' helpers (`test_support`), for Parley SQL's UI tests.

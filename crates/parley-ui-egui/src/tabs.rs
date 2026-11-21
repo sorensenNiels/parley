@@ -128,6 +128,8 @@ impl ParleyUi {
         }
         self.reconnect = None;
         if self.tabs.len() <= 1 {
+            // R-UI-37: the screens kept go with the tab, though the start screen stays.
+            self.view.forget_history();
             self.closed = Some("Disconnected.".to_owned());
             return;
         }
