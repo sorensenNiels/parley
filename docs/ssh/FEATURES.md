@@ -32,8 +32,13 @@
   `PARLEY_RSYNC_DIR`), off the PATH the installer sets; Parley SSH looks there first. MSYS2's rsync gets no drive
   letter whatever its mount table (`transfer::windows_place`): it starts in the desktop path's drive with the rest
   as a relative path, and finds `parley-ssh` by name, its folder put first on rsync's PATH (`Launch`). The release
-  workflow's Windows job and `make package` on Windows run the script. **Not yet**: the About page naming the
-  bundled rsync with its version. **Automated**: `net::pipe::tests` (tokens; a
+  workflow's Windows job and `make package` on Windows run the script. **About page** (2026-11-21): the shared
+  About page takes what a program ships beside itself (`about::Included`, `About::show_with`); Parley SSH lists the
+  bundled rsync among the Includes with its version, read from the `rsync-SOURCE.txt` beside it, its licence and the
+  folder its licence and sources notice are in, and nothing where none came with it (Linux). The Includes group now
+  shows in builds that do not look for updates too, as JTOpen's notice asks to be in plain view. Tested by
+  `about::tests` (an included item drawn) and `transfer::window::tests` (the version from the notice, none without
+  one); seen in a screenshot with a stand-in bundled rsync, the Includes below the fold. **Automated**: `net::pipe::tests` (tokens; a
   relay's token, command and data both ways; data right after the header kept; no window, a silent relay),
   `tests/net.rs` (a pipe carries a relay's data through an exec channel and back, not to the UI or the screen; ending
   it closes the relay's connection), `transfer::desktop::tests` in the core (the desktop's rsync arguments both ways,

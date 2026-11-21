@@ -32,12 +32,10 @@ impl std::fmt::Debug for Io {
 }
 
 /// The rsync that came with Parley SSH (R-SSH-66): in the `rsync` folder beside the program (Windows, so that it is
-/// not on the `PATH`), beside it, or in a macOS app's Resources; else the one on the `PATH`.
-fn bundled_rsync() -> String {
+/// not on the `PATH`), beside it, or in a macOS app's Resources.
+fn bundled_path() -> Option<std::path::PathBuf> {
     let name = if cfg!(windows) { "rsync.exe" } else { "rsync" };
-    let Ok(exe) = std::env::current_exe() else {
-        return "rsync".to_owned();
-    };
+    let exe = std::env::current_exe().ok()?;
     let folder = exe.with_file_name("rsync").join(name);
     let beside = exe.with_file_name(name);
     let resources = exe
@@ -48,7 +46,40 @@ fn bundled_rsync() -> String {
         .into_iter()
         .flatten()
         .find(|path| path.is_file())
-        .map_or_else(|| "rsync".to_owned(), |path| path.display().to_string())
+}
+
+/// The bundled rsync, else the one on the `PATH`.
+fn bundled_rsync() -> String {
+    bundled_path().map_or_else(|| "rsync".to_owned(), |path| path.display().to_string())
+}
+
+/// The rsync that came with Parley SSH, for the About page (R-SSH-66): its version from the `rsync-SOURCE.txt`
+/// beside it, which the installer's scripts write; nothing when none came with it (Linux uses the system's).
+pub fn bundled() -> Option<parley_ui_egui::settings::about::Included> {
+    let path = bundled_path()?;
+    let source = std::fs::read_to_string(path.with_file_name("rsync-SOURCE.txt")).ok();
+    let folder = path
+        .parent()
+        .map(|f| f.display().to_string())
+        .unwrap_or_default();
+    Some(included(source.as_deref(), &folder))
+}
+
+/// The About page's line for the bundled rsync, from its `rsync-SOURCE.txt` (`rsync 3.4.1 comes with …`).
+fn included(source: Option<&str>, folder: &str) -> parley_ui_egui::settings::about::Included {
+    let version = source
+        .and_then(|text| text.split_whitespace().nth(1))
+        .filter(|v| v.starts_with(|c: char| c.is_ascii_digit()))
+        .map(|v| format!(" {v}"))
+        .unwrap_or_default();
+    parley_ui_egui::settings::about::Included {
+        name: format!("rsync{version}"),
+        about: format!(
+            "For transfers to and from this computer, run as a program of its own. GNU General Public License \
+             version 3; its licence and where its source is (rsync-COPYING.txt, rsync-SOURCE.txt) are in {folder}."
+        ),
+        source: "https://rsync.samba.org".to_owned(),
+    }
 }
 
 impl ParleySshUi {
@@ -404,5 +435,33 @@ impl ParleySshUi {
             .iter()
             .find_map(|tab| tab.pane(pane))
             .and_then(crate::tabs::Pane::session)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::included;
+
+    #[test]
+    fn the_about_page_names_the_bundled_rsync_with_its_version_r_ssh_66() {
+        let line = included(
+            Some(
+                "rsync 3.4.1 comes with Parley SSH as a program of its own, with the DLLs it needs",
+            ),
+            r"C:\Program Files\Parley 5250\rsync",
+        );
+        assert_eq!(line.name, "rsync 3.4.1");
+        assert!(
+            line.about
+                .ends_with(r"are in C:\Program Files\Parley 5250\rsync."),
+            "{}",
+            line.about
+        );
+        assert_eq!(
+            included(None, "/x").name,
+            "rsync",
+            "no notice beside it: no version"
+        );
+        assert_eq!(included(Some("garbled"), "/x").name, "rsync");
     }
 }

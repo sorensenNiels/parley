@@ -11,6 +11,15 @@ use crate::updates::UpdateStatus;
 /// Where the source and the issues are.
 const REPOSITORY: &str = "https://github.com/sorensenNiels/parley";
 
+/// Something a program ships beside itself, for the About page's Includes (R-SSH-66): its name with its version, a
+/// line about it (what it is for, its licence), and where its source is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Included {
+    pub name: String,
+    pub about: String,
+    pub source: String,
+}
+
 /// The About page's own state.
 #[derive(Debug, Default)]
 pub struct About {
@@ -33,6 +42,17 @@ impl About {
         program: Program,
         check_for_updates: &mut bool,
         updates: &UpdateStatus,
+    ) {
+        self.show_with(ui, program, (check_for_updates, updates), &[]);
+    }
+
+    /// The page, with what `program` ships beside itself among the Includes.
+    pub fn show_with(
+        &mut self,
+        ui: &mut Ui,
+        program: Program,
+        (check_for_updates, updates): (&mut bool, &UpdateStatus),
+        included: &[Included],
     ) {
         let p = theme::palette(ui);
         let name = program.name();
@@ -66,16 +86,16 @@ impl About {
         });
         if *updates == UpdateStatus::Unsupported {
             theme::hint(ui, "This build doesn't look for new versions.");
-            return;
+        } else {
+            group(ui, "Updates", None, |rows| {
+                rows.switch(
+                    &format!("Look for a new version when {name} starts"),
+                    Some("Asks GitHub for the latest release; sends nothing else."),
+                    check_for_updates,
+                );
+                rows.full_row(|ui| self.update_row(ui, updates));
+            });
         }
-        group(ui, "Updates", None, |rows| {
-            rows.switch(
-                &format!("Look for a new version when {name} starts"),
-                Some("Asks GitHub for the latest release; sends nothing else."),
-                check_for_updates,
-            );
-            rows.full_row(|ui| self.update_row(ui, updates));
-        });
         if let Some(copied) = &self.copied {
             theme::hint(ui, copied);
         }
@@ -89,6 +109,12 @@ impl About {
                 );
                 ui.hyperlink_to("Its source", "https://github.com/IBM/JTOpen");
             });
+            for item in included {
+                rows.fact(&item.name, |ui| {
+                    ui.label(&item.about);
+                    ui.hyperlink_to("Its source", &item.source);
+                });
+            }
         });
     }
 
@@ -170,4 +196,35 @@ fn download_command_menu(
     })
     .inner
     .flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    #[test]
+    fn a_program_lists_what_it_ships_beside_itself_r_ssh_66() {
+        let included = vec![Included {
+            name: "rsync 3.4.1".into(),
+            about: "For transfers. GNU GPL version 3; æøå.".into(),
+            source: "https://rsync.samba.org".into(),
+        }];
+        let mut about = About::default();
+        let mut check = true;
+        let mut harness = Harness::new_ui(|ui| {
+            crate::theme::install(ui.ctx(), crate::fonts::DEFAULT_TERMINAL_FONT);
+            about.show_with(
+                ui,
+                Program::ParleySsh,
+                (&mut check, &UpdateStatus::Unsupported),
+                &included,
+            );
+        });
+        harness.run();
+        harness.get_by_label("rsync 3.4.1");
+        harness.get_by_label("For transfers. GNU GPL version 3; æøå.");
+        harness.get_by_label("JTOpen 21.0.7");
+    }
 }

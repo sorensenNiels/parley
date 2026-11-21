@@ -17,7 +17,7 @@ mod view;
 mod window;
 
 pub use desktop::{DESKTOP, DesktopFiles, Launch, Setup};
-pub use window::Io;
+pub use window::{Io, bundled};
 
 /// The most of a job's output kept: enough for rsync's last progress line and its last error lines.
 const KEPT: usize = 4096;

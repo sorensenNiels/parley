@@ -259,6 +259,8 @@ pub struct Dialog {
     /// Said when the chosen font is not installed.
     pub font_note: Option<String>,
     snippets: crate::snippets::Page,
+    /// What came with Parley SSH, for the About page: rsync where it was bundled (R-SSH-66).
+    included: Vec<parley_ui_egui::settings::about::Included>,
 }
 
 impl Dialog {
@@ -271,6 +273,7 @@ impl Dialog {
             installed: parley_ui_egui::fonts::Installed::search(move || ctx.request_repaint()),
             font_note: None,
             snippets: crate::snippets::Page::default(),
+            included: crate::transfer::bundled().into_iter().collect(),
         }
     }
 
@@ -318,11 +321,11 @@ impl Dialog {
             Page::Terminal => terminal_page(ui, settings),
             Page::Snippets => self.snippets.show(ui, &mut settings.snippets, files),
             Page::Transfers => transfers_page(ui, settings),
-            Page::About => self.about.show(
+            Page::About => self.about.show_with(
                 ui,
                 Program::ParleySsh,
-                &mut settings.check_for_updates,
-                updates,
+                (&mut settings.check_for_updates, updates),
+                &self.included,
             ),
         });
         self.page = page;
