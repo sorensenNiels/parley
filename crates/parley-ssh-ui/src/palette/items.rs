@@ -65,6 +65,7 @@ fn actions(mac: bool) -> Vec<(Action, &'static str, String)> {
         (Action::TextActualSize, "Actual text size", size("0")),
         (Action::PickSnippet, "Send a snippet…", ours("S")),
         (Action::Transfer, "Transfer files…", ours("Y")),
+        (Action::SetUpKey, "Set up key sign-on…", String::new()),
         (Action::EditSnippets, "Edit snippets…", String::new()),
         (Action::Shortcuts, "Keyboard shortcuts", String::new()),
         (Action::Settings, "Settings", String::new()),

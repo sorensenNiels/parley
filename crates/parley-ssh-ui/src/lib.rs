@@ -8,6 +8,7 @@ mod broadcast;
 mod dialogs;
 mod find;
 mod fonts;
+mod key_setup;
 mod log;
 mod openssh;
 mod palette;
@@ -127,6 +128,9 @@ pub struct ParleySshUi {
     beeper: Option<Beeper>,
     /// The Transfer panel, while open (Phase 31).
     transfer: Option<transfer::Panel>,
+    /// Setting up key sign-on, while its dialog is open (R-SSH-67), and its list's last height.
+    key_setup: Option<key_setup::KeySetup>,
+    key_list_height: f32,
 }
 
 impl std::fmt::Debug for ParleySshUi {
@@ -173,6 +177,8 @@ impl ParleySshUi {
             palette: None,
             beeper: None,
             transfer: None,
+            key_setup: None,
+            key_list_height: 0.0,
         }
     }
 
@@ -433,6 +439,7 @@ impl ParleySshUi {
             }
         }
         self.show_dialogs(ui.ctx());
+        self.key_setup_frame(ui.ctx());
         self.snippet_dialogs(ui.ctx());
         self.show_palette(ui.ctx());
     }
@@ -638,6 +645,7 @@ impl ParleySshUi {
             Action::SendSnippet(i) => self.send_snippet(i),
             Action::PickSnippet => self.open_picker(),
             Action::Transfer => self.open_transfer(),
+            Action::SetUpKey => self.open_key_setup(),
             Action::RunTransfer(i) => self.run_saved_transfer(ctx, i),
             Action::EditSnippets => {
                 self.settings_dialog =

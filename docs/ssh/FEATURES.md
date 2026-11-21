@@ -19,8 +19,24 @@
   its last line end, an existing folder left as it is, the check finding a group- and an others-writable folder and
   the Fix closing them), `key_setup/make.rs` (a key read back with its passphrase "hemmeligt æøå" and not with a
   wrong one, 600 and 700, its public line read back; never over an existing `.pub`, numbered names, no passphrase),
-  `tests/net.rs` (every sign-on test now says how it signed on; the agent's keys listed; no agent said). **Still to
-  build**: the window (step 2); then the owner's checks on a Linux server and IBM i (step 3).
+  `tests/net.rs` (every sign-on test now says how it signed on; the agent's keys listed; no agent said).
+
+- **R-SSH-67, R-SSH-68, Phase 32 step 2** (2026-11-21, Linux under WSL; D63): the window. After a password or
+  keyboard-interactive sign-on a bar above the terminal offers "Sign on with a key next time? Set up… · Not for this
+  session" (kept in the saved session as `key_offer_off`); Session ▸ Set up key sign-on… and the palette open the same
+  dialog (`key_setup`): the session's key files, the agent's keys, the usual `~/.ssh` keys and Make a new key; Make
+  asks a comment and the passphrase twice; then the check and the key added over side channels in key setup's own job
+  range; the result, IBM i's folders with Fix… asked first; the saved session (and the live one, for a restart) gets
+  the key file first in its list or the agent key as its only one. **Automated** (`make test`): `key_setup/tests.rs`
+  (the order of the keys and which is chosen as the agent answers, also after the user chose; the whole flow from
+  check to remembered, with IBM i's folder asked and fixed; a failure in the server's words; an unsaved session
+  remembers nothing; a key made with the passphrase typed twice, a mismatch said; closing ends a running job;
+  remembering a file or an agent key; which events are key setup's; kittest: the dialog's buttons stay in place, Make
+  and back, Set up runs the check; the offer bar's two answers), `session.rs` (offered after a password, not after a
+  key or when the session said not; key setup's events kept apart from the Transfer panel's), `tests.rs` (Not for this
+  session and the key set up kept in the saved session and the live one). **To check in the running app** (step 3):
+  from a password sign-on to a key sign-on on the next connection on a Linux server and on IBM i, with a home folder
+  the group can write fixed; a new key made; an agent key; light and dark.
 
 - **R-SSH-55 and part of R-SSH-66, Phase 31 step 5** (2026-11-21, Linux under WSL): copies between this computer
   and a server. "This computer" is a choice for either end of the Transfer panel, with File… and Folder… buttons

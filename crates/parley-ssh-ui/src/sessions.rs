@@ -63,6 +63,8 @@ pub struct SavedSession {
     pub log_pattern: String,
     /// Listed first on the start screen and in the palette (R-SSH-63).
     pub favourite: bool,
+    /// "Not for this session": never offer key sign-on after a password (R-SSH-67, D63).
+    pub key_offer_off: bool,
 }
 
 impl Default for SavedSession {
@@ -95,6 +97,7 @@ impl Default for SavedSession {
             log_mode: crate::log::LogMode::Off,
             log_pattern: crate::log::DEFAULT_PATTERN.to_owned(),
             favourite: false,
+            key_offer_off: false,
         }
     }
 }

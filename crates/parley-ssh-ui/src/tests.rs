@@ -1226,3 +1226,40 @@ fn this_computer_as_an_end_takes_a_path_chosen_with_the_file_window_r_ssh_55() {
         "only this computer's end has it"
     );
 }
+
+#[test]
+fn not_for_this_session_and_a_key_set_up_are_kept_in_the_saved_session_r_ssh_67() {
+    use crate::key_setup::{Choice, Order};
+    let mut settings = Settings::default();
+    settings.sessions.push(waiting());
+    let mut h = app(settings);
+    h.run_steps(1);
+    let ctx = h.ctx.clone();
+    let pane = h.state().tabs[0].active;
+    h.state_mut().connect_pane(&ctx, pane, waiting(), true);
+    h.state_mut().no_key_offer(pane);
+    assert!(h.state().settings.sessions[0].key_offer_off);
+
+    let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAV5CINKVHRsJdOO4vr5nwVr0ASkuG8DODBufVj2pCQ9";
+    let line = parley_ssh_core::key_setup::PublicLine::parse(key).expect("a key line");
+    h.state_mut().carry_key_orders(
+        pane,
+        vec![Order::Remember {
+            session: "Wait".into(),
+            key: Choice::File("/home/me/.ssh/id_æøå".into(), Ok(line)),
+        }],
+    );
+    assert_eq!(
+        h.state().settings.sessions[0].key_files,
+        ["/home/me/.ssh/id_æøå"]
+    );
+    let restarted = h
+        .state()
+        .active_session()
+        .map(|s| s.source.key_files.clone());
+    assert_eq!(
+        restarted,
+        Some(vec!["/home/me/.ssh/id_æøå".to_owned()]),
+        "a restart uses it too"
+    );
+}

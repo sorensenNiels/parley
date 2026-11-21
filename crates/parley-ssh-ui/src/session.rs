@@ -65,6 +65,14 @@ pub struct Session {
     pub host_key_line: Option<String>,
     /// What the jobs on this connection said since the Transfer panel last looked (Phase 31).
     jobs: Vec<Event>,
+    /// What key setup's jobs and the agent said since it last looked (R-SSH-67).
+    key_events: Vec<Event>,
+    /// How the user signed on, once the shell started.
+    pub signed_on_with: Option<net::SignedOnWith>,
+    /// The bar offering key sign-on is shown (R-SSH-67, D63).
+    offer_key: bool,
+    /// What was clicked in that bar since the window last looked.
+    offer_answer: Option<crate::key_setup::Offer>,
     /// What happened, for the event log (R-SSH-16).
     pub log: Vec<LogLine>,
     pub view: screen::View,
@@ -164,6 +172,10 @@ impl Session {
             fingerprint: None,
             host_key_line: None,
             jobs: Vec::new(),
+            key_events: Vec::new(),
+            signed_on_with: None,
+            offer_key: false,
+            offer_answer: None,
             log: Vec::new(),
             view: screen::View::default(),
             host_key: None,
@@ -349,61 +361,73 @@ impl Session {
     pub fn poll(&mut self) {
         let events: Vec<Event> = self.connection.events().collect();
         for event in events {
-            match event {
-                Event::Log(line) => self.log.push(LogLine::now(line)),
-                Event::Problem(problem) => {
-                    self.log.push(LogLine::now(problem.clone()));
-                    self.problem = Some(problem);
+            self.take_in(event);
+        }
+    }
+
+    /// One event from the connection.
+    fn take_in(&mut self, event: Event) {
+        match event {
+            Event::Log(line) => self.log.push(LogLine::now(line)),
+            Event::Problem(problem) => {
+                self.log.push(LogLine::now(problem.clone()));
+                self.problem = Some(problem);
+            }
+            Event::HostKey(question) => self.host_key = Some(dialogs::HostKey::new(question)),
+            Event::Banner(text) => self.banner = Some(text),
+            Event::Prompt(prompt) => {
+                self.prompt = Some(dialogs::Prompt::new(prompt, self.banner.take()));
+            }
+            // Kept for the tab, Restart and reconnecting, which then do not ask again (R-SSH-62).
+            Event::User(user) => {
+                self.target.user.clone_from(&user);
+                self.source.user = user;
+            }
+            Event::Secured {
+                algorithms,
+                fingerprint,
+                host_key,
+            } => {
+                self.algorithms = Some(algorithms);
+                self.fingerprint = Some(fingerprint);
+                self.host_key_line = Some(host_key);
+                if self.state == State::Connecting {
+                    self.state = State::SigningOn;
                 }
-                Event::HostKey(question) => self.host_key = Some(dialogs::HostKey::new(question)),
-                Event::Banner(text) => self.banner = Some(text),
-                Event::Prompt(prompt) => {
-                    self.prompt = Some(dialogs::Prompt::new(prompt, self.banner.take()));
+            }
+            Event::Started { with } => {
+                // R-SSH-67: after a password, offered unless the saved session said not for it.
+                self.signed_on_with = Some(with);
+                self.offer_key = with.typed() && !self.source.key_offer_off;
+                if self.log_file.is_none() && self.source.log_mode != crate::log::LogMode::Off {
+                    self.start_log();
                 }
-                // Kept for the tab, Restart and reconnecting, which then do not ask again (R-SSH-62).
-                Event::User(user) => {
-                    self.target.user.clone_from(&user);
-                    self.source.user = user;
+                if self.reconnect.take().is_some() {
+                    self.say("Reconnected: this is a new shell.");
                 }
-                Event::Secured {
-                    algorithms,
-                    fingerprint,
-                    host_key,
-                } => {
-                    self.algorithms = Some(algorithms);
-                    self.fingerprint = Some(fingerprint);
-                    self.host_key_line = Some(host_key);
-                    if self.state == State::Connecting {
-                        self.state = State::SigningOn;
-                    }
+                self.state = State::Running;
+                self.started = true;
+                self.problem = None;
+                self.grab_focus = true;
+            }
+            // For the Transfer panel, which started them (Phase 31).
+            job @ (Event::JobOutput { .. }
+            | Event::JobEnded { .. }
+            | Event::Door { .. }
+            | Event::Forwarded { .. }
+            | Event::AgentKeys(_)) => {
+                if crate::key_setup::is_key_event(&job) {
+                    self.key_events.push(job);
+                } else {
+                    self.jobs.push(job);
                 }
-                // How the user signed on is for the key sign-on offer (R-SSH-67, Phase 32 step 2).
-                Event::Started { with: _ } => {
-                    if self.log_file.is_none() && self.source.log_mode != crate::log::LogMode::Off {
-                        self.start_log();
-                    }
-                    if self.reconnect.take().is_some() {
-                        self.say("Reconnected: this is a new shell.");
-                    }
-                    self.state = State::Running;
-                    self.started = true;
-                    self.problem = None;
-                    self.grab_focus = true;
-                }
-                // For the Transfer panel, which started them (Phase 31).
-                job @ (Event::JobOutput { .. }
-                | Event::JobEnded { .. }
-                | Event::Door { .. }
-                | Event::Forwarded { .. }) => self.jobs.push(job),
-                // Only the key setup asks for them (R-SSH-67, Phase 32 step 2).
-                Event::AgentKeys(_) => {}
-                Event::Ended(ending) => {
-                    self.log.push(LogLine::now(ending_text(&ending)));
-                    self.host_key = None;
-                    self.prompt = None;
-                    self.state = State::Ended(ending);
-                    self.just_ended = true;
-                }
+            }
+            Event::Ended(ending) => {
+                self.log.push(LogLine::now(ending_text(&ending)));
+                self.host_key = None;
+                self.prompt = None;
+                self.state = State::Ended(ending);
+                self.just_ended = true;
             }
         }
     }
@@ -423,6 +447,7 @@ impl Session {
         let asking = self.host_key.is_some() || self.prompt.is_some() || self.paste.is_some();
         let grab = active && !asking && std::mem::take(&mut self.grab_focus);
         let area = ui.max_rect();
+        self.offer_bar(ui);
         self.find_bar(ui);
         for out in screen::show(ui, &self.terminal, &mut self.view, look, grab) {
             match out {
@@ -586,6 +611,37 @@ impl Session {
             Some(find) => find.bar.focus(),
             None => self.find = Some(crate::find::Find::opened()),
         }
+    }
+
+    /// The bar offering key sign-on after a password sign-on (R-SSH-67, D63).
+    fn offer_bar(&mut self, ui: &mut egui::Ui) {
+        if !self.offer_key {
+            return;
+        }
+        let answer = egui::Frame::new()
+            .inner_margin(egui::Margin::symmetric(8, 4))
+            .fill(parley_ui_egui::theme::palette(ui).chrome)
+            .show(ui, crate::key_setup::offer_bar)
+            .inner;
+        if let Some(answer) = answer {
+            self.offer_key = false;
+            self.offer_answer = Some(answer);
+        }
+    }
+
+    /// What was clicked in the offer bar since the last call.
+    pub fn take_offer(&mut self) -> Option<crate::key_setup::Offer> {
+        self.offer_answer.take()
+    }
+
+    /// Key sign-on is being set up, or was: the bar goes.
+    pub fn end_offer(&mut self) {
+        self.offer_key = false;
+    }
+
+    /// What key setup's jobs and the agent said since the last call (R-SSH-67).
+    pub fn take_key_events(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.key_events)
     }
 
     /// The find bar above the screen, and what the screen highlights.
@@ -844,6 +900,44 @@ mod tests {
             }],
             "3 s is not long"
         );
+    }
+
+    #[test]
+    fn key_sign_on_is_offered_after_a_password_unless_the_session_said_not_r_ssh_67() {
+        use net::SignedOnWith;
+        let mut s = failing();
+        s.take_in(Event::Started {
+            with: SignedOnWith::Agent,
+        });
+        assert!(!s.offer_key, "a key signed on already");
+        s.take_in(Event::Started {
+            with: SignedOnWith::Password,
+        });
+        assert!(s.offer_key);
+        s.end_offer();
+        assert!(!s.offer_key);
+
+        let mut off = failing();
+        off.source.key_offer_off = true;
+        off.take_in(Event::Started {
+            with: SignedOnWith::KeyboardInteractive,
+        });
+        assert!(!off.offer_key, "not for this session");
+    }
+
+    #[test]
+    fn key_setup_s_job_events_are_kept_apart_from_the_transfer_panel_s_r_ssh_67() {
+        use parley_ssh_core::net::{JobEnding, JobId};
+        let mut s = failing();
+        let ended = |id| Event::JobEnded {
+            id: JobId(id),
+            ending: JobEnding::Exited(0),
+        };
+        s.take_in(ended(3));
+        s.take_in(ended(crate::key_setup::KEY_JOBS + 1));
+        s.take_in(Event::AgentKeys(Ok(Vec::new())));
+        assert_eq!(s.take_jobs(), [ended(3)]);
+        assert_eq!(s.take_key_events().len(), 2);
     }
 
     #[test]

@@ -57,6 +57,8 @@ pub enum Action {
     Transfer,
     /// Run the saved transfer with this index (R-SSH-56).
     RunTransfer(usize),
+    /// Set up key sign-on for the session in front (R-SSH-67).
+    SetUpKey,
 }
 
 /// What the header shows.
@@ -107,6 +109,12 @@ pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
                 icons::UPLOAD_SIMPLE,
                 "Transfer files…",
                 Action::Transfer,
+            ),
+            Item(
+                connected,
+                icons::LOCK,
+                "Set up key sign-on…",
+                Action::SetUpKey,
             ),
             broadcast_item(header.broadcast, false),
             broadcast_item(header.broadcast, true),
