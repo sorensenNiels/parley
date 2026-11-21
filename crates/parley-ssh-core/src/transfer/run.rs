@@ -26,6 +26,70 @@ pub struct Direct {
     pub target: Remote,
     /// The path on B.
     pub target_path: String,
+    pub options: Options,
+}
+
+/// How rsync copies (R-SSH-56's switches).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Options {
+    /// Delete files at the target that the source does not have (`--delete`); excluded ones are kept.
+    pub delete: bool,
+    /// Keep permissions, owner, group and times (`-a`); without it, files and links only (`-rl`).
+    pub keep: bool,
+    /// Compress on the way (`-z`).
+    pub compress: bool,
+    /// Patterns not copied (`--exclude`), one each.
+    pub excludes: Vec<String>,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            delete: false,
+            keep: true,
+            compress: true,
+            excludes: Vec::new(),
+        }
+    }
+}
+
+/// Whether rsync copies or only says what it would do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// `--dry-run --itemize-changes`, names unescaped (`-8`): what will be added, changed and deleted (R-SSH-56).
+    DryRun,
+    /// With progress, keeping partial files for the next try (`--partial`).
+    Copy,
+}
+
+impl Options {
+    /// rsync's switches for these options in `mode`, each one word for the shell.
+    fn switches(&self, mode: Mode) -> String {
+        let mut words = vec![format!(
+            "-{}{}",
+            if self.keep { "a" } else { "rl" },
+            if self.compress { "z" } else { "" }
+        )];
+        words.push(
+            match mode {
+                Mode::DryRun => "--dry-run --itemize-changes -8",
+                Mode::Copy => "--partial --info=progress2 --no-inc-recursive",
+            }
+            .to_owned(),
+        );
+        if self.delete {
+            words.push("--delete".to_owned());
+        }
+        for pattern in self
+            .excludes
+            .iter()
+            .map(|p| p.trim())
+            .filter(|p| !p.is_empty())
+        {
+            words.push(format!("--exclude={}", quote(pattern)));
+        }
+        words.join(" ")
+    }
 }
 
 /// `text` as one word for a Bourne shell: in single quotes, a quote inside as `'\''`.
@@ -37,7 +101,7 @@ pub fn quote(text: &str) -> String {
 /// `set -C`, so an existing file or link is never written through) and removed when the script ends however it
 /// ends; then A's rsync, signing on to B with the agent (`BatchMode`: no password prompt to hang on) and trusting
 /// only that key. Plain Bourne shell, as [`super::check_command`].
-pub fn direct_command(direct: &Direct) -> Result<String, String> {
+pub fn direct_command(direct: &Direct, mode: Mode) -> Result<String, String> {
     let key = direct.target.host_key.trim();
     if key.split_whitespace().count() != 2 {
         return Err("Parley has no host key for the target server: connect to it again".to_owned());
@@ -56,8 +120,9 @@ pub fn direct_command(direct: &Direct) -> Result<String, String> {
     Ok(format!(
         "f=/tmp/parley-known-hosts.$$; (umask 077; set -C; printf '%s\\n' {line} > \"$f\") || exit 1; \
          trap 'rm -f \"$f\"' 0 1 2 15; \
-         {} -az --partial --info=progress2 --no-inc-recursive --protect-args --rsync-path={} -e \"{ssh}\" {} {}",
+         {} {} --protect-args --rsync-path={} -e \"{ssh}\" {} {}",
         quote(&direct.rsync),
+        direct.options.switches(mode),
         quote(&direct.target.rsync),
         quote(&direct.source),
         quote(&to),
@@ -201,12 +266,13 @@ mod tests {
                 rsync: "rsync".into(),
             },
             target_path: "/srv/it's here".into(),
+            options: Options::default(),
         }
     }
 
     #[test]
     fn the_direct_command_trusts_only_bs_key_and_signs_on_with_the_agent_r_ssh_53() {
-        let command = direct_command(&direct()).expect("a command");
+        let command = direct_command(&direct(), Mode::Copy).expect("a command");
         assert_eq!(
             command,
             "f=/tmp/parley-known-hosts.$$; (umask 077; set -C; printf '%s\\n' \
@@ -224,16 +290,43 @@ mod tests {
         let mut d = direct();
         d.target.host = "fe80::1".into();
         assert!(
-            direct_command(&d)
+            direct_command(&d, Mode::Copy)
                 .expect("a command")
                 .ends_with("'niels@[fe80::1]:/srv/it'\\''s here'")
         );
         d.target.host_key = String::new();
-        assert!(direct_command(&d).is_err());
+        assert!(direct_command(&d, Mode::Copy).is_err());
         d.target.host_key = "ssh-ed25519 AAAA'; rm -rf ~; '".into();
         assert!(
-            direct_command(&d).is_err(),
+            direct_command(&d, Mode::Copy).is_err(),
             "a key line with more than two words is not a key"
+        );
+    }
+
+    #[test]
+    fn the_dry_run_and_the_switches_change_only_rsyncs_options_r_ssh_56() {
+        let mut d = direct();
+        let dry = direct_command(&d, Mode::DryRun).expect("a command");
+        assert!(
+            dry.contains(
+                "'/QOpenSys/pkgs/bin/rsync' -az --dry-run --itemize-changes -8 --protect-args"
+            ),
+            "{dry}"
+        );
+        assert!(!dry.contains("--partial"), "a dry run copies nothing");
+        d.options = Options {
+            delete: true,
+            keep: false,
+            compress: false,
+            excludes: vec!["*.log".into(), "  ".into(), " it's/ ".into()],
+        };
+        let copy = direct_command(&d, Mode::Copy).expect("a command");
+        assert!(
+            copy.contains(
+                "rsync' -rl --partial --info=progress2 --no-inc-recursive --delete \
+                 --exclude='*.log' --exclude='it'\\''s/' --protect-args"
+            ),
+            "{copy}"
         );
     }
 

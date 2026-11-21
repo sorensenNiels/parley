@@ -630,6 +630,7 @@ impl ParleySshUi {
             Action::SendSnippet(i) => self.send_snippet(i),
             Action::PickSnippet => self.open_picker(),
             Action::Transfer => self.open_transfer(),
+            Action::RunTransfer(i) => self.run_saved_transfer(ctx, i),
             Action::EditSnippets => {
                 self.settings_dialog =
                     Some(settings::Dialog::open(ctx, &self.settings).on(settings::Page::Snippets));

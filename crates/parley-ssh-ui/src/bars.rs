@@ -55,6 +55,8 @@ pub enum Action {
     ToggleLog,
     /// The Transfer panel (Phase 31, R-SSH-56).
     Transfer,
+    /// Run the saved transfer with this index (R-SSH-56).
+    RunTransfer(usize),
 }
 
 /// What the header shows.

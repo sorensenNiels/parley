@@ -1122,9 +1122,9 @@ fn escape_empties_the_search_and_a_long_list_folds_under_the_favourites_r_ssh_65
 fn ctrl_shift_y_opens_the_transfer_panel_and_close_closes_it_r_ssh_56() {
     let mut h = app(Settings::default());
     h.run_steps(2);
-    assert!(h.query_by_label("Copy").is_none());
+    assert!(h.query_by_label("Copy…").is_none());
     press(&mut h, egui::Key::Y, CTRL_SHIFT);
-    let copy = h.get_by_label("Copy");
+    let copy = h.get_by_label("Copy…");
     assert!(
         copy.accesskit_node().is_disabled(),
         "nothing to copy between without two sessions"
@@ -1133,5 +1133,37 @@ fn ctrl_shift_y_opens_the_transfer_panel_and_close_closes_it_r_ssh_56() {
     h.get_by_label("Close").click();
     h.run_steps(2);
     assert!(h.state().transfer.is_none());
-    assert!(h.query_by_label("Copy").is_none());
+    assert!(h.query_by_label("Copy…").is_none());
+}
+
+#[test]
+fn a_saved_transfer_is_run_from_the_palette_and_a_session_no_longer_saved_is_said_r_ssh_56() {
+    let mut settings = Settings::default();
+    settings.transfers.push(crate::transfer::SavedTransfer {
+        name: "Nightly æøå".into(),
+        source: "gone".into(),
+        target: "also gone".into(),
+        ..crate::transfer::SavedTransfer::default()
+    });
+    let mut h = app(settings);
+    h.run_steps(2);
+    let listed: Vec<(String, String)> = h
+        .state()
+        .palette_items(false)
+        .into_iter()
+        .filter(|i| i.kind == "Transfer")
+        .map(|i| (i.label, i.detail))
+        .collect();
+    assert_eq!(listed, [("Nightly æøå".into(), "gone to also gone".into())]);
+    let ctx = h.ctx.clone();
+    h.state_mut().run_saved_transfer(&ctx, 0);
+    h.run_steps(2);
+    let panel = h.state().transfer.as_ref().expect("the panel is open");
+    assert!(!panel.waiting, "nothing to wait for");
+    assert!(
+        matches!(&panel.outcome, Some(crate::transfer::Outcome::Failed(why)) if why == "No session is saved as gone any more."),
+        "{:?}",
+        panel.outcome
+    );
+    assert_eq!(panel.name, "Nightly æøå");
 }

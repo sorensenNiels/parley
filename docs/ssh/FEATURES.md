@@ -8,6 +8,25 @@
 
 ## In progress
 
+- **R-SSH-56 (the rest), Phase 31 step 3** (2026-11-21, Linux under WSL): Copy… now runs a dry run first
+  (`--dry-run --itemize-changes -8`, with the agent as the copy) and lists what will be added (+), changed (~) and
+  deleted (-, in red, with a warning), counted in full with the first 200 names of each; an up-to-date target says
+  so and copies nothing; Copy (or "Copy and delete N" as a danger button) runs the copy; Cancel ends the dry run at
+  once. The source path's trailing `/` is a choice of "The folder itself" / "What is inside", said in a sentence
+  under the paths. Switches: keep permissions, owner and times (`-a`, else `-rl`; on), compress (on), delete extra
+  files at the target (off), excludes one pattern a line. Saved transfers by name with their sessions' saved names
+  (`Settings::transfers`): chosen from the panel's list, saved and forgotten under it, and run from the palette
+  ("Transfer" items), which opens a session not open yet and starts the dry run once both are connected. The panel
+  is split into `transfer` (the steps), `transfer/view` and `transfer/window`. **Automated**: `transfer::changes::tests`
+  (itemized lines of every kind with `æøå`, a line and a character split between reads, the list's limit),
+  `transfer::run::tests` (the dry run's and the switches' command lines), `transfer::tests` (dry run then confirm;
+  the switches in both commands; an up-to-date target; a failed dry run; cancel in each stage; save, load and old
+  saved transfers without switches; the trailing `/` in words), `tests.rs` (a saved transfer in the palette; one
+  whose session is no longer saved says so). **Seen** (`--screenshot`, dark, the panel opened by a temporary line:
+  the form, switches and Save; the dry run's list only in tests). **To check on the owner's servers**: the dry
+  run's list for a real folder with a change, an addition and (with Delete on) a deletion; an up-to-date target;
+  excludes; saving a transfer and running it from the palette with one session closed.
+
 - **R-SSH-53, R-SSH-56 (first part), Phase 31 step 2** (2026-11-20, Linux under WSL): server to server, direct,
   from the Transfer panel (Session ▸ Transfer files…, the palette, Ctrl+Shift+Y / Cmd+Y): a source and a target
   session with a path each, Copy, progress, Cancel, and the outcome in plain words. Copy checks rsync on both ends,

@@ -138,6 +138,16 @@ impl ParleySshUi {
                 choice: Choice::Action(Action::SendSnippet(i)),
             });
         }
+        for (i, t) in self.settings.transfers.iter().enumerate() {
+            items.push(Item {
+                key: format!("transfer:{}", t.name),
+                kind: "Transfer",
+                label: t.name.clone(),
+                detail: format!("{} to {}", t.source, t.target),
+                shortcut: String::new(),
+                choice: Choice::Action(Action::RunTransfer(i)),
+            });
+        }
         for (action, label, shortcut) in actions(mac) {
             items.push(Item {
                 key: format!("action:{label}"),
@@ -188,7 +198,7 @@ impl ParleySshUi {
     }
 
     /// Connects `source` in the pane in front when it shows a start screen, else in a new tab.
-    fn open_source(&mut self, ctx: &egui::Context, source: SavedSession, saved: bool) {
+    pub(crate) fn open_source(&mut self, ctx: &egui::Context, source: SavedSession, saved: bool) {
         if !self
             .tabs
             .get(self.current)

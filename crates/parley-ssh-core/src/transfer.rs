@@ -3,9 +3,12 @@
 
 use std::fmt;
 
+mod changes;
 mod run;
+pub use changes::{Changes, Listed};
 pub use run::{
-    Direct, Progress, Remote, bytes_text, direct_command, last_progress, outcome, quote,
+    Direct, Mode, Options, Progress, Remote, bytes_text, direct_command, last_progress, outcome,
+    quote,
 };
 
 /// The oldest rsync with `--info=progress2`, which the progress needs (R-SSH-57).
