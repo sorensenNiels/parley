@@ -215,3 +215,19 @@ impl parley_ssh_ui::snippets::SnippetFiles for SnippetFileWindow {
             .map_err(|e| format!("{} could not be read: {e}", path.display()))
     }
 }
+
+/// Desktop paths for Parley SSH's transfers (R-SSH-55), chosen through the system's file window.
+#[derive(Debug)]
+pub struct DesktopFileWindow;
+
+impl parley_ssh_ui::transfer::DesktopFiles for DesktopFileWindow {
+    fn choose(&self, folder: bool) -> Option<String> {
+        let window = rfd::FileDialog::new();
+        let chosen = if folder {
+            window.set_title("Choose a folder").pick_folder()
+        } else {
+            window.set_title("Choose a file").pick_file()
+        };
+        chosen.map(|path| path.display().to_string())
+    }
+}

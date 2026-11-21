@@ -1167,3 +1167,62 @@ fn a_saved_transfer_is_run_from_the_palette_and_a_session_no_longer_saved_is_sai
     );
     assert_eq!(panel.name, "Nightly æøå");
 }
+
+#[test]
+fn the_transfers_page_names_another_rsync_and_its_buttons_stay_put_r_ssh_66() {
+    let mut h = app(Settings::default());
+    h.run_steps(2);
+    h.state_mut()
+        .carry_out(&egui::Context::default(), Action::Settings);
+    h.run_steps(3);
+    let before = h.get_by_label("Save").rect();
+    h.get_by_label("Transfers").click();
+    h.run_steps(2);
+    h.get_by_label("rsync").click();
+    h.run_steps(1);
+    h.get_by_label("rsync").type_text("/opt/æøå/rsync");
+    h.run_steps(3);
+    assert_eq!(h.state().settings.transfer_rsync, "/opt/æøå/rsync");
+    assert_eq!(
+        h.get_by_label("Save").rect(),
+        before,
+        "the dialog keeps its size"
+    );
+}
+
+/// Chooses files for the panel without a window: always the same folder.
+struct ChosenFolder;
+
+impl crate::transfer::DesktopFiles for ChosenFolder {
+    fn choose(&self, folder: bool) -> Option<String> {
+        folder.then(|| "/home/niels/æøå".to_owned())
+    }
+}
+
+#[test]
+fn this_computer_as_an_end_takes_a_path_chosen_with_the_file_window_r_ssh_55() {
+    let mut h = app(Settings::default());
+    h.run_steps(2);
+    h.state_mut().set_desktop_files(Box::new(ChosenFolder));
+    press(&mut h, egui::Key::Y, CTRL_SHIFT);
+    if let Some(panel) = &mut h.state_mut().transfer {
+        panel.target = Some(crate::transfer::DESKTOP);
+    }
+    h.run_steps(2);
+    assert!(
+        h.query_by_label("Folder…").is_some(),
+        "the file window for this computer's path"
+    );
+    h.get_by_label("Folder…").click();
+    h.run_steps(2);
+    let panel = h.state().transfer.as_ref().expect("the panel");
+    assert_eq!(
+        panel.target_path, "/home/niels/æøå/",
+        "a folder's contents go into it"
+    );
+    assert_eq!(
+        h.query_all_by_label("Folder…").count(),
+        1,
+        "only this computer's end has it"
+    );
+}

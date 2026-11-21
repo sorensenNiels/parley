@@ -34,6 +34,38 @@ pub enum Command {
     },
     Version,
     Help,
+    /// rsync's remote shell for a desktop transfer (R-SSH-55): `--relay PORT TOKEN [-l USER] HOST COMMAND...`,
+    /// given by the running window in rsync's `-e`; not for people, so not in the usage text.
+    Relay {
+        port: u16,
+        token: String,
+        command: String,
+    },
+}
+
+/// Reads the relay's arguments after `--relay`.
+fn relay(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
+    let port = args
+        .next()
+        .and_then(|p| p.parse::<u16>().ok())
+        .filter(|p| *p > 0)
+        .ok_or("--relay needs the window's port")?;
+    let token = args.next().ok_or("--relay needs a token")?;
+    // The host names nothing: the window knows the session by the token. rsync names a user before it when the
+    // path has one; the session's own user is used anyway.
+    if args.next().ok_or("--relay needs a host")? == "-l" {
+        args.next();
+        args.next().ok_or("--relay needs a host")?;
+    }
+    let words: Vec<String> = args.collect();
+    if words.is_empty() {
+        return Err("--relay needs a command to run".to_owned());
+    }
+    Ok(Command::Relay {
+        port,
+        token,
+        command: parley_ssh_core::net::pipe::command_of(&words),
+    })
 }
 
 /// Reads `parley-ssh`'s arguments (without the program's name).
@@ -43,7 +75,11 @@ pub enum Command {
 pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> {
     let mut request = StartRequest::default();
     let mut screenshot = None;
-    let mut args = args.into_iter();
+    let mut args = args.into_iter().peekable();
+    if args.peek().is_some_and(|a| a == "--relay") {
+        args.next();
+        return relay(args);
+    }
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("'{arg}' needs a value"));
         match arg.as_str() {
@@ -133,6 +169,39 @@ mod tests {
             Command::Run { request, .. } => Ok(request),
             other => Err(format!("{other:?}")),
         }
+    }
+
+    #[test]
+    fn rsyncs_remote_shell_call_is_read_as_the_relay_r_ssh_55() {
+        let args = |a: &[&str]| parse(a.iter().map(|s| (*s).to_owned()));
+        assert_eq!(
+            args(&[
+                "--relay",
+                "40123",
+                "abcd",
+                "parley",
+                "rsync",
+                "--server",
+                "-logDtprze.iLsfxCIvu",
+                ".",
+                "æøå"
+            ]),
+            Ok(Command::Relay {
+                port: 40123,
+                token: "abcd".into(),
+                command: "rsync --server -logDtprze.iLsfxCIvu . æøå".into(),
+            })
+        );
+        assert!(matches!(
+            args(&["--relay", "1", "t", "-l", "niels", "parley", "rsync"]),
+            Ok(Command::Relay { command, .. }) if command == "rsync"
+        ));
+        assert!(args(&["--relay", "0", "t", "h", "rsync"]).is_err());
+        assert!(args(&["--relay", "1", "t", "h"]).is_err(), "no command");
+        assert!(
+            matches!(args(&["host", "--relay"]), Ok(Command::Run { .. }) | Err(_)),
+            "only first is it the relay"
+        );
     }
 
     #[test]

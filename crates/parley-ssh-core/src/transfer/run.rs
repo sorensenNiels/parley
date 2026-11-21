@@ -65,30 +65,39 @@ pub enum Mode {
 impl Options {
     /// rsync's switches for these options in `mode`, each one word for the shell.
     fn switches(&self, mode: Mode) -> String {
+        self.words(mode)
+            .into_iter()
+            .map(|word| match word.strip_prefix("--exclude=") {
+                Some(pattern) => format!("--exclude={}", quote(pattern)),
+                None => word,
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// rsync's switches for these options in `mode`, one argument each, unquoted.
+    pub(super) fn words(&self, mode: Mode) -> Vec<String> {
         let mut words = vec![format!(
             "-{}{}",
             if self.keep { "a" } else { "rl" },
             if self.compress { "z" } else { "" }
         )];
-        words.push(
-            match mode {
-                Mode::DryRun => "--dry-run --itemize-changes -8",
-                Mode::Copy => "--partial --info=progress2 --no-inc-recursive",
-            }
-            .to_owned(),
-        );
+        let for_mode: &[&str] = match mode {
+            Mode::DryRun => &["--dry-run", "--itemize-changes", "-8"],
+            Mode::Copy => &["--partial", "--info=progress2", "--no-inc-recursive"],
+        };
+        words.extend(for_mode.iter().map(|w| (*w).to_owned()));
         if self.delete {
             words.push("--delete".to_owned());
         }
-        for pattern in self
-            .excludes
-            .iter()
-            .map(|p| p.trim())
-            .filter(|p| !p.is_empty())
-        {
-            words.push(format!("--exclude={}", quote(pattern)));
-        }
-        words.join(" ")
+        words.extend(
+            self.excludes
+                .iter()
+                .map(|p| p.trim())
+                .filter(|p| !p.is_empty())
+                .map(|p| format!("--exclude={p}")),
+        );
+        words
     }
 }
 

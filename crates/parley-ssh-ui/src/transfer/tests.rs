@@ -484,3 +484,157 @@ fn a_source_that_cannot_forward_or_reach_the_target_is_said_r_ssh_54() {
     p.start(end(1, "a"), end(2, "b"));
     assert!(!p.offer_through, "a new run forgets the offer");
 }
+
+fn setup() -> Setup {
+    Setup {
+        rsync: "/usr/bin/rsync".into(),
+        program: "/opt/Parley SSH/parley-ssh".into(),
+        port: 40_123,
+    }
+}
+
+/// Starts a desktop transfer between `source` and `target` and answers both checks; the orders that follow.
+fn desktop_checked(p: &mut Panel, source: End, target: End) -> Vec<Order> {
+    p.setup = setup();
+    let orders = p.start(source, target);
+    let mut checks = Vec::new();
+    for order in &orders {
+        match order {
+            Order::Spawn(id, argv) => {
+                assert_eq!(
+                    argv,
+                    &["/usr/bin/rsync", "--version"],
+                    "the desktop's own rsync"
+                );
+                checks.push((DESKTOP, *id, "rsync  version 3.4.1  protocol version 32\n"));
+            }
+            Order::Exec(pane, exec) => checks.push((*pane, exec.id, RSYNC)),
+            other => panic!("a check: {other:?}"),
+        }
+    }
+    assert_eq!(checks.len(), 2, "{orders:?}");
+    let mut next = Vec::new();
+    for (pane, id, answer) in checks {
+        p.feed(pane, out(id, answer));
+        next = p.feed(pane, ended(id, JobEnding::Exited(0)));
+    }
+    next
+}
+
+/// The `-e` program's token in `argv`.
+fn token_of(argv: &[String]) -> String {
+    let at = argv.iter().position(|a| a == "-e").expect("-e");
+    argv[at + 1].rsplit(' ').next().expect("a token").to_owned()
+}
+
+#[test]
+fn a_desktop_upload_runs_rsync_here_with_the_relay_as_its_remote_shell_r_ssh_55() {
+    let mut p = panel();
+    p.source = Some(DESKTOP);
+    let orders = desktop_checked(&mut p, End::desktop(), end(2, "b"));
+    let [Order::Spawn(dry, argv)] = orders.as_slice() else {
+        panic!("the dry run here: {orders:?}")
+    };
+    assert_eq!(argv[0], "/usr/bin/rsync");
+    assert!(argv.contains(&"--dry-run".to_owned()), "{argv:?}");
+    assert!(
+        argv.contains(&"--rsync-path='rsync'".to_owned()),
+        "the server's rsync: {argv:?}"
+    );
+    let token = token_of(argv);
+    assert_eq!(token.len(), 32);
+    let at = argv.iter().position(|a| a == "-e").expect("-e");
+    assert_eq!(
+        argv[at + 1],
+        format!("'/opt/Parley SSH/parley-ssh' --relay 40123 {token}")
+    );
+    assert_eq!(argv[argv.len() - 2..], ["/data/æøå/", "parley:/backup"]);
+
+    assert_eq!(p.pipe("not the token"), None);
+    let Some((2, pipe_job)) = p.pipe(&token) else {
+        panic!("the relay's command runs on the server's connection")
+    };
+    assert_eq!(p.pipe(&token), None, "a token is good once");
+    let dry = *dry;
+    p.feed(
+        2,
+        out(dry, "<f+++++++++ from the server's pane, not counted\n"),
+    );
+    p.feed(DESKTOP, out(dry, LISTED));
+    p.feed(DESKTOP, ended(dry, JobEnding::Exited(0)));
+    let orders = p.confirm();
+    let [Order::Spawn(copy, argv)] = orders.as_slice() else {
+        panic!("the copy here: {orders:?}")
+    };
+    assert!(argv.contains(&"--info=progress2".to_owned()));
+    let second = token_of(argv);
+    assert_ne!(second, token, "a new token for the copy");
+    assert_eq!(p.pipe(&token), None);
+    let Some((2, copy_pipe)) = p.pipe(&second) else {
+        panic!("the copy's relay")
+    };
+    assert_ne!(copy_pipe, pipe_job);
+    assert_eq!(
+        p.cancel(),
+        [Order::End(2, copy_pipe)],
+        "ended at the server, so rsync here keeps its partial files"
+    );
+    p.feed(DESKTOP, ended(*copy, JobEnding::Exited(12)));
+    assert_eq!(p.outcome, Some(Outcome::Cancelled));
+}
+
+#[test]
+fn a_desktop_download_takes_the_servers_path_first_r_ssh_55() {
+    let mut p = panel();
+    p.target = Some(DESKTOP);
+    p.target_path = "/home/niels/hentet/".into();
+    let orders = desktop_checked(&mut p, end(1, "a"), End::desktop());
+    let [Order::Spawn(dry, argv)] = orders.as_slice() else {
+        panic!("the dry run here: {orders:?}")
+    };
+    assert_eq!(
+        argv[argv.len() - 2..],
+        ["parley:/data/æøå/", "/home/niels/hentet/"]
+    );
+    // Cancelled before the relay came: rsync here is ended.
+    assert_eq!(p.cancel(), [Order::End(DESKTOP, *dry)]);
+    assert!(!p.running());
+}
+
+#[test]
+fn no_rsync_here_or_no_relay_port_is_said_before_anything_is_copied_r_ssh_55() {
+    let mut p = panel();
+    p.setup = setup();
+    let orders = p.start(End::desktop(), end(2, "b"));
+    let Some(Order::Spawn(id, _)) = orders.first() else {
+        panic!("the desktop's check: {orders:?}")
+    };
+    let id = *id;
+    p.feed(
+        DESKTOP,
+        ended(
+            id,
+            JobEnding::Refused("/usr/bin/rsync could not be started".into()),
+        ),
+    );
+    let Some(Order::Exec(2, check)) = orders.get(1) else {
+        panic!("the server's check")
+    };
+    p.feed(2, out(check.id, RSYNC));
+    assert_eq!(p.feed(2, ended(check.id, JobEnding::Exited(0))), NONE);
+    assert!(
+        matches!(&p.outcome, Some(Outcome::Failed(why)) if why.starts_with("this computer has no rsync")),
+        "{:?}",
+        p.outcome
+    );
+
+    p.setup.port = 0;
+    assert_eq!(p.start(End::desktop(), end(2, "b")), NONE);
+    assert!(matches!(&p.outcome, Some(Outcome::Failed(why)) if why.contains("could not listen")));
+    p.setup = setup();
+    assert_eq!(
+        p.start(End::desktop(), End::desktop()),
+        NONE,
+        "this computer twice"
+    );
+}

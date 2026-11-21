@@ -35,7 +35,9 @@ make package      # installers for this OS in target/packages/
 ```
 
 `make package` builds the optimised app and packages it: `.deb` and `.AppImage` on Linux, `.msi` on Windows,
-`.dmg` on macOS. An installer can only be built on its own OS.
+`.dmg` on macOS. An installer can only be built on its own OS. On macOS it first builds rsync for Parley SSH from
+its pinned source (`scripts/build-rsync.sh`, R-SSH-66), which needs Xcode's command-line tools; Parley SSH's
+`.deb` depends on the distribution's `rsync` instead.
 
 ## Make a release
 

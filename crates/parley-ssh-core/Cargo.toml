@@ -25,6 +25,8 @@ sha1 = "0.11"
 data-encoding = "2"
 # Passwords wiped from memory when dropped (R-SSH-4); russh uses it too.
 zeroize = "1"
+# The one-time tokens of desktop transfers' relay (R-SSH-55).
+getrandom.workspace = true
 
 [dev-dependencies]
 # The in-process SSH server of tests/net.rs runs on its own runtime.

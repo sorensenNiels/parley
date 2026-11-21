@@ -80,6 +80,9 @@ pub struct Settings {
     pub all_sessions_open: bool,
     /// Transfers kept by name (R-SSH-56).
     pub transfers: Vec<crate::transfer::SavedTransfer>,
+    /// Another rsync for transfers on this computer than the one that comes with Parley SSH (R-SSH-66); empty for
+    /// that one, or the one on the `PATH`.
+    pub transfer_rsync: String,
 }
 
 /// What the host's bell does (R-SSH-19, D46).
@@ -129,6 +132,7 @@ impl Default for Settings {
             bell: BellStyle::Flash,
             all_sessions_open: false,
             transfers: Vec::new(),
+            transfer_rsync: String::new(),
         }
     }
 }
@@ -182,6 +186,7 @@ pub enum Page {
     Appearance,
     Terminal,
     Snippets,
+    Transfers,
     About,
 }
 
@@ -191,6 +196,7 @@ impl SettingsPage for Page {
             Self::Appearance => "Appearance",
             Self::Terminal => "Terminal",
             Self::Snippets => "Snippets",
+            Self::Transfers => "Transfers",
             Self::About => "About",
         }
     }
@@ -199,7 +205,12 @@ impl SettingsPage for Page {
 const SECTIONS: Sections<Page> = &[
     (
         "General",
-        &[Page::Appearance, Page::Terminal, Page::Snippets],
+        &[
+            Page::Appearance,
+            Page::Terminal,
+            Page::Snippets,
+            Page::Transfers,
+        ],
     ),
     ("App", &[Page::About]),
 ];
@@ -231,6 +242,7 @@ impl Page {
             }
             // The snippets are the user's own: Restore defaults leaves them.
             Self::Snippets => {}
+            Self::Transfers => settings.transfer_rsync = defaults.transfer_rsync,
             Self::About => settings.check_for_updates = defaults.check_for_updates,
         }
     }
@@ -305,6 +317,7 @@ impl Dialog {
             }
             Page::Terminal => terminal_page(ui, settings),
             Page::Snippets => self.snippets.show(ui, &mut settings.snippets, files),
+            Page::Transfers => transfers_page(ui, settings),
             Page::About => self.about.show(
                 ui,
                 Program::ParleySsh,
@@ -322,6 +335,27 @@ impl Dialog {
             }
         }
     }
+}
+
+/// Settings ▸ Transfers (R-SSH-66): which rsync copies to and from this computer.
+fn transfers_page(ui: &mut Ui, settings: &mut Settings) {
+    group(ui, "This computer", None, |rows| {
+        rows.row(
+            "rsync",
+            Some(
+                "Empty: the rsync that comes with Parley SSH, or on Linux the one installed. Name another to use \
+                 it instead (3.1 or later).",
+            ),
+            |ui, name| {
+                parley_ui_egui::theme::sized_edit(
+                    ui,
+                    260.0,
+                    egui::TextEdit::singleline(&mut settings.transfer_rsync).hint_text("/usr/local/bin/rsync"),
+                )
+                .labelled_by(name);
+            },
+        );
+    });
 }
 
 fn terminal_page(ui: &mut Ui, settings: &mut Settings) {

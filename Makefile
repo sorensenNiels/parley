@@ -175,6 +175,9 @@ package: release helper
 ifneq ($(PACKAGE_FORMATS_$(PLATFORM)),)
 	cargo packager -p $(APP) --release -f $(PACKAGE_FORMATS_$(PLATFORM))
 endif
+ifeq ($(PLATFORM),macos)
+	bash scripts/build-rsync.sh target/rsync
+endif
 ifneq ($(PACKAGE_SPLIT_$(PLATFORM)),)
 	bash scripts/package-split.sh $(PACKAGE_SPLIT_$(PLATFORM))
 endif

@@ -374,6 +374,18 @@ impl server::Handler for Server {
         Ok(())
     }
 
+    /// The client has sent all a side channel's input: a program reading it to its end ends (R-SSH-55).
+    async fn channel_eof(
+        &mut self,
+        channel: ChannelId,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        session.exit_status_request(channel, 0)?;
+        session.eof(channel)?;
+        session.close(channel)?;
+        Ok(())
+    }
+
     async fn window_change_request(
         &mut self,
         _channel: ChannelId,
@@ -413,6 +425,8 @@ fn side_job(
     match command {
         // Runs until the client ends it.
         "sleep forever" => Ok(true),
+        // As rsync's server side, nothing said first; the input comes back (R-SSH-55).
+        c if c.starts_with("rsync --server") => Ok(true),
         // As a program on the server would: ask the forwarded agent for its keys, and say how many.
         "agent keys" => {
             let handle = session.handle();
@@ -1543,4 +1557,66 @@ fn a_server_that_does_not_forward_says_so_in_plain_words_r_ssh_54() {
     a.send(Command::Forward { id: JobId(2), door });
     let refused = forwarded(&a, JobId(2)).expect_err("refused");
     assert!(refused.contains("AllowTcpForwarding"), "{refused}");
+}
+
+/// Both ends of a loopback connection: what the relay would hold, and what the window hands the connection.
+fn socket_pair() -> (std::net::TcpStream, std::net::TcpStream) {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let relay =
+        std::net::TcpStream::connect(listener.local_addr().expect("address")).expect("connect");
+    let (window, _) = listener.accept().expect("accept");
+    (relay, window)
+}
+
+#[test]
+fn a_pipe_carries_a_relays_data_through_an_exec_channel_and_back_r_ssh_55() {
+    use std::io::{Read, Write};
+    let (connection, terminal) = started("pipe", Options::default());
+    let (mut relay, window) = socket_pair();
+    connection.send(Command::Pipe {
+        id: JobId(5),
+        command: "rsync --server -logDtprze.iLsfxCIvu . /tmp".into(),
+        stream: window,
+    });
+    relay.write_all("hej æøå".as_bytes()).expect("written");
+    relay
+        .shutdown(std::net::Shutdown::Write)
+        .expect("half closed");
+    relay
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .expect("timeout");
+    let mut back = Vec::new();
+    relay.read_to_end(&mut back).expect("read to the end");
+    assert_eq!(
+        String::from_utf8_lossy(&back),
+        "hej æøå",
+        "the test server echoes it"
+    );
+    let (out, _, ending) = job(&connection, JobId(5));
+    assert_eq!(out, "", "the data went to the relay, not the UI");
+    assert_eq!(ending, JobEnding::Exited(0));
+    let screen = screen_text(&terminal);
+    assert!(!screen.contains("hej"), "nor onto the screen: {screen}");
+}
+
+#[test]
+fn ending_a_pipe_closes_the_relays_connection_r_ssh_55() {
+    use std::io::Read;
+    let (connection, _) = started("pipe-end", Options::default());
+    let (mut relay, window) = socket_pair();
+    connection.send(Command::Pipe {
+        id: JobId(6),
+        command: "sleep forever".into(),
+        stream: window,
+    });
+    // The channel is open once the command runs: a short wait, then the end.
+    std::thread::sleep(Duration::from_millis(200));
+    connection.send(Command::EndJob(JobId(6)));
+    assert_eq!(job(&connection, JobId(6)).2, JobEnding::Stopped);
+    relay
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .expect("timeout");
+    let mut rest = Vec::new();
+    relay.read_to_end(&mut rest).expect("closed, not timed out");
+    assert_eq!(rest, Vec::<u8>::new());
 }

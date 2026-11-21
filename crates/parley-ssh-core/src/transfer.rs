@@ -4,8 +4,10 @@
 use std::fmt;
 
 mod changes;
+mod desktop;
 mod run;
 pub use changes::{Changes, Listed};
+pub use desktop::{Desktop, desktop_args, msys_path};
 pub use run::{
     Direct, Mode, Options, Progress, Remote, bytes_text, direct_command, last_progress, outcome,
     quote, unreachable,
@@ -61,6 +63,15 @@ pub enum Check {
     Missing,
     /// Something answered that Parley cannot read: its first line.
     Unknown(String),
+}
+
+/// Reads the answer of the desktop's rsync at `path` to `--version`: its exit status and what it printed; `None`
+/// for both when it could not be started (R-SSH-55, R-SSH-66).
+pub fn check_desktop(path: &str, answer: Option<(Option<u32>, &str)>) -> Check {
+    match answer {
+        None => Check::Missing,
+        Some((exit_status, output)) => check(exit_status, &format!("{output}\n{FOUND} {path}\n")),
+    }
 }
 
 /// Reads the answer to [`check_command`]: its exit status and what it printed.
@@ -245,6 +256,22 @@ mod tests {
         assert!(matches!(
             check(Some(0), &found("rsync  version x.y  protocol", "rsync")),
             Check::Unknown(_)
+        ));
+    }
+
+    #[test]
+    fn the_desktops_rsync_is_checked_as_a_servers_r_ssh_55() {
+        assert!(matches!(
+            check_desktop("rsync", Some((Some(0), "rsync  version 3.4.1  protocol version 32\n"))),
+            Check::Usable { path, .. } if path == "rsync"
+        ));
+        assert_eq!(check_desktop("/x/rsync", None), Check::Missing);
+        assert!(matches!(
+            check_desktop(
+                "/usr/bin/rsync",
+                Some((Some(0), "openrsync: protocol version 29\n"))
+            ),
+            Check::Openrsync { .. }
         ));
     }
 

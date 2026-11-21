@@ -2,15 +2,53 @@
 //! and what the panel asks the sessions to do.
 
 use egui::Ui;
+use parley_ssh_core::net::pipe::PipeServer;
 use parley_ssh_core::net::{Command, Event};
 
-use super::{End, Order, Panel, Request, view::Choice};
+use super::local::Locals;
+use super::{DESKTOP, DesktopFiles, End, Order, Panel, Request, view::Choice};
 use crate::ParleySshUi;
 use crate::panes::PaneId;
 use crate::session::Session;
 
 /// The panel's width.
 const WIDTH: f32 = 340.0;
+
+/// The desktop's side of transfers (R-SSH-55): its programs, the relays' port, and the file window.
+#[derive(Default)]
+pub struct Io {
+    locals: Locals,
+    pipes: Option<PipeServer>,
+    pub(crate) files: Option<Box<dyn DesktopFiles>>,
+}
+
+impl std::fmt::Debug for Io {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Io")
+            .field("locals", &self.locals)
+            .field("pipes", &self.pipes)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The rsync that came with Parley SSH (R-SSH-66): beside the program, or in a macOS app's Resources; else the one
+/// on the `PATH`.
+fn bundled_rsync() -> String {
+    let name = if cfg!(windows) { "rsync.exe" } else { "rsync" };
+    let Ok(exe) = std::env::current_exe() else {
+        return "rsync".to_owned();
+    };
+    let beside = exe.with_file_name(name);
+    let resources = exe
+        .parent()
+        .and_then(std::path::Path::parent)
+        .map(|contents| contents.join("Resources").join(name));
+    [Some(beside), resources]
+        .into_iter()
+        .flatten()
+        .find(|path| path.is_file())
+        .map_or_else(|| "rsync".to_owned(), |path| path.display().to_string())
+}
 
 impl ParleySshUi {
     /// Opens the Transfer panel, with the session in front as the source.
@@ -61,6 +99,10 @@ impl ParleySshUi {
 
     /// The pane of the open session saved as `name`, connected ones first, else a new one connecting to it.
     fn pane_for(&mut self, ctx: &egui::Context, name: &str) -> Result<PaneId, String> {
+        // A saved transfer names the desktop with no name (R-SSH-55).
+        if name.is_empty() {
+            return Ok(DESKTOP);
+        }
         let open: Vec<(PaneId, bool)> = self
             .tabs
             .iter()
@@ -87,6 +129,9 @@ impl ParleySshUi {
 
     /// The saved name of the session in `pane`.
     fn saved_name(&self, pane: Option<PaneId>) -> Option<String> {
+        if pane == Some(DESKTOP) {
+            return Some(String::new());
+        }
         self.session_in(pane?)
             .filter(|s| s.saved)
             .map(|s| s.source.name.clone())
@@ -104,11 +149,41 @@ impl ParleySshUi {
                 }
             }
         }
+        news.extend(
+            self.transfer_io
+                .locals
+                .take()
+                .into_iter()
+                .map(|e| (DESKTOP, e)),
+        );
+        sessions.insert(0, (DESKTOP, "This computer".to_owned(), true));
+        let piped = self
+            .transfer_io
+            .pipes
+            .as_ref()
+            .map(PipeServer::take)
+            .unwrap_or_default();
+        let can_choose = self.transfer_io.files.is_some();
         let Some(panel) = &mut self.transfer else {
             return;
         };
+        panel.can_choose = can_choose;
         let mut orders = Vec::new();
         let mut forwards = Vec::new();
+        // A relay with the token waited for runs its command on the server's connection; any other is closed by
+        // being dropped (R-SSH-55).
+        for relay in piped {
+            if let Some((pane, id)) = panel.pipe(&relay.token) {
+                forwards.push((
+                    pane,
+                    Command::Pipe {
+                        id,
+                        command: relay.command,
+                        stream: relay.stream,
+                    },
+                ));
+            }
+        }
         for (pane, event) in news {
             match event {
                 // The target's way in goes to the source's connection, which the panel names (R-SSH-54).
@@ -143,7 +218,38 @@ impl ParleySshUi {
                 session.send_job(command);
             }
         }
-        self.carry_orders(orders);
+        self.carry_orders(ui.ctx(), orders);
+    }
+
+    /// Readies the desktop's side for a run: the rsync to use, Parley SSH as its remote shell, and the relays'
+    /// port, listened on from the first desktop transfer on.
+    fn prepare_desktop(&mut self, ctx: &egui::Context) -> Result<(), String> {
+        if self.transfer_io.pipes.is_none() {
+            let ctx = ctx.clone();
+            let server = PipeServer::start(move || ctx.request_repaint()).map_err(|e| {
+                format!("Parley SSH could not listen for this computer's rsync: {e}")
+            })?;
+            self.transfer_io.pipes = Some(server);
+        }
+        let named = self.settings.transfer_rsync.trim();
+        let rsync = if named.is_empty() {
+            bundled_rsync()
+        } else {
+            named.to_owned()
+        };
+        let program = std::env::current_exe()
+            .map_err(|e| format!("Parley SSH could not find its own program: {e}"))?
+            .display()
+            .to_string();
+        let port = self.transfer_io.pipes.as_ref().map_or(0, PipeServer::port);
+        if let Some(panel) = &mut self.transfer {
+            panel.setup = super::Setup {
+                rsync,
+                program,
+                port,
+            };
+        }
+        Ok(())
     }
 
     /// Does what the panel asked; the orders for the sessions that follow.
@@ -157,8 +263,18 @@ impl ParleySshUi {
                     return Vec::new();
                 };
                 let (source, target) = (panel.source, panel.target);
-                let end = |pane: Option<PaneId>| {
-                    pane.and_then(|p| self.session_in(p).map(|s| End::of(p, s)))
+                if (source == Some(DESKTOP) || target == Some(DESKTOP))
+                    && let Err(why) = self.prepare_desktop(ctx)
+                {
+                    if let Some(panel) = &mut self.transfer {
+                        panel.outcome = Some(super::Outcome::Failed(why));
+                    }
+                    return Vec::new();
+                }
+                let end = |pane: Option<PaneId>| match pane {
+                    Some(DESKTOP) => Some(End::desktop()),
+                    Some(p) => self.session_in(p).map(|s| End::of(p, s)),
+                    None => None,
                 };
                 match ((end(source), end(target)), &mut self.transfer) {
                     ((Some(a), Some(b)), Some(panel)) => panel.start(a, b),
@@ -196,6 +312,26 @@ impl ParleySshUi {
             }
             Request::Save => {
                 self.save_transfer();
+                Vec::new()
+            }
+            Request::Choose { target, folder } => {
+                let chosen = self
+                    .transfer_io
+                    .files
+                    .as_ref()
+                    .and_then(|files| files.choose(folder));
+                if let (Some(path), Some(panel)) = (chosen, &mut self.transfer) {
+                    let path = if folder && !path.ends_with(['/', '\\']) {
+                        format!("{path}/")
+                    } else {
+                        path
+                    };
+                    if target {
+                        panel.target_path = path;
+                    } else {
+                        panel.source_path = path;
+                    }
+                }
                 Vec::new()
             }
             Request::Forget(i) => {
@@ -236,9 +372,20 @@ impl ParleySshUi {
         }
     }
 
-    fn carry_orders(&self, orders: Vec<Order>) {
+    fn carry_orders(&mut self, ctx: &egui::Context, orders: Vec<Order>) {
         for order in orders {
             let (pane, command) = match order {
+                Order::Spawn(id, argv) => {
+                    let ctx = ctx.clone();
+                    self.transfer_io
+                        .locals
+                        .spawn(id, &argv, move || ctx.request_repaint());
+                    continue;
+                }
+                Order::End(DESKTOP, id) => {
+                    self.transfer_io.locals.end(id);
+                    continue;
+                }
                 Order::Exec(pane, exec) => (pane, Command::Exec(exec)),
                 Order::End(pane, id) => (pane, Command::EndJob(id)),
                 Order::OpenDoor(pane, id) => (pane, Command::OpenDoor(id)),

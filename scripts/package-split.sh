@@ -6,7 +6,8 @@
 # Windows' .msi and the AppImage still come from `[package.metadata.packager]` in crates/parley-app/Cargo.toml.
 #
 # Usage: scripts/package-split.sh deb|dmg [TARGET_TRIPLE]
-# Needs the release binaries (`cargo build -p parley-app --release [--target …]`) and target/helpers (`make helper`).
+# Needs the release binaries (`cargo build -p parley-app --release [--target …]`), target/helpers (`make helper`)
+# and, for dmg, target/rsync (`scripts/build-rsync.sh target/rsync TARGET_TRIPLE`).
 set -euo pipefail
 
 format=${1:?"usage: $0 deb|dmg [TARGET_TRIPLE]"}
@@ -32,15 +33,26 @@ helper='{"src": "'"$root"'/target/helpers/parley-sql.jar", "target": "helpers/pa
   {"src": "'"$root"'/target/helpers/jt400.jar", "target": "helpers/jt400.jar"},
   {"src": "'"$root"'/helpers/sql/NOTICE.txt", "target": "helpers/NOTICE.txt"},
   {"src": "'"$root"'/helpers/sql/JTOpen-LICENSE.html", "target": "helpers/JTOpen-LICENSE.html"}'
+# rsync for Parley SSH (R-SSH-66, D58): on macOS the one scripts/build-rsync.sh built into target/rsync, with its
+# licence and where its source is; on Linux the distribution's, as a dependency of the package.
+rsync=""
+ssh_depends=""
+case $format in
+  dmg) rsync='{"src": "'"$root"'/target/rsync/rsync", "target": "rsync"},
+  {"src": "'"$root"'/target/rsync/rsync-COPYING.txt", "target": "rsync-COPYING.txt"},
+  {"src": "'"$root"'/target/rsync/rsync-SOURCE.txt", "target": "rsync-SOURCE.txt"}' ;;
+  deb) ssh_depends='"rsync"' ;;
+esac
 icons=$(printf '"%s/icons/%s", ' "$app" 32.png 64.png 128.png 256.png 512.png)
 triple=""
 [ -z "$target" ] || triple="\"targetTriple\": \"$target\","
 
 # The .deb's dependencies: X11 keyboard and OpenGL/EGL are loaded at run time by the window library, fontconfig to
 # list the installed fonts, GTK 3 by the file windows (R-KEY-7).
-# One program's config: its binary, package name, product name, identifier, description and extra resources.
+# One program's config: its binary, package name, product name, identifier, description, extra resources and extra
+# dependencies of its .deb.
 config() {
-  local binary=$1 package=$2 product=$3 identifier=$4 description=$5 long=$6 extra=${7:-}
+  local binary=$1 package=$2 product=$3 identifier=$4 description=$5 long=$6 extra=${7:-} depends=${8:-}
   cat <<EOF
 {
   "name": "parley-app",
@@ -63,7 +75,7 @@ config() {
     "packageName": "$package",
     "section": "net",
     "desktopTemplate": "$app/linux/$binary.desktop",
-    "depends": ["libgtk-3-0", "libasound2", "libxkbcommon-x11-0", "libegl1", "libgl1", "libfontconfig1"]
+    "depends": ["libgtk-3-0", "libasound2", "libxkbcommon-x11-0", "libegl1", "libgl1", "libfontconfig1"${depends:+, $depends}]
   },
   "macos": {"minimumSystemVersion": "11.0"}
 }
@@ -76,7 +88,8 @@ $(config parley parley-5250 "Parley 5250" dk.softdesign.parley "A TN5250 termina
 $(config parley-sql parley-sql "Parley SQL" dk.softdesign.parley-sql "SQL for IBM i (needs Java 11 or later)" \
   "Parley SQL runs SQL on IBM i: an editor with completion, results, the schema browser and data transfer, through IBM's JTOpen." "$helper"),
 $(config parley-ssh parley-ssh "Parley SSH" dk.softdesign.parley-ssh "An SSH client" \
-  "Parley SSH is an SSH client with tabs and split panes, saved sessions, snippets and the hosts of ~/.ssh/config.")
+  "Parley SSH is an SSH client with tabs and split panes, saved sessions, snippets and the hosts of ~/.ssh/config." \
+  "$rsync" "$ssh_depends")
 ]"
 
 [ "$format" = deb ] || rm -rf "$staging"

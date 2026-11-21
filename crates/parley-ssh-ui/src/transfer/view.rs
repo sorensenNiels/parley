@@ -5,7 +5,7 @@ use egui::{ComboBox, ProgressBar, ScrollArea, TextEdit, Ui};
 use parley_ssh_core::transfer::{self, Changes, Listed};
 use parley_ui_egui::theme;
 
-use super::{Outcome, PaneId, Panel, Request, Route, SavedTransfer, Stage, copies_text};
+use super::{DESKTOP, Outcome, PaneId, Panel, Request, Route, SavedTransfer, Stage, copies_text};
 
 /// A session to choose: its pane, its name, and whether it is connected.
 pub type Choice = (PaneId, String, bool);
@@ -82,14 +82,19 @@ impl Panel {
                 });
             ui.add_space(4.0);
         }
-        end_row(
+        let can_choose = self.can_choose;
+        if let Some(folder) = end_row(
             ui,
-            "From",
-            "transfer-source",
+            ("From", "transfer-source", can_choose),
             &mut self.source,
             &mut self.source_path,
             sessions,
-        );
+        ) {
+            request = Some(Request::Choose {
+                target: false,
+                folder,
+            });
+        }
         let path = self.source_path.trim();
         if path.len() > 1 {
             let mut what = if path.ends_with('/') {
@@ -113,18 +118,28 @@ impl Panel {
             }
         }
         ui.add_space(4.0);
-        end_row(
+        if let Some(folder) = end_row(
             ui,
-            "To",
-            "transfer-target",
+            ("To", "transfer-target", can_choose),
             &mut self.target,
             &mut self.target_path,
             sessions,
-        );
+        ) {
+            request = Some(Request::Choose {
+                target: true,
+                folder,
+            });
+        }
         if !self.source_path.trim().is_empty() {
             theme::hint(ui, copies_text(&self.source_path, &self.target_path));
         }
         ui.add_space(6.0);
+        self.options(ui);
+        request
+    }
+
+    /// rsync's switches, the way to go, and what that way means.
+    fn options(&mut self, ui: &mut Ui) {
         theme::section_label(ui, "Options");
         theme::switch_row(
             ui,
@@ -137,14 +152,17 @@ impl Panel {
             "Delete extra files at the target",
             &mut self.switches.delete,
         );
-        theme::segmented(
-            ui,
-            &mut self.switches.route,
-            &[
-                (Route::Straight, "Straight"),
-                (Route::Through, "Through Parley SSH"),
-            ],
-        );
+        let desktop = self.source == Some(DESKTOP) || self.target == Some(DESKTOP);
+        if !desktop {
+            theme::segmented(
+                ui,
+                &mut self.switches.route,
+                &[
+                    (Route::Straight, "Straight"),
+                    (Route::Through, "Through Parley SSH"),
+                ],
+            );
+        }
         ui.label("Leave out (one pattern a line)");
         ui.add(
             TextEdit::multiline(&mut self.switches.excludes)
@@ -154,7 +172,10 @@ impl Panel {
         );
         theme::hint(
             ui,
-            if self.switches.route == Route::Through {
+            if desktop {
+                "rsync on this computer copies to or from the server through the session's open connection: \
+                 nothing signs on again, and no agent is needed."
+            } else if self.switches.route == Route::Through {
                 "rsync on the first server reaches the second through this computer, for servers that cannot reach \
                  each other: slower, as every byte passes through here. It signs on to the second with your agent \
                  while the transfer runs; the first server's administrator could use the agent meanwhile. A target \
@@ -165,7 +186,6 @@ impl Panel {
                  through a jump host goes through Parley SSH."
             },
         );
-        request
     }
 
     /// The button that starts, the run as it goes, and how the last one ended.
@@ -282,15 +302,15 @@ fn waiting(ui: &mut Ui, text: &str) {
     });
 }
 
-/// A session to choose and its path.
+/// A session (or this computer) to choose and its path; on this computer, whether a file (`false`) or a folder
+/// (`true`) is to be chosen with the file window.
 fn end_row(
     ui: &mut Ui,
-    label: &str,
-    id: &str,
+    (label, id, can_choose): (&str, &str, bool),
     pane: &mut Option<PaneId>,
     path: &mut String,
     sessions: &[Choice],
-) {
+) -> Option<bool> {
     ui.label(theme::semibold(label));
     let shown = match pane.and_then(|p| sessions.iter().find(|(id, _, _)| *id == p)) {
         Some((_, name, true)) => name.clone(),
@@ -305,11 +325,29 @@ fn end_row(
                 ui.selectable_value(pane, Some(*p), name);
             }
         });
+    let here = *pane == Some(DESKTOP);
+    let mut chosen = None;
     ui.add(
         TextEdit::singleline(path)
-            .hint_text("/path/on/the/server")
+            .hint_text(if here {
+                "A path on this computer"
+            } else {
+                "/path/on/the/server"
+            })
             .desired_width(f32::INFINITY),
     );
+    if here && can_choose {
+        theme::button_row(ui, |ui| {
+            // Right to left: Folder… ends the row.
+            if ui.add(theme::ghost_button("Folder…")).clicked() {
+                chosen = Some(true);
+            }
+            if ui.add(theme::ghost_button("File…")).clicked() {
+                chosen = Some(false);
+            }
+        });
+    }
+    chosen
 }
 
 /// The dry run's list: how many of each, and their names.

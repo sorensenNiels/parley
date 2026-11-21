@@ -6,6 +6,7 @@ pub mod agent;
 mod client;
 mod jobs;
 pub mod jump;
+pub mod pipe;
 mod public_key;
 mod relay;
 mod sign_on;
@@ -151,6 +152,13 @@ pub enum Command {
     },
     /// Stops the forwarding of [`Command::Forward`].
     Unforward(JobId),
+    /// Runs `command` for a desktop transfer, its data to and from the relay's `stream` (R-SSH-55, [`pipe`]); its
+    /// end is [`Event::JobEnded`], and [`Command::EndJob`] ends it.
+    Pipe {
+        id: JobId,
+        command: String,
+        stream: std::net::TcpStream,
+    },
     Disconnect,
 }
 
@@ -499,6 +507,7 @@ async fn session(
                 Some(Command::OpenDoor(id)) => link.send(Event::Door { id, door: relay::Door::new(id, Arc::clone(&handle), target.port) }),
                 Some(Command::Forward { id, door }) => doors.forward(&handle, id, door, link).await,
                 Some(Command::Unforward(id)) => doors.unforward(&handle, id).await,
+                Some(Command::Pipe { id, command, stream }) => side.pipe(&handle, (id, command, stream), link).await,
                 Some(Command::HostKey(_) | Command::Answers(_)) => {}
             },
         }

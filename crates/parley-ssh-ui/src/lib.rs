@@ -21,7 +21,7 @@ pub mod settings;
 pub mod snippets;
 mod start;
 mod tabs;
-mod transfer;
+pub mod transfer;
 mod window;
 mod window_keys;
 
@@ -112,6 +112,8 @@ pub struct ParleySshUi {
     close_confirmed: bool,
     /// Export and import of snippets through the system's file window (R-SSH-49).
     snippet_files: Option<Box<dyn snippets::SnippetFiles>>,
+    /// The desktop's side of transfers (R-SSH-55).
+    transfer_io: transfer::Io,
     picker: Option<snippets::Picker>,
     /// A snippet's placeholders being asked for.
     fill: Option<snippets::Fill>,
@@ -162,6 +164,7 @@ impl ParleySshUi {
             closing: None,
             close_confirmed: false,
             snippet_files: None,
+            transfer_io: transfer::Io::default(),
             picker: None,
             fill: None,
             broadcast_all: false,
@@ -225,6 +228,11 @@ impl ParleySshUi {
     /// Export and import of snippets (R-SSH-49).
     pub fn set_snippet_files(&mut self, files: Box<dyn snippets::SnippetFiles>) {
         self.snippet_files = Some(files);
+    }
+
+    /// Lets the Transfer panel choose desktop paths with the system's file window (R-SSH-55).
+    pub fn set_desktop_files(&mut self, files: Box<dyn transfer::DesktopFiles>) {
+        self.transfer_io.files = Some(files);
     }
 
     pub fn settings(&self) -> &Settings {

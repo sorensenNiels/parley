@@ -70,6 +70,25 @@ fn main() -> eframe::Result {
             println!("{}", ssh_start::USAGE);
             return Ok(());
         }
+        Ok(Command::Relay {
+            port,
+            token,
+            command,
+        }) => {
+            // stdout is rsync's: only errors are said, on stderr.
+            let carried = parley_ssh_core::net::pipe::relay(
+                port,
+                &token,
+                &command,
+                std::io::stdin(),
+                std::io::stdout().lock(),
+            );
+            if let Err(e) = carried {
+                eprintln!("parley-ssh: the relay to the Parley SSH window failed: {e}");
+                std::process::exit(255);
+            }
+            return Ok(());
+        }
         Err(e) => {
             eprintln!("parley-ssh: {e}\n\n{}", ssh_start::USAGE);
             std::process::exit(2);
@@ -103,6 +122,7 @@ fn main() -> eframe::Result {
             ui.set_update_checker(parley_app::update_checker());
             ui.set_spawner(std::sync::Arc::new(ssh_start::spawn));
             ui.set_snippet_files(Box::new(parley_app::helpers::SnippetFileWindow));
+            ui.set_desktop_files(Box::new(parley_app::helpers::DesktopFileWindow));
             ui.set_notifier(std::sync::Arc::new(notify));
             ui.set_beeper(std::sync::Arc::new(parley_app::beep::beep));
             // The hosts of ~/.ssh/config (R-SSH-42); none without a home folder.

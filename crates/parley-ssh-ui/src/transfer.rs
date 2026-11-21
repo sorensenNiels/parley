@@ -11,8 +11,13 @@ use serde::{Deserialize, Serialize};
 use crate::panes::PaneId;
 use crate::session::Session;
 
+mod desktop;
+mod local;
 mod view;
 mod window;
+
+pub use desktop::{DESKTOP, DesktopFiles, Setup};
+pub use window::Io;
 
 /// The most of a job's output kept: enough for rsync's last progress line and its last error lines.
 const KEPT: usize = 4096;
@@ -114,6 +119,9 @@ pub enum Order {
     OpenDoor(PaneId, JobId),
     /// Stop the source's forwarding.
     Unforward(PaneId, JobId),
+    /// Run a program on the desktop as job `JobId`: its name, then its arguments (R-SSH-55); its output and end
+    /// come back as the jobs' of [`DESKTOP`], and [`Order::End`] with [`DESKTOP`] ends it.
+    Spawn(JobId, Vec<String>),
 }
 
 /// A job's output so far, kept short.
@@ -177,6 +185,11 @@ struct Run {
     rsync: (String, String),
     /// The source's forwarding while the copy goes through Parley SSH, to stop when the run ends.
     relay: Option<JobId>,
+    /// Where rsync runs: the source, or the desktop when one end is the desktop.
+    runner: PaneId,
+    /// A copy between the desktop and a server, and the relay it waits for (R-SSH-55).
+    desktop: Option<transfer::Desktop>,
+    pipe: Option<desktop::Pipe>,
     stage: Stage,
 }
 
@@ -202,6 +215,10 @@ pub struct Panel {
     pub waiting: bool,
     /// The source could not reach the target: offer to go through Parley SSH (R-SSH-54).
     pub offer_through: bool,
+    /// The desktop's rsync and the relay, set by the window (R-SSH-55).
+    pub setup: Setup,
+    /// The launcher can show the file window for desktop paths.
+    pub can_choose: bool,
     run: Option<Run>,
     pub outcome: Option<Outcome>,
     next_job: u64,
@@ -223,6 +240,11 @@ pub enum Request {
     Forget(usize),
     /// Copy again through Parley SSH.
     TryThrough,
+    /// Choose the source's or the target's desktop path with the file window: a file, or a folder.
+    Choose {
+        target: bool,
+        folder: bool,
+    },
 }
 
 /// How a job that did not end well ended, in plain words; `err` is what it wrote to stderr.
@@ -289,10 +311,13 @@ impl Panel {
         self.outcome = None;
         self.waiting = false;
         self.offer_through = false;
+        let desktop = source.pane == DESKTOP || target.pane == DESKTOP;
         let problem = if source.pane == target.pane {
-            Some("Choose two different sessions.".to_owned())
+            Some("Choose two different ends.".to_owned())
         } else if self.source_path.trim().is_empty() || self.target_path.trim().is_empty() {
-            Some("Give a path on both servers.".to_owned())
+            Some("Give a path at both ends.".to_owned())
+        } else if desktop && self.setup.port == 0 {
+            Some("Parley SSH could not listen for this computer's rsync.".to_owned())
         } else {
             None
         };
@@ -301,15 +326,23 @@ impl Panel {
             return Vec::new();
         }
         let (a, b) = (self.job(), self.job());
-        let check = |id| Exec {
-            id,
-            command: transfer::check_command(),
-            agent: false,
+        let rsync = self.setup.rsync.clone();
+        let check = |pane, id| {
+            if pane == DESKTOP {
+                Order::Spawn(id, vec![rsync.clone(), "--version".to_owned()])
+            } else {
+                Order::Exec(
+                    pane,
+                    Exec {
+                        id,
+                        command: transfer::check_command(),
+                        agent: false,
+                    },
+                )
+            }
         };
-        let orders = vec![
-            Order::Exec(source.pane, check(a)),
-            Order::Exec(target.pane, check(b)),
-        ];
+        let orders = vec![check(source.pane, a), check(target.pane, b)];
+        let runner = source.pane;
         self.run = Some(Run {
             source,
             target,
@@ -317,6 +350,9 @@ impl Panel {
             target_path: self.target_path.trim().to_owned(),
             rsync: (String::new(), String::new()),
             relay: None,
+            runner,
+            desktop: None,
+            pipe: None,
             stage: Stage::Checking {
                 source: (a, Output::default(), None),
                 target: (b, Output::default(), None),
@@ -329,11 +365,15 @@ impl Panel {
     pub fn confirm(&mut self) -> Vec<Order> {
         let Some(Run {
             stage: Stage::Review { copy, .. },
+            desktop,
             ..
         }) = &mut self.run
         else {
             return Vec::new();
         };
+        if desktop.is_some() {
+            return self.confirm_desktop();
+        }
         let command = std::mem::take(copy);
         let job = self.job();
         let Some(run) = &mut self.run else {
@@ -346,7 +386,7 @@ impl Panel {
             cancelled: false,
         };
         vec![Order::Exec(
-            run.source.pane,
+            run.runner,
             Exec {
                 id: job,
                 command,
@@ -371,14 +411,22 @@ impl Panel {
             ),
             Stage::Relaying { .. } => (Vec::new(), Some(Outcome::Cancelled)),
             // A dry run changes nothing, so it need not be waited for.
-            Stage::Looking { job, .. } => (
-                vec![Order::End(run.source.pane, *job)],
-                Some(Outcome::Cancelled),
-            ),
+            Stage::Looking { job, .. } => {
+                let mut orders = vec![Order::End(run.runner, *job)];
+                orders.extend(desktop::end_pipe(run.pipe.as_ref()));
+                (orders, Some(Outcome::Cancelled))
+            }
             Stage::Review { .. } => (Vec::new(), None),
             Stage::Copying { job, cancelled, .. } => {
                 *cancelled = true;
-                return vec![Order::End(run.source.pane, *job)];
+                // A desktop copy ends at the server, so that rsync on the desktop stops by itself and keeps its
+                // partial files (R-SSH-55); before its relay has come, the desktop's rsync is ended.
+                let at_server = desktop::end_pipe(run.pipe.as_ref());
+                return if at_server.is_empty() {
+                    vec![Order::End(run.runner, *job)]
+                } else {
+                    at_server
+                };
             }
         };
         orders.extend(self.end(outcome));
@@ -442,6 +490,9 @@ impl Panel {
             return Vec::new();
         };
         let from_source = pane == run.source.pane;
+        let from_runner = pane == run.runner;
+        let desktop_ends = [run.source.pane == DESKTOP, run.target.pane == DESKTOP];
+        let desktop_rsync = self.setup.rsync.clone();
         match (&mut run.stage, event) {
             (Stage::Relaying { job }, Event::Forwarded { id, port })
                 if *job == id && from_source =>
@@ -463,13 +514,22 @@ impl Panel {
                 Vec::new()
             }
             (Stage::Checking { source, target }, Event::JobEnded { id, ending }) => {
-                for (job, output, check) in [&mut *source, &mut *target] {
+                for ((job, output, check), on_desktop) in
+                    [&mut *source, &mut *target].into_iter().zip(desktop_ends)
+                {
                     if *job == id {
                         let status = match ending {
                             JobEnding::Exited(n) => Some(n),
                             _ => None,
                         };
-                        *check = Some(transfer::check(status, &output.out));
+                        *check = Some(if on_desktop {
+                            // Refused: the desktop's rsync could not be started at all.
+                            let answer = (!matches!(ending, JobEnding::Refused(_)))
+                                .then_some((status, output.out.as_str()));
+                            transfer::check_desktop(&desktop_rsync, answer)
+                        } else {
+                            transfer::check(status, &output.out)
+                        });
                     }
                 }
                 let (Some(a), Some(b)) = (source.2.clone(), target.2.clone()) else {
@@ -485,7 +545,7 @@ impl Panel {
                     ..
                 },
                 Event::JobOutput { id, stream, data },
-            ) if *job == id && from_source => {
+            ) if *job == id && from_runner => {
                 match stream {
                     Stream::Out => changes.push(&data),
                     Stream::Err => output.push(stream, &data),
@@ -493,7 +553,7 @@ impl Panel {
                 Vec::new()
             }
             (Stage::Looking { job, .. }, Event::JobEnded { id, ending })
-                if *job == id && from_source =>
+                if *job == id && from_runner =>
             {
                 self.looked(&ending)
             }
@@ -505,7 +565,7 @@ impl Panel {
                     ..
                 },
                 Event::JobOutput { id, stream, data },
-            ) if *job == id && from_source => {
+            ) if *job == id && from_runner => {
                 output.push(stream, &data);
                 if let Some(now) = transfer::last_progress(&output.out) {
                     *progress = Some(now);
@@ -513,7 +573,7 @@ impl Panel {
                 Vec::new()
             }
             (Stage::Copying { job, .. }, Event::JobEnded { id, ending })
-                if *job == id && from_source =>
+                if *job == id && from_runner =>
             {
                 self.copied(&ending)
             }
@@ -600,6 +660,9 @@ impl Panel {
             return self.end(Some(Outcome::Failed(problems.join("\n"))));
         };
         run.rsync = (rsync_a.clone(), rsync_b.clone());
+        if run.source.pane == DESKTOP || run.target.pane == DESKTOP {
+            return self.look_desktop();
+        }
         if self.switches.route == Route::Through || run.target.through_jump {
             run.stage = Stage::Relaying { job };
             return vec![Order::OpenDoor(run.target.pane, job)];
@@ -640,7 +703,7 @@ impl Panel {
             copy,
         };
         vec![Order::Exec(
-            run.source.pane,
+            run.runner,
             Exec {
                 id: job,
                 command: dry,

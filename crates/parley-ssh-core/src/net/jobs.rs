@@ -111,6 +111,51 @@ impl Jobs {
         }
     }
 
+    /// Runs `command` on a channel whose data goes to and from `stream` (a desktop transfer's relay, R-SSH-55)
+    /// rather than to the UI; the job's end is said as any job's.
+    pub(super) async fn pipe(
+        &mut self,
+        handle: &ssh::Handle<client::Client>,
+        (id, command, stream): (JobId, String, std::net::TcpStream),
+        link: &Link,
+    ) {
+        self.0.retain(|_, stop| !stop.is_closed());
+        let opened = async {
+            stream
+                .set_nonblocking(true)
+                .map_err(|e| format!("The relay's connection cannot be used: {e}"))?;
+            let socket = tokio::net::TcpStream::from_std(stream)
+                .map_err(|e| format!("The relay's connection cannot be used: {e}"))?;
+            let channel = handle
+                .channel_open_session()
+                .await
+                .map_err(|e| format!("The server refused a second channel: {e}"))?;
+            channel
+                .exec(true, command.as_bytes())
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok::<_, String>((channel, socket))
+        };
+        match opened.await {
+            Ok((channel, socket)) => {
+                link.log(format!(
+                    "Running on the server for this computer's rsync: {command}"
+                ));
+                let (stop, mut stopped) = unbounded_channel();
+                self.0.insert(id, stop);
+                let link = link.clone();
+                tokio::spawn(async move {
+                    let ending = bridge(channel, socket, &mut stopped).await;
+                    link.send(Event::JobEnded { id, ending });
+                });
+            }
+            Err(reason) => link.send(Event::JobEnded {
+                id,
+                ending: JobEnding::Refused(reason),
+            }),
+        }
+    }
+
     /// Ends a job; one that already ended is no longer there, which is harmless.
     pub(super) fn end(&mut self, id: JobId) {
         if let Some(stop) = self.0.remove(&id) {
@@ -190,6 +235,65 @@ async fn carry(
                 if stop.is_some() {
                     // Not every server takes signals (OpenSSH does since 7.9); closing ends the command anyway, as
                     // a hang-up. russh forgets a channel it closes, so the server's answer is not waited for.
+                    let _ = channel.signal(russh::Sig::TERM).await;
+                    let _ = channel.close().await;
+                    return JobEnding::Stopped;
+                }
+            },
+        }
+    }
+}
+
+/// Carries a channel's data to and from a relay's socket until the channel closes or the UI ends the job; the
+/// socket is closed then, which ends rsync on the desktop.
+async fn bridge(
+    mut channel: russh::Channel<ssh::Msg>,
+    mut socket: tokio::net::TcpStream,
+    stopped: &mut tokio::sync::mpsc::UnboundedReceiver<()>,
+) -> JobEnding {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut ending = JobEnding::Closed;
+    let mut reading = true;
+    let mut listening = true;
+    let mut buffer = vec![0u8; 32 * 1024];
+    loop {
+        tokio::select! {
+            message = channel.wait() => match message {
+                Some(ChannelMsg::Data { data }) => {
+                    if socket.write_all(&data).await.is_err() {
+                        // rsync on the desktop has gone: so has the reason to go on.
+                        let _ = channel.close().await;
+                        return ending;
+                    }
+                }
+                Some(ChannelMsg::Eof) => {
+                    // Nothing more for rsync on the desktop to read; a failure means it has gone already.
+                    let _ = socket.shutdown().await;
+                }
+                Some(ChannelMsg::Failure) => return JobEnding::Refused("The server refused to run rsync".to_owned()),
+                Some(ChannelMsg::ExitStatus { exit_status }) => ending = JobEnding::Exited(exit_status),
+                Some(ChannelMsg::ExitSignal { signal_name, .. }) => ending = JobEnding::Signal(format!("{signal_name:?}")),
+                Some(ChannelMsg::Close) | None => return ending,
+                // Among the rest, the server's rsync's errors (extended data): the desktop's rsync says what went
+                // wrong itself.
+                Some(_) => {}
+            },
+            read = socket.read(&mut buffer), if reading => match read {
+                Ok(0) | Err(_) => {
+                    reading = false;
+                    // rsync on the desktop has said all; the server's rsync sees the end of its input.
+                    let _ = channel.eof().await;
+                }
+                Ok(n) => {
+                    if channel.data(&buffer[..n]).await.is_err() {
+                        return ending;
+                    }
+                }
+            },
+            stop = stopped.recv(), if listening => {
+                listening = false;
+                if stop.is_some() {
+                    // As `carry`: russh forgets a channel it closes, so its answer is not waited for.
                     let _ = channel.signal(russh::Sig::TERM).await;
                     let _ = channel.close().await;
                     return JobEnding::Stopped;

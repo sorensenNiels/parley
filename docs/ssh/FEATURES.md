@@ -8,6 +8,36 @@
 
 ## In progress
 
+- **R-SSH-55 and part of R-SSH-66, Phase 31 step 5** (2026-11-21, Linux under WSL): copies between this computer
+  and a server. "This computer" is a choice for either end of the Transfer panel, with File… and Folder… buttons
+  (the launcher's file window, `DesktopFiles`). rsync runs here (`transfer/local`) with `-e "parley-ssh --relay
+  PORT TOKEN"`; the relay (`net/pipe`, `parley-ssh --relay`) connects back to the window on a loopback port with a
+  one-time token (128 random bits, new for the dry run and for the copy, compared in constant time) and the command,
+  and the window runs that command on an exec channel of the session's open connection (`Command::Pipe`), so
+  nothing signs on again and no agent is needed. Cancel ends the job at the server, so rsync here stops by itself
+  and keeps its partial files. Windows paths go to rsync as MSYS2's (`/c/Users/…`). A saved transfer names this
+  computer with an empty name. Settings ▸ Transfers names another rsync; otherwise the one that came with Parley SSH
+  (beside the program, or in the Mac app's Resources), else the one on the `PATH`. **R-SSH-66 so far**:
+  `scripts/build-rsync.sh` builds rsync 3.4.1 from its pinned source (SHA-256 checked; the tarball's signature by
+  Andrew Tridgell checked when pinned) with its own zlib and popt, with `rsync-COPYING.txt` (GPLv3) and
+  `rsync-SOURCE.txt`; the release workflow and `make package` run it on macOS and the Parley SSH app carries it;
+  the Parley SSH `.deb` depends on `rsync`. **Not yet**: rsync for the Windows installer (MSYS2's rsync and its
+  DLLs), and the About page naming the bundled rsync with its version. **Automated**: `net::pipe::tests` (tokens; a
+  relay's token, command and data both ways; data right after the header kept; no window, a silent relay),
+  `tests/net.rs` (a pipe carries a relay's data through an exec channel and back, not to the UI or the screen; ending
+  it closes the relay's connection), `transfer::desktop::tests` in the core (the desktop's rsync arguments both ways,
+  the relay's words through rsync's `-e` splitting, Windows paths), `transfer::tests::the_desktops_rsync_is_checked…`,
+  `ssh_start` (the relay's command line), the panel's `transfer::tests` (upload: the checks, the dry run here, the
+  relay's token good once and new for the copy, Cancel at the server; download; no rsync here; no relay port; this
+  computer twice), `transfer::local::tests` (output and exit status, a missing program, an ended one), `tests.rs`
+  (the Transfers page; this computer's path from the file window). **Run for real** (Linux under WSL): rsync 3.4.1
+  through `parley-ssh --relay` with a stand-in for the window running `rsync --server` locally: a dry run, a copy
+  up and a copy back, with `æøå` and a quote in the paths and an exclude. Two bugs found that way and fixed: the
+  relay's stdout was line-buffered (rsync hung), and the header reader could swallow rsync's first bytes.
+  `scripts/build-rsync.sh` built and ran on Linux; not yet run on macOS. **To check**: a copy up and down with a
+  real server in the app on Linux, macOS and Windows; the release workflow's macOS jobs (run by hand) and the app's
+  bundled rsync.
+
 - **R-SSH-54, the engine part of R-SSH-31, Phase 31 step 4** (2026-11-21, Linux under WSL): server to server
   through Parley SSH. `net/relay.rs`: `Command::OpenDoor` hands out a `Door` (the target connection's handle, now
   kept in an `Arc`, and its SSH port); `Command::Forward` asks the source to listen on `127.0.0.1:0`

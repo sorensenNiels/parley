@@ -94,6 +94,11 @@ jobs:
         shell: bash
         run: bash scripts/build-helper.sh target/helpers
 
+      - name: rsync for Parley SSH (R-SSH-66)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash scripts/build-rsync.sh target/rsync ${{ matrix.target }}
+
       - name: Package
         shell: bash
         env:
