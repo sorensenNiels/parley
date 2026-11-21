@@ -39,6 +39,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_screen_is_saved_as_html_or_text_as_its_name_ends_r_ui_39() {
+        let dir = crate::macros::tests::TempDir::new("screens");
+        std::fs::create_dir_all(&dir.0).expect("a folder");
+        let html = dir.0.join("Skærm.HTML");
+        let text = dir.0.join("Skærm.txt");
+        write_screen(&html, "æøå\n", "<pre>æøå</pre>").expect("written");
+        write_screen(&text, "æøå\n", "<pre>æøå</pre>").expect("written");
+        assert_eq!(
+            std::fs::read_to_string(html).expect("read"),
+            "<pre>æøå</pre>"
+        );
+        assert_eq!(std::fs::read_to_string(text).expect("read"), "æøå\n");
+        assert!(write_screen(&dir.0.join("missing").join("x.txt"), "", "").is_err());
+    }
+
+    #[test]
     fn the_override_comes_first_and_a_development_build_comes_last_r_sql_13() {
         let exe = Path::new("/repo/target/debug/parley");
         let list = candidates(
@@ -230,4 +246,36 @@ impl parley_ssh_ui::transfer::DesktopFiles for DesktopFileWindow {
         };
         chosen.map(|path| path.display().to_string())
     }
+}
+
+/// The history's Save… (R-UI-39): the system's file window, and the screen written as text or HTML as the
+/// name chosen ends.
+#[derive(Debug)]
+pub struct ScreenFileWindow;
+
+impl parley_ui_egui::ScreenFiles for ScreenFileWindow {
+    /// The file window blocks the frame while it is open, as the macros' do: GTK and macOS want it on the UI
+    /// thread.
+    fn save(&self, suggested: &str, text: &str, html: &str) -> Result<Option<String>, String> {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Save screen")
+            .add_filter("Text", &["txt"])
+            .add_filter("HTML", &["html", "htm"])
+            .set_file_name(format!("{suggested}.txt"))
+            .save_file()
+        else {
+            return Ok(None);
+        };
+        write_screen(&path, text, html)?;
+        Ok(Some(path.display().to_string()))
+    }
+}
+
+/// Writes `text`, or `html` for a name ending in `.html` or `.htm`, to `path`.
+fn write_screen(path: &Path, text: &str, html: &str) -> Result<(), String> {
+    let contents = match parley_ui_egui::screen_format_of(path) {
+        parley_ui_egui::ScreenFormat::Html => html,
+        parley_ui_egui::ScreenFormat::Text => text,
+    };
+    std::fs::write(path, contents).map_err(|e| e.to_string())
 }

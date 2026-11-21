@@ -8,11 +8,16 @@ mod cursor;
 mod find;
 mod gui;
 mod history;
+mod save;
 mod windows;
 
 pub use colors::{COLORS, CustomColors, Palette, Scheme};
 pub use cursor::CursorShape;
-pub use history::{HistoryAction, HistoryStatus, bar as history_bar};
+pub use history::{HistoryAction, HistoryStatus, Place as HistoryPlace, bar as history_bar};
+pub use save::{
+    HtmlLook, NoScreenFiles, ScreenFiles, ScreenFormat, format_of as screen_format_of, screen_html,
+    screen_text,
+};
 
 pub use find::{
     FIELD as FIND_FIELD, FindAction, FindBar, bar as find_bar,

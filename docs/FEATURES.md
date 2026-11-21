@@ -21,7 +21,17 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
   and looks the same; on a whole session (`tests/session.rs`) the sign-on screen is kept with the cursor's place, a
   write that leaves the keyboard locked keeps nothing and its unlock keeps the screen with "æøå"; a typed password
   is in the live screen but in no kept screen; the history and its limit go over to the session that replaces it.
-  **Still to build**: saving and the setting (R-UI-39).
+  The setting (R-UI-39) is given to the session in front each frame.
+
+- **R-UI-39** (step 3 of Phase 42 built 2026-11-21, Linux under WSL; D61): the history bar's Save… and Settings ▸
+  Terminal ▸ Screens kept. **Automated** (`make test`): `parley-ui-egui`'s `terminal/save.rs` (text has every row with
+  its trailing blanks cut, "æøå" kept; HTML is one file with the title escaped, the font, reverse image as a
+  background in the scheme's colours, a column-separator field marked, a line per row, no script; `.html`/`.htm`
+  ask for HTML, anything else for text), `terminal/history.rs` (kittest: the bar's Save…), `lib.rs` (kittest: the
+  Terminal page shows Screens kept at 50; settings saved before it read as 50), `parley-app`'s `helpers.rs` (the
+  file is written as HTML or text as its name ends, a missing folder is an error). **To check in the running app**:
+  the file window on Linux, Windows and macOS, both files opened (the HTML in a browser, in a dark and a light
+  scheme), the status bar saying where the file went, and lowering Screens kept dropping the oldest at once.
 
 - **R-UI-38** (step 2 of Phase 42 built 2026-11-21, Linux under WSL; D61): the history view. Screen history is in the
   Edit menu beside Find (Parley has no View menu). **Automated** (`make test`): `parley-ui-egui`'s

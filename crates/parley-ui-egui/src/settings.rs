@@ -55,6 +55,8 @@ pub struct Settings {
     pub type_ahead: bool,
     /// The host's windows are drawn with frames (R-UI-26).
     pub window_frames: bool,
+    /// How many screens each session keeps for the history view (R-UI-39).
+    pub screens_kept: usize,
     /// What a line break does when pasting (R-KEY-12).
     pub paste_breaks: crate::keymap::PasteBreaks,
     /// The cursor's shape, and whether it blinks (R-UI-28).
@@ -95,6 +97,7 @@ impl Default for Settings {
             blinking_text: true,
             type_ahead: false,
             window_frames: true,
+            screens_kept: parley_core::session::SCREENS_KEPT,
             paste_breaks: crate::keymap::PasteBreaks::default(),
             cursor: terminal::CursorShape::default(),
             cursor_blink: false,
@@ -168,6 +171,7 @@ impl Page {
                 settings.blinking_text = defaults.blinking_text;
                 settings.type_ahead = defaults.type_ahead;
                 settings.window_frames = defaults.window_frames;
+                settings.screens_kept = defaults.screens_kept;
                 settings.cursor = defaults.cursor;
                 settings.paste_breaks = defaults.paste_breaks;
                 settings.cursor_blink = defaults.cursor_blink;
@@ -429,6 +433,17 @@ impl Dialog {
                 "Type-ahead",
                 Some("Keys typed while the IBM i works (X SYSTEM) are kept and typed when it is done."),
                 &mut settings.type_ahead,
+            );
+            rows.row(
+                "Screens kept",
+                Some("For the screen history (Ctrl+Page Up), in memory while the session's tab is open."),
+                |ui, name| {
+                    ui.add(
+                        egui::DragValue::new(&mut settings.screens_kept)
+                            .range(parley_core::session::SCREENS_KEPT_RANGE),
+                    )
+                    .labelled_by(name);
+                },
             );
             rows.full_row(|ui| {
                 let palette =

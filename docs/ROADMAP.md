@@ -46,7 +46,7 @@ modern take on what surrounds the screen: sessions, keyboard mapping, copy and p
 | [Phase 40: more sessions at once](phases/phase-40-more-sessions-at-once.md) | Done (2026-11-17), checked by the owner: duplicate (R-UI-30), session groups (R-UI-31, R-UI-32), tabs (R-UI-33) and where more sessions open (R-UI-34), D53. |
 | Phases 26–39: SSH | Parley SSH's phases: [ssh/ROADMAP.md](ssh/ROADMAP.md). |
 | Phase 22: GUI elements (beta) | In progress (resumed 2026-11-20, D57): R-DS-10 windows, R-DS-11 selection fields and the mouse, R-DS-12 scroll bars, Write Data and mouse buttons built and tested behind a session switch (D38) ([FEATURES.md](FEATURES.md)); to be checked in the running app, then kept as a beta switch with no further work unless a user asks (D60). |
-| Phase 42: screen history | Planned in detail 2026-11-21 (D60, D61): R-UI-37..39; next to build. |
+| Phase 42: screen history | Built 2026-11-21 (D60, D61): R-UI-37..39, all three steps; the owner's checks in the running app are open (docs/FEATURES.md). |
 
 ## 4. Phases
 

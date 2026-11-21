@@ -46,6 +46,7 @@ use sessions::{Editor, Outcome};
 pub use settings::MoreSessions;
 pub use settings::{Settings, Theme};
 pub use tabs::{NewWindow, OpenWindow};
+pub use terminal::{ScreenFiles, ScreenFormat, screen_format_of};
 pub use theme::Density;
 pub use updates::Checker;
 
@@ -144,6 +145,8 @@ pub struct ParleyUi {
     /// Closing is decided: the next close request goes through.
     exit_confirmed: bool,
     macros: Macros,
+    /// Where the history's Save… writes a screen (R-UI-39).
+    screen_files: Box<dyn terminal::ScreenFiles>,
     /// Naming a finished recording (R-KEY-3).
     save_macro: Option<macros::SaveDialog>,
     /// Asking for the password a running macro needs (R-KEY-4).
@@ -204,6 +207,7 @@ impl ParleyUi {
             asking_to_exit: false,
             exit_confirmed: false,
             macros: Macros::new(Box::new(NoMacroStore)),
+            screen_files: Box::new(terminal::NoScreenFiles),
             save_macro: None,
             macro_password: None,
             macro_manager: None,
@@ -218,6 +222,11 @@ impl ParleyUi {
             window_opener: None,
             groups_dialog: None,
         }
+    }
+
+    /// Where the history's Save… writes a screen: the system's file window (R-UI-39).
+    pub fn set_screen_files(&mut self, files: Box<dyn terminal::ScreenFiles>) {
+        self.screen_files = files;
     }
 
     /// Where macros are kept (R-KEY-3). Without one, a recording cannot be saved. The folder
@@ -540,6 +549,7 @@ impl ParleyUi {
         self.view.cursor_blink = self.settings.cursor_blink;
         if let Some(session) = session.as_deref_mut() {
             session.set_type_ahead(self.settings.type_ahead);
+            session.set_screens_kept(self.settings.screens_kept);
         }
         if session
             .as_deref_mut()
@@ -632,9 +642,40 @@ impl ParleyUi {
             }
             Some(terminal::HistoryAction::Forward) => self.view.history_forward(session),
             Some(terminal::HistoryAction::Live) => self.view.back_to_live(),
+            Some(terminal::HistoryAction::Save) => self.save_screen(session, &place),
             None => return,
         }
         self.focus_terminal = true;
+    }
+
+    /// Saves the history's screen as text or HTML where the operator chooses (R-UI-39); the status bar says
+    /// where it went, or why not.
+    fn save_screen(&mut self, session: &parley_core::Session, place: &terminal::HistoryPlace) {
+        let name = self
+            .current
+            .as_ref()
+            .map_or("Parley 5250", |p| p.name.as_str());
+        let time = place.time();
+        let title = format!("{name} – {time}");
+        let (screen, code_page) = (self.view.shown(session), session.code_page());
+        let text = terminal::screen_text(screen, code_page);
+        let html = terminal::screen_html(
+            screen,
+            code_page,
+            &terminal::HtmlLook {
+                palette: &self.view.palette,
+                font: &self.settings.terminal_font,
+                blinking: self.settings.blinking_text,
+                title: &title,
+            },
+        );
+        let suggested = format!("{name} {}", time.replace(':', "-"))
+            .replace(['/', '\\', '<', '>', '"', '|', '?', '*'], "_");
+        match self.screen_files.save(&suggested, &text, &html) {
+            Ok(Some(path)) => self.warning = Some(format!("The screen was saved to {path}.")),
+            Ok(None) => {}
+            Err(e) => self.warning = Some(format!("The screen could not be saved: {e}")),
+        }
     }
 
     /// The session's screen, or the start screen without one; returns the functions the
@@ -2074,6 +2115,24 @@ mod tests {
         harness.get_by_label("Save").click();
         harness.run();
         assert!(harness.state().settings().type_ahead);
+    }
+
+    #[test]
+    fn the_terminal_page_says_how_many_screens_are_kept_r_ui_39() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("Terminal").click();
+        harness.run();
+        harness.get_by_label("Screens kept").scroll_to_me();
+        harness.run();
+        assert_eq!(
+            harness.get_by_label("Screens kept").value().as_deref(),
+            Some("50")
+        );
+        // Settings saved before there was a history keep the default.
+        let old: Settings = serde_json::from_str("{}").expect("parse");
+        assert_eq!(old.screens_kept, 50);
     }
 
     #[test]

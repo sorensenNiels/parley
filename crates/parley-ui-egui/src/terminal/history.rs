@@ -84,9 +84,16 @@ pub struct Place {
 }
 
 impl Place {
+    /// When the screen came, as the local time of day: "10:42:13".
+    pub fn time(&self) -> String {
+        chrono::DateTime::<chrono::Local>::from(self.came)
+            .format("%H:%M:%S")
+            .to_string()
+    }
+
     /// "Screen 12 of 50 · 10:42:13", and how many came since.
     pub fn text(&self) -> String {
-        let time = chrono::DateTime::<chrono::Local>::from(self.came).format("%H:%M:%S");
+        let time = self.time();
         let since = match self.new {
             0 => String::new(),
             1 => " · 1 new screen".to_owned(),
@@ -102,6 +109,8 @@ pub enum HistoryAction {
     Back,
     Forward,
     Live,
+    /// Save the screen shown (R-UI-39).
+    Save,
 }
 
 /// The bar over the history view.
@@ -122,6 +131,9 @@ pub fn bar(ui: &mut Ui, place: &Place) -> Option<HistoryAction> {
         theme::button_row(ui, |ui| {
             if ui.add(theme::ghost_button("Back to live")).clicked() {
                 action = Some(HistoryAction::Live);
+            }
+            if ui.add(theme::ghost_button("Save…")).clicked() {
+                action = Some(HistoryAction::Save);
             }
         });
     });
@@ -237,9 +249,15 @@ mod tests {
         harness.run();
         harness.get_by_label("Back to live").click();
         harness.run();
+        harness.get_by_label("Save…").click();
+        harness.run();
         assert_eq!(
             harness.state(),
-            &[HistoryAction::Forward, HistoryAction::Live],
+            &[
+                HistoryAction::Forward,
+                HistoryAction::Live,
+                HistoryAction::Save
+            ],
             "the oldest screen has none earlier"
         );
     }

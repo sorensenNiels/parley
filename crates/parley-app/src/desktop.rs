@@ -149,6 +149,7 @@ pub fn run() -> eframe::Result {
             ui.set_beep(Box::new(parley_app::beep::beep));
             // R-UI-34: a duplicate or a group's sessions in windows of their own.
             ui.set_window_opener(Box::new(open_window));
+            ui.set_screen_files(Box::new(parley_app::helpers::ScreenFileWindow));
             match parley_app::macros::MacroFolder::beside_settings() {
                 Some(folder) => ui.set_macro_store(Box::new(folder)),
                 None => eprintln!("parley: no folder for macros on this system"),
