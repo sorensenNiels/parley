@@ -54,7 +54,7 @@ Parley's principles apply ([../ROADMAP.md](../ROADMAP.md) §2), read for SSH:
 | [Phase 28: the terminal, lean](phases/phase-28-the-terminal-lean.md) | Done (2026-11-20). |
 | Phase 31: transfers with rsync | Built 2026-11-21 (D48, D58): R-SSH-53..57, R-SSH-66; the owner's checks on real servers and in a release run are open ([FEATURES.md](FEATURES.md)). |
 | Phase 30: tunnels | Parked until a user asks for it (D59): [../PARKED.md](../PARKED.md). |
-| Phase 32: key sign-on, set up here | Planned in detail 2026-11-21 (D60, D63, IDEA-41): R-SSH-67, R-SSH-68; next to build. |
+| Phase 32: key sign-on, set up here | Built 2026-11-21 (D60, D63): R-SSH-67, R-SSH-68; the owner's checks on a Linux server and IBM i are open ([FEATURES.md](FEATURES.md)). |
 
 The table is in the order the phases were built; numbers are kept, so they are not in order.
 
