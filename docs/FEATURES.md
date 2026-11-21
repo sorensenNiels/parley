@@ -89,4 +89,5 @@ How each finished requirement was verified is in its phase file:
 - [Phase 20 — Everyday screen work](phases/phase-20-everyday-screen-work.md)
 - [Phase 21 — Protocol gaps](phases/phase-21-protocol-gaps.md)
 - [Phase 24 — More settings](phases/phase-24-more-settings.md)
+- [Phase 40 — More sessions at once](phases/phase-40-more-sessions-at-once.md)
 - [Between phases](phases/between-phases.md)

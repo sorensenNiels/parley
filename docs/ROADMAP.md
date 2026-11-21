@@ -4,8 +4,9 @@
 > requirements and how each was verified, are in [phases/](phases/); [REQUIREMENTS.md](REQUIREMENTS.md) is the index of finished IDs.
 > Look things up with `grep -n` (an ID such as `"R-NET-1 "`, `"| D3 "` or a heading) rather than reading the whole file.
 
-**Status of this document:** first written while setting up the development environment (2026-11-12). Phases 1–4
-are built and verified (the last on 2026-11-15); Phase 20, everyday screen work, is done too.
+**Status of this document:** first written 2026-11-12; cleaned up for the final push on 2026-11-21 (D62). Open:
+the owner's checks of Phase 22 and Phase 42, then the ideas still open ([IDEAS.md](IDEAS.md)). What is decided not
+to be built now is in [PARKED.md](PARKED.md).
 
 ## 1. Vision
 
@@ -34,19 +35,19 @@ modern take on what surrounds the screen: sessions, keyboard mapping, copy and p
 
 | Phase | State |
 |---|---|
-| [Phase 0: development environment](phases/phase-00-development-environment.md) | Done (2026-11-12): workspace, Makefile, setup scripts, CI, lints, Claude Code setup. |
-| [Phase 1: connect and show a screen](phases/phase-01-connect-and-show-a-screen.md) | Done (2026-11-12): verified on Windows, macOS, Linux and WSL2 (FEATURES.md). |
-| [Phase 2: saved sessions and auto sign-on](phases/phase-02-saved-sessions-and-auto-sign-on.md) | Done (2026-11-12): verified on Windows, macOS, Linux and WSL2 (FEATURES.md). Auto sign-on and saved passwords were removed again in Phase 3 (R-NET-7, D16). |
-| [Phase 3: keyboard maps and macros](phases/phase-03-keyboard-maps-and-macros.md) | Done (2026-11-12): verified on Windows, macOS and Linux (FEATURES.md): R-DS-5, keyboard maps (R-KEY-2), macros (R-KEY-3, R-KEY-4), add-ons (R-ADD-1, R-ADD-2), auto sign-on removed (R-NET-7, D16). The macro editor (R-KEY-5), Stop in the status bar (R-KEY-6) and import and export of macros (R-KEY-7) verified 2026-11-15. |
-| [Phase 4: a modern look](phases/phase-04-a-modern-look.md) | Done (2026-11-15): verified on Windows, macOS, Linux and WSL (FEATURES.md): icons (R-UI-13, D17), an interactive status bar (R-UI-14), one header with the session (R-UI-15), the 5250 keys in a Keys menu in the status bar (R-UI-16), a shortcut sheet (R-UI-17), no error for a key in a protected area (R-KEY-8); both commands after installing (R-NF-2). |
-| Phases 5–19: SQL | Parley SQL's phases: [sql/ROADMAP.md](sql/ROADMAP.md). |
-| [Phase 20: everyday screen work](phases/phase-20-everyday-screen-work.md) | Done (2026-11-15): checked by the owner in the running app (FEATURES.md): R-UI-20..23, R-NET-10. |
-| [Phase 21: protocol gaps](phases/phase-21-protocol-gaps.md) | Done (2026-11-16): R-DS-6, R-DS-7 (IDEA-7), R-DS-8 (IDEA-4) done; R-UI-24, R-UI-25 (IDEA-6) done; R-KEY-9 (IDEA-2) done; R-KEY-10 (IDEA-3) done; R-KEY-11 (IDEA-14) done; IDEA-5: R-DS-9 extended attributes done; the GUI is Phase 22. |
-| [Phase 24: more settings](phases/phase-24-more-settings.md) | Done (2026-11-16), checked by the owner on Windows, macOS, Linux and WSL: R-NET-11, R-UI-28, R-KEY-12, R-EBC-2; Parley SQL's are Phase 25 in [sql/ROADMAP.md](sql/ROADMAP.md). |
-| [Phase 40: more sessions at once](phases/phase-40-more-sessions-at-once.md) | Done (2026-11-17), checked by the owner: duplicate (R-UI-30), session groups (R-UI-31, R-UI-32), tabs (R-UI-33) and where more sessions open (R-UI-34), D53. |
-| Phases 26–39: SSH | Parley SSH's phases: [ssh/ROADMAP.md](ssh/ROADMAP.md). |
-| Phase 22: GUI elements (beta) | In progress (resumed 2026-11-20, D57): R-DS-10 windows, R-DS-11 selection fields and the mouse, R-DS-12 scroll bars, Write Data and mouse buttons built and tested behind a session switch (D38) ([FEATURES.md](FEATURES.md)); to be checked in the running app, then kept as a beta switch with no further work unless a user asks (D60). |
-| Phase 42: screen history | Built 2026-11-21 (D60, D61): R-UI-37..39, all three steps; the owner's checks in the running app are open (docs/FEATURES.md). |
+| [Phase 0: development environment](phases/phase-00-development-environment.md) | Done (2026-11-12). |
+| [Phase 1: connect and show a screen](phases/phase-01-connect-and-show-a-screen.md) | Done (2026-11-12). |
+| [Phase 2: saved sessions and auto sign-on](phases/phase-02-saved-sessions-and-auto-sign-on.md) | Done (2026-11-12); auto sign-on removed again in Phase 3 (D16). |
+| [Phase 3: keyboard maps and macros](phases/phase-03-keyboard-maps-and-macros.md) | Done (2026-11-12; R-KEY-5..7 on 2026-11-15). |
+| [Phase 4: a modern look](phases/phase-04-a-modern-look.md) | Done (2026-11-15). |
+| Phases 5–19, 23, 25: SQL | [sql/ROADMAP.md](sql/ROADMAP.md). |
+| [Phase 20: everyday screen work](phases/phase-20-everyday-screen-work.md) | Done (2026-11-15). |
+| [Phase 21: protocol gaps](phases/phase-21-protocol-gaps.md) | Done (2026-11-16). |
+| [Phase 24: more settings](phases/phase-24-more-settings.md) | Done (2026-11-16). |
+| [Phase 40: more sessions at once](phases/phase-40-more-sessions-at-once.md) | Done (2026-11-17). |
+| Phases 26–39, 41: SSH | [ssh/ROADMAP.md](ssh/ROADMAP.md). |
+| Phase 22: GUI elements (beta) | Built behind a session switch (D38, D57): R-DS-10..12; the owner's checks in the running app are open ([FEATURES.md](FEATURES.md)), then it stays a beta switch (D60). |
+| Phase 42: screen history | Built 2026-11-21 (D60, D61): R-UI-37..39; the owner's checks in the running app are open ([FEATURES.md](FEATURES.md)). |
 
 ## 4. Phases
 
@@ -60,17 +61,10 @@ Parley claims it only behind a session switch, off by default, while it is built
 selection fields and the mouse (R-DS-11), scroll bars, Write Data and mouse buttons (R-DS-12). Each step is checked on DKSOFT00 with a trace and a
 macro the owner runs.
 
-**Paused (2026-11-15).** R-DS-10 is built and tested, but DKSOFT00 never sent a GUI structured field: not with level 1
-claimed in a 58-byte reply, not with tn5250j's enhanced claim (byte 4 X'07', byte 5 X'08', 64 bytes), and not on a
-display device created fresh by that reply (PARLYGUI, type 3477 FC). Something else on IBM i decides when it uses the
-enhanced interface. Before R-DS-11: find IBM's rules for it (a system, user, job, device or display file setting, or
-how IBM's own emulators identify themselves), then check R-DS-10 live.
-
-**Resumed (2026-11-20, D57).** Built without a live check: R-DS-11 and R-DS-12 from the manual, each
-tested with records built by hand from it; the switch comes back to the session dialog.
-
-**Ends with the owner's checks (2026-11-21, D60).** Once R-DS-10..12 are checked in the running app, the phase is done
-and the GUI stays a beta switch; nothing more is built for it unless a user asks.
+**History.** Paused on 2026-11-15, when the owner's IBM i never sent a GUI structured field whatever the query reply
+claimed (see R-DS-10's entry in [FEATURES.md](FEATURES.md)); resumed on 2026-11-20 (D57), with R-DS-11 and R-DS-12
+built from the manual and tested with records built by hand from it. Once R-DS-10..12 are checked in the running app
+the phase is done and the GUI stays a beta switch; nothing more unless a user asks (D60, [PARKED.md](PARKED.md)).
 
 ### Phase 42 — screen history
 
@@ -91,7 +85,8 @@ and their own system.
 
 ### Later (unordered, to be planned)
 
-Printer sessions (IDEA-18); see [IDEAS.md](IDEAS.md). SQL work is planned in [sql/ROADMAP.md](sql/ROADMAP.md).
+The ideas still open: Insert mode and trailing blanks (IDEA-8), printer sessions (IDEA-18), a command bar (IDEA-27);
+see [IDEAS.md](IDEAS.md). Decided not now: [PARKED.md](PARKED.md).
 
 ## 5. Requirements
 
@@ -102,7 +97,7 @@ the SQL window's add-on switches, probes and assistant, are in [sql/ROADMAP.md](
 
 | ID | Requirement | Phase |
 |---|---|---|
-| R-DS-10 | **GUI windows, behind a switch** (2026-11-15, from IDEA-5; D38; *the switch was taken out of the session dialog again on 2026-11-15, as IBM i never sent windows; the engine part stays, see Phase 22*; SC30-3533-04 §15.6.13.1–4). A session setting "GUI elements (beta)", off by default; when on, the query reply claims what tn5250j's enhanced mode claims: GUI-like characters, enhanced user interface level 1 and Write Error Code to Window (device capability byte 4 bits 5–7) and level 3 (byte 5 bit 4), in a 64-byte reply (with level 1 alone, DKSOFT00 sent no windows); the pointer device (byte 4 bit 4) waits for R-DS-11. Write to Display Structured Field (WDSF) then carries out Create Window (X'51': a window of the given depth and width at the current address, with its border and optional title as the border and title minor structures say, drawn as a framed panel over the screen; the cursor kept inside when its flag says so; up to 128 windows, one of the same place and size replacing the other), Unrestricted Window Cursor Movement (X'52'), Remove GUI Window (X'59') and Remove All GUI Constructs (X'5F'); Clear Unit, Clear Unit Alternate and Restore Screen remove them too. Text written inside a window shows in it. Off, nothing changes. | 22 |
+| R-DS-10 | **GUI windows, behind a switch** (2026-11-15, from IDEA-5; D38, D57; SC30-3533-04 §15.6.13.1–4). A session setting "GUI elements (beta)", off by default; when on, the query reply claims what tn5250j's enhanced mode claims: GUI-like characters, enhanced user interface level 1 and Write Error Code to Window (device capability byte 4 bits 5–7) and level 3 (byte 5 bit 4), in a 64-byte reply (with level 1 alone, DKSOFT00 sent no windows); the pointer device (byte 4 bit 4) waits for R-DS-11. Write to Display Structured Field (WDSF) then carries out Create Window (X'51': a window of the given depth and width at the current address, with its border and optional title as the border and title minor structures say, drawn as a framed panel over the screen; the cursor kept inside when its flag says so; up to 128 windows, one of the same place and size replacing the other), Unrestricted Window Cursor Movement (X'52'), Remove GUI Window (X'59') and Remove All GUI Constructs (X'5F'); Clear Unit, Clear Unit Alternate and Restore Screen remove them too. Text written inside a window shows in it. Off, nothing changes. | 22 |
 | R-DS-11 | **GUI selection fields and the mouse** (2026-11-15, from IDEA-5; D38; *details 2026-11-20, D57: from IBM i's own bytes in IBM's TRC5250 traces and the names Wireshark and other emulators took from the manual, which was not at hand*; SC30-3533-04 §15.6.13.5–6). With the switch on, the query reply also claims a pointer device (byte 4 bit 4). Define Selection Field (X'50') defines an input field at the current address: a menu bar, radio buttons (single choice), check boxes (multiple choice), single and multiple choice lists and pull-downs, and push buttons, with their choices' text, state (bits B'10' selected and B'11' not available, as IBM i's menu bar bytes show), mnemonic and AID, and the colours of the presentation minor structure; only the minor structures meant for a GUI display count, and a field meant only for a display without a mouse is skipped. Choices are written into the screen, `columns` to a row (a menu bar in one row, a new one where a choice says), each as its state's attribute, an indicator (`/` selected, `_` not) or a push button's blanks, the text and a normal attribute; Parley draws radio buttons, check boxes, push-button boxes and mnemonic underlines over them. On a choice the cursor keys go to the next choice (or send the choice's Roll AID when it asks), Space or `/` selects (a check box toggles), a mnemonic selects its choice, Enter on a menu bar or push button selects it, and a click selects; a choice's own AID, or Enter for an auto-enter field, then goes to the host. The read commands send the field with the others in address order: one choice as its number plus X'1F' in two bytes (X'0000' for none), several as X'F1' or X'00' a choice. Selected choices go back when the keyboard unlocks if the field asks. Remove GUI Selection Field (X'58') blanks it; clearing the format table, Remove All GUI Constructs and removing the window it is in forget it. | 22 |
 | R-DS-12 | **GUI scroll bars, Write Data and mouse buttons** (2026-11-15, from IDEA-5; D38; *details 2026-11-20, D57, as R-DS-11*; SC30-3533-04 §15.6.13.7–10). With the switch on, the query reply also claims enhanced user interface level 2 (byte 5 bit 0). Define Scroll Bar Field (X'53'): a vertical or horizontal bar of the given size at the current address, with the rows to scroll through and the slider's position, drawn with arrows; a click on an arrow moves it one row, beside the slider a page, and dragging the slider anywhere; then Roll Down (back) or Roll Up (on) goes to the host, and the read commands send the new position in four bytes at the bar's address (what IBM i expects back was in no source at hand). Remove GUI Scroll Bar Field (X'5B'). Write Data (X'54') puts its data into the entry field at the current address. Programmable Mouse Buttons (X'55'): each definition's event (left, right or middle pressed, released or double-clicked, with Shift or not), or two events, sends its AID, moving the cursor to the mouse first if it says; the click then does nothing else. | 22 |
 | R-UI-37 | **Screens kept** (2026-11-21, IDEA-21, D60, D61). Each time the host has written and unlocks the keyboard, the session keeps a copy of the screen: its text, attributes, extended attributes and GUI windows, the cursor's place and when it came; the same screen as the last one kept is not kept again. Non-display fields and other non-display text are blanked in the copy, so a password never reaches the history. The newest screens are kept, as many as the setting says (R-UI-39, 50 by default), in memory only: the history lasts while the session's tab is open, across a reconnect, and is gone when the tab closes. | 42 |
@@ -128,8 +123,9 @@ The decisions, with the question, the choice and the alternatives, are in [DECIS
   `phases/phase-NN-<slug>.md`, and its §3 row links to it.
 - A choice that future work must respect becomes a decision in [DECISIONS.md](DECISIONS.md).
 - An idea is not a plan: it goes in [IDEAS.md](IDEAS.md) (by theme in [ideas/](ideas/)) until it is picked, then becomes requirements here.
+- What is decided not to be built now, an idea or a requirement, moves with its text to [PARKED.md](PARKED.md) (D62).
 - **One sequence of IDs for all roadmaps.** Parley SQL keeps its own `R-SQL` counter and Parley SSH its `R-SSH`; every other area, decisions
   (`D`), phases and ideas (`IDEA`, in [IDEAS.md](IDEAS.md)) take their next number here, whichever roadmap uses it,
   so a number never means two things.
 
-Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-12` · `R-DS-13` · `R-EBC-3` · `R-KEY-13` · `R-UI-40` · `R-ADD-4` · `R-NF-6` · `D62` · `Phase 43` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); `R-SSH`: [ssh/ROADMAP.md](ssh/ROADMAP.md); ideas: last line of IDEAS.md).
+Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-12` · `R-DS-13` · `R-EBC-3` · `R-KEY-13` · `R-UI-40` · `R-ADD-4` · `R-NF-6` · `D63` · `Phase 43` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); `R-SSH`: [ssh/ROADMAP.md](ssh/ROADMAP.md); ideas: last line of IDEAS.md).

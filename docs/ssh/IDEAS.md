@@ -10,6 +10,7 @@
   sequence for all three. IDs are never reused or renumbered.
 - When an idea is picked for a phase, write it as one or more requirements in the roadmap (§5, next free ID of the
   area) and mark the row here *"→ R-SSH-n"*. Remove the row once its requirements are done; the number stays used.
+- An idea decided against or for later goes to [PARKED.md](../PARKED.md), with its text (D62).
 - An idea that would change a decision says so; the decision is taken before it is built.
 
 ## Themes

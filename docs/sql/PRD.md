@@ -5,8 +5,8 @@
 > [REQUIREMENTS.md](REQUIREMENTS.md) (done ones), and [FEATURES.md](FEATURES.md) says how each was verified.
 > Requirement IDs (`R-SQL-7`) and decisions (`D20`) below point there. The terminal is [../PRD.md](../PRD.md).
 
-**Status:** written 2026-11-14 when the SQL plan got documents of its own; updated after Phase 14. Everything below
-is built and verified on Linux under WSL against the owner's IBM i 7.3 (2026-11-14); Windows and macOS not yet.
+**Status:** written 2026-11-14; brought up to date for the final push on 2026-11-21 (D62). Everything below is built
+and verified; Phases 23 and 25 also on Windows, macOS and Linux.
 
 ## 1. Summary
 
@@ -43,7 +43,6 @@ library list, `LABEL ON` headings) in a fast desktop window.
 **Non-goals** (decided; changing one needs a new decision)
 
 - Bundling a Java runtime: Java 11+ is installed by the user (R-SQL-12, D20).
-- Export to Excel (R-SQL-17 dropped: CSV only).
 - Several connections at once in Parley SQL (D26); Run on… (R-SQL-43) went with Parley's own SQL window (R-SQL-70).
 
 ## 5. What Parley SQL does
@@ -69,6 +68,9 @@ library list, `LABEL ON` headings) in a fast desktop window.
 | Editing | Comment, indent, move and duplicate lines, pairs, matching bracket, go to line, keyword case, zoom | R-SQL-52..59 | Verified |
 | Editor, deeper | Gutter with line numbers, ▶ and outcomes; completion on Ctrl+Space and with snippets; a routine's parameters; the word under the cursor, Ctrl+D; trailing blanks trimmed (D28) | R-SQL-61..68 | Verified |
 | Shortcuts and settings | Parley SQL's Shortcuts page; Parley SQL's settings kept in Parley SQL only | R-SQL-60, R-SQL-69 | Verified |
+| A library's SQL | A library, a table with its indexes and views, rows as `INSERT`s, a library backed up as SQL (D39) | R-SQL-93..96 | Verified |
+| Connection settings | Naming, libraries, commitment control, formats and the CSV delimiter per connection | R-SQL-97..100 | Verified |
+| Compound statements | A `;` inside `BEGIN … END` does not end the statement | R-SQL-92 | Built, to check |
 
 ## 6. Solution overview
 
@@ -79,9 +81,8 @@ design: [../ARCHITECTURE.md](../ARCHITECTURE.md).
 
 ## 7. Release plan
 
-- **Phases 5–12 (built 2026-11-13..14):** see [ROADMAP.md](ROADMAP.md) §3.
-- **Next:** the owner's checks in the running app, so the requirements can move to REQUIREMENTS.md; then a phase
-  picked from [IDEAS.md](IDEAS.md) (IBM i Services views, data transfer).
+- **Done:** Phases 5–19, 23 and 25 ([ROADMAP.md](ROADMAP.md) §3).
+- **The final push (D62):** the owner's check of R-SQL-92; no SQL ideas are open. Parked: [../PARKED.md](../PARKED.md).
 
 ## 8. Risks and open questions
 
