@@ -16,7 +16,7 @@ mod local;
 mod view;
 mod window;
 
-pub use desktop::{DESKTOP, DesktopFiles, Setup};
+pub use desktop::{DESKTOP, DesktopFiles, Launch, Setup};
 pub use window::Io;
 
 /// The most of a job's output kept: enough for rsync's last progress line and its last error lines.
@@ -121,7 +121,7 @@ pub enum Order {
     Unforward(PaneId, JobId),
     /// Run a program on the desktop as job `JobId`: its name, then its arguments (R-SSH-55); its output and end
     /// come back as the jobs' of [`DESKTOP`], and [`Order::End`] with [`DESKTOP`] ends it.
-    Spawn(JobId, Vec<String>),
+    Spawn(JobId, Launch),
 }
 
 /// A job's output so far, kept short.
@@ -189,6 +189,7 @@ struct Run {
     runner: PaneId,
     /// A copy between the desktop and a server, and the relay it waits for (R-SSH-55).
     desktop: Option<transfer::Desktop>,
+    place: desktop::Place,
     pipe: Option<desktop::Pipe>,
     stage: Stage,
 }
@@ -329,7 +330,10 @@ impl Panel {
         let rsync = self.setup.rsync.clone();
         let check = |pane, id| {
             if pane == DESKTOP {
-                Order::Spawn(id, vec![rsync.clone(), "--version".to_owned()])
+                Order::Spawn(
+                    id,
+                    Launch::plain(vec![rsync.clone(), "--version".to_owned()]),
+                )
             } else {
                 Order::Exec(
                     pane,
@@ -352,6 +356,7 @@ impl Panel {
             relay: None,
             runner,
             desktop: None,
+            place: desktop::Place::default(),
             pipe: None,
             stage: Stage::Checking {
                 source: (a, Output::default(), None),

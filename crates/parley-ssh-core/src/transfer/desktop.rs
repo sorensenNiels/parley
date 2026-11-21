@@ -13,7 +13,7 @@ pub struct Desktop {
     pub relay: Vec<String>,
     /// The server's rsync, as its check found it.
     pub server_rsync: String,
-    /// The path on the desktop, in the form the desktop's rsync takes ([`msys_path`] on Windows).
+    /// The path on the desktop, in the form the desktop's rsync takes ([`windows_place`] on Windows).
     pub desktop_path: String,
     pub server_path: String,
     /// From the desktop to the server; else from the server to the desktop.
@@ -61,21 +61,35 @@ fn rsh_word(word: &str) -> String {
     }
 }
 
-/// A Windows path as MSYS2's rsync takes it: `C:\Users\æøå` as `/c/Users/æøå`, `\\server\share` as
-/// `//server/share` (a `C:` would otherwise be read as a host called C).
-pub fn msys_path(path: &str) -> String {
+/// A Windows path as MSYS2's rsync takes it whatever its mount table says (`/c/…` or `/cygdrive/c/…`): the folder to
+/// start rsync in, and the path from there with forward slashes; `C:\Users\æøå\` is `C:\` and `Users/æøå/`. A drive
+/// letter must not reach rsync, which would read `C:` as a host called C. A relative path stays where it is.
+pub fn windows_place(path: &str) -> (Option<String>, String) {
     let forward = path.replace('\\', "/");
-    let mut chars = forward.chars();
-    match (chars.next(), chars.next(), chars.next()) {
-        (Some(drive), Some(':'), Some('/') | None) if drive.is_ascii_alphabetic() => {
-            format!(
-                "/{}/{}",
-                drive.to_ascii_lowercase(),
-                forward.get(3..).unwrap_or_default()
-            )
+    let relative = |rest: &str| {
+        let rest = rest.trim_start_matches('/');
+        if rest.is_empty() {
+            "./".to_owned()
+        } else {
+            rest.to_owned()
         }
-        _ => forward,
+    };
+    let mut chars = forward.chars();
+    if let (Some(drive), Some(':')) = (chars.next(), chars.next())
+        && drive.is_ascii_alphabetic()
+    {
+        return (Some(format!("{drive}:\\")), relative(chars.as_str()));
     }
+    if let Some(unc) = forward.strip_prefix("//") {
+        let mut parts = unc.splitn(3, '/');
+        if let (Some(server), Some(share)) = (parts.next(), parts.next()) {
+            return (
+                Some(format!("\\\\{server}\\{share}\\")),
+                relative(parts.next().unwrap_or_default()),
+            );
+        }
+    }
+    (None, forward)
 }
 
 #[cfg(test)]
@@ -145,11 +159,22 @@ mod tests {
     }
 
     #[test]
-    fn windows_paths_are_given_to_msys2s_rsync_in_its_form_r_ssh_55() {
-        assert_eq!(msys_path(r"C:\Users\Niels\æøå"), "/c/Users/Niels/æøå");
-        assert_eq!(msys_path("d:"), "/d/");
-        assert_eq!(msys_path(r"\\nas\share\x"), "//nas/share/x");
-        assert_eq!(msys_path("relative/dir"), "relative/dir");
-        assert_eq!(msys_path("/already/posix"), "/already/posix");
+    fn windows_paths_reach_msys2s_rsync_without_a_drive_letter_r_ssh_55() {
+        let place = |p: &str| windows_place(p);
+        assert_eq!(
+            place(r"C:\Users\Niels\æøå\"),
+            (Some(r"C:\".to_owned()), "Users/Niels/æøå/".to_owned()),
+            "the trailing slash stays: a folder's contents"
+        );
+        assert_eq!(
+            place(r"d:\rapport.pdf"),
+            (Some(r"d:\".to_owned()), "rapport.pdf".to_owned())
+        );
+        assert_eq!(place("D:"), (Some(r"D:\".to_owned()), "./".to_owned()));
+        assert_eq!(
+            place(r"\\nas\share\x y"),
+            (Some(r"\\nas\share\".to_owned()), "x y".to_owned())
+        );
+        assert_eq!(place(r"relative\dir"), (None, "relative/dir".to_owned()));
     }
 }

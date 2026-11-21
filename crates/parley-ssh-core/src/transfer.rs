@@ -7,7 +7,7 @@ mod changes;
 mod desktop;
 mod run;
 pub use changes::{Changes, Listed};
-pub use desktop::{Desktop, desktop_args, msys_path};
+pub use desktop::{Desktop, desktop_args, windows_place};
 pub use run::{
     Direct, Mode, Options, Progress, Remote, bytes_text, direct_command, last_progress, outcome,
     quote, unreachable,

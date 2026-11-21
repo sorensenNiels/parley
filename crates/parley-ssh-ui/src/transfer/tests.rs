@@ -500,10 +500,10 @@ fn desktop_checked(p: &mut Panel, source: End, target: End) -> Vec<Order> {
     let mut checks = Vec::new();
     for order in &orders {
         match order {
-            Order::Spawn(id, argv) => {
+            Order::Spawn(id, launch) => {
                 assert_eq!(
-                    argv,
-                    &["/usr/bin/rsync", "--version"],
+                    launch.argv,
+                    ["/usr/bin/rsync", "--version"],
                     "the desktop's own rsync"
                 );
                 checks.push((DESKTOP, *id, "rsync  version 3.4.1  protocol version 32\n"));
@@ -532,9 +532,10 @@ fn a_desktop_upload_runs_rsync_here_with_the_relay_as_its_remote_shell_r_ssh_55(
     let mut p = panel();
     p.source = Some(DESKTOP);
     let orders = desktop_checked(&mut p, End::desktop(), end(2, "b"));
-    let [Order::Spawn(dry, argv)] = orders.as_slice() else {
+    let [Order::Spawn(dry, launch)] = orders.as_slice() else {
         panic!("the dry run here: {orders:?}")
     };
+    let argv = &launch.argv;
     assert_eq!(argv[0], "/usr/bin/rsync");
     assert!(argv.contains(&"--dry-run".to_owned()), "{argv:?}");
     assert!(
@@ -563,9 +564,10 @@ fn a_desktop_upload_runs_rsync_here_with_the_relay_as_its_remote_shell_r_ssh_55(
     p.feed(DESKTOP, out(dry, LISTED));
     p.feed(DESKTOP, ended(dry, JobEnding::Exited(0)));
     let orders = p.confirm();
-    let [Order::Spawn(copy, argv)] = orders.as_slice() else {
+    let [Order::Spawn(copy, launch)] = orders.as_slice() else {
         panic!("the copy here: {orders:?}")
     };
+    let argv = &launch.argv;
     assert!(argv.contains(&"--info=progress2".to_owned()));
     let second = token_of(argv);
     assert_ne!(second, token, "a new token for the copy");
@@ -589,9 +591,10 @@ fn a_desktop_download_takes_the_servers_path_first_r_ssh_55() {
     p.target = Some(DESKTOP);
     p.target_path = "/home/niels/hentet/".into();
     let orders = desktop_checked(&mut p, end(1, "a"), End::desktop());
-    let [Order::Spawn(dry, argv)] = orders.as_slice() else {
+    let [Order::Spawn(dry, launch)] = orders.as_slice() else {
         panic!("the dry run here: {orders:?}")
     };
+    let argv = &launch.argv;
     assert_eq!(
         argv[argv.len() - 2..],
         ["parley:/data/æøå/", "/home/niels/hentet/"]

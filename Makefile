@@ -171,7 +171,13 @@ PACKAGE_FORMATS_windows := wix
 PACKAGE_SPLIT_linux := deb
 PACKAGE_SPLIT_macos := dmg
 
+# rsync for Parley SSH (R-SSH-66): MSYS2's for the .msi, whose template takes it from PARLEY_RSYNC_DIR; built from
+# source for the Mac apps.
+package: export PARLEY_RSYNC_DIR := $(CURDIR)/target/rsync-windows
 package: release helper
+ifeq ($(PLATFORM),windows)
+	python scripts/fetch-rsync-windows.py target/rsync-windows
+endif
 ifneq ($(PACKAGE_FORMATS_$(PLATFORM)),)
 	cargo packager -p $(APP) --release -f $(PACKAGE_FORMATS_$(PLATFORM))
 endif

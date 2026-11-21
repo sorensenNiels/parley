@@ -15,28 +15,43 @@
   one-time token (128 random bits, new for the dry run and for the copy, compared in constant time) and the command,
   and the window runs that command on an exec channel of the session's open connection (`Command::Pipe`), so
   nothing signs on again and no agent is needed. Cancel ends the job at the server, so rsync here stops by itself
-  and keeps its partial files. Windows paths go to rsync as MSYS2's (`/c/Users/…`). A saved transfer names this
+  and keeps its partial files. On Windows rsync gets no drive letter (see R-SSH-66 below). A saved transfer names this
   computer with an empty name. Settings ▸ Transfers names another rsync; otherwise the one that came with Parley SSH
   (beside the program, or in the Mac app's Resources), else the one on the `PATH`. **R-SSH-66 so far**:
   `scripts/build-rsync.sh` builds rsync 3.4.1 from its pinned source (SHA-256 checked; the tarball's signature by
   Andrew Tridgell checked when pinned) with its own zlib and popt, with `rsync-COPYING.txt` (GPLv3) and
   `rsync-SOURCE.txt`; the release workflow and `make package` run it on macOS and the Parley SSH app carries it;
-  the Parley SSH `.deb` depends on `rsync`. **Not yet**: rsync for the Windows installer (MSYS2's rsync and its
-  DLLs), and the About page naming the bundled rsync with its version. **Automated**: `net::pipe::tests` (tokens; a
+  the Parley SSH `.deb` depends on `rsync`. **Windows** (2026-11-21): `scripts/fetch-rsync-windows.py` (Python 3.14,
+  standard library only) fetches MSYS2's `rsync-3.4.1-1` and the packages of the six DLLs it loads (msys-2.0,
+  msys-crypto-3, msys-iconv-2, msys-lz4-1, msys-xxhash-0, msys-zstd-1; their own imports checked to stay within
+  these and Windows' DLLs), each against its pinned SHA-256; each package's signature was checked when pinned
+  against MSYS2's keyring (key 5F944B02…A0AA7F57, certified by three of its master keys, not revoked). It takes only
+  rsync.exe and those DLLs, with every licence (the texts the packages lack are in `crates/parley-app/windows/rsync/`)
+  and `rsync-SOURCE.txt` naming each part's licence and MSYS2 source package. The installer template puts them in an
+  `rsync` folder of the install folder (component `ParleySshRsync` of the Parley SSH feature, from
+  `PARLEY_RSYNC_DIR`), off the PATH the installer sets; Parley SSH looks there first. MSYS2's rsync gets no drive
+  letter whatever its mount table (`transfer::windows_place`): it starts in the desktop path's drive with the rest
+  as a relative path, and finds `parley-ssh` by name, its folder put first on rsync's PATH (`Launch`). The release
+  workflow's Windows job and `make package` on Windows run the script. **Not yet**: the About page naming the
+  bundled rsync with its version. **Automated**: `net::pipe::tests` (tokens; a
   relay's token, command and data both ways; data right after the header kept; no window, a silent relay),
   `tests/net.rs` (a pipe carries a relay's data through an exec channel and back, not to the UI or the screen; ending
   it closes the relay's connection), `transfer::desktop::tests` in the core (the desktop's rsync arguments both ways,
   the relay's words through rsync's `-e` splitting, Windows paths), `transfer::tests::the_desktops_rsync_is_checked…`,
   `ssh_start` (the relay's command line), the panel's `transfer::tests` (upload: the checks, the dry run here, the
   relay's token good once and new for the copy, Cancel at the server; download; no rsync here; no relay port; this
-  computer twice), `transfer::local::tests` (output and exit status, a missing program, an ended one), `tests.rs`
+  computer twice; on Windows the drive as the start folder and the relay by name), `transfer::local::tests` (output
+  and exit status, the start folder and the PATH, a missing program, an ended one), `transfer::desktop::tests` in the
+  core (`windows_place`: drive, UNC, relative, trailing slash), `tests.rs`
   (the Transfers page; this computer's path from the file window). **Run for real** (Linux under WSL): rsync 3.4.1
   through `parley-ssh --relay` with a stand-in for the window running `rsync --server` locally: a dry run, a copy
   up and a copy back, with `æøå` and a quote in the paths and an exclude. Two bugs found that way and fixed: the
   relay's stdout was line-buffered (rsync hung), and the header reader could swallow rsync's first bytes.
-  `scripts/build-rsync.sh` built and ran on Linux; not yet run on macOS. **To check**: a copy up and down with a
-  real server in the app on Linux, macOS and Windows; the release workflow's macOS jobs (run by hand) and the app's
-  bundled rsync.
+  `scripts/build-rsync.sh` built and ran on Linux; not yet run on macOS. `scripts/fetch-rsync-windows.py` ran on
+  Linux: the fourteen files, the DLLs' imports read with objdump, the template's component naming the same fourteen;
+  rsync.exe not run (no Windows here). **To check**: a copy up and down with a real server in the app on Linux,
+  macOS and Windows (on Windows, a path on another drive and one with `æøå`); the release workflow's macOS and Windows
+  jobs (run by hand), the installed `rsync` folder, and that `rsync` is not found on the PATH in a new terminal.
 
 - **R-SSH-54, the engine part of R-SSH-31, Phase 31 step 4** (2026-11-21, Linux under WSL): server to server
   through Parley SSH. `net/relay.rs`: `Command::OpenDoor` hands out a `Door` (the target connection's handle, now

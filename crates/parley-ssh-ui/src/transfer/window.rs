@@ -31,19 +31,20 @@ impl std::fmt::Debug for Io {
     }
 }
 
-/// The rsync that came with Parley SSH (R-SSH-66): beside the program, or in a macOS app's Resources; else the one
-/// on the `PATH`.
+/// The rsync that came with Parley SSH (R-SSH-66): in the `rsync` folder beside the program (Windows, so that it is
+/// not on the `PATH`), beside it, or in a macOS app's Resources; else the one on the `PATH`.
 fn bundled_rsync() -> String {
     let name = if cfg!(windows) { "rsync.exe" } else { "rsync" };
     let Ok(exe) = std::env::current_exe() else {
         return "rsync".to_owned();
     };
+    let folder = exe.with_file_name("rsync").join(name);
     let beside = exe.with_file_name(name);
     let resources = exe
         .parent()
         .and_then(std::path::Path::parent)
         .map(|contents| contents.join("Resources").join(name));
-    [Some(beside), resources]
+    [Some(folder), Some(beside), resources]
         .into_iter()
         .flatten()
         .find(|path| path.is_file())
@@ -375,11 +376,11 @@ impl ParleySshUi {
     fn carry_orders(&mut self, ctx: &egui::Context, orders: Vec<Order>) {
         for order in orders {
             let (pane, command) = match order {
-                Order::Spawn(id, argv) => {
+                Order::Spawn(id, launch) => {
                     let ctx = ctx.clone();
                     self.transfer_io
                         .locals
-                        .spawn(id, &argv, move || ctx.request_repaint());
+                        .spawn(id, &launch, move || ctx.request_repaint());
                     continue;
                 }
                 Order::End(DESKTOP, id) => {

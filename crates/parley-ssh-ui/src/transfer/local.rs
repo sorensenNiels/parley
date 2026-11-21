@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use parley_ssh_core::net::{Event, JobEnding, JobId, Stream};
 
+use super::Launch;
+
 /// The desktop's running programs.
 pub struct Locals {
     running: HashMap<JobId, Arc<Mutex<Child>>>,
@@ -41,7 +43,7 @@ impl std::fmt::Debug for Locals {
 impl Locals {
     /// Starts `argv` (its name first) as job `id`; one that cannot start ends at once as refused. `wake` is called
     /// whenever there is news.
-    pub fn spawn(&mut self, id: JobId, argv: &[String], wake: impl Fn() + Send + Sync + 'static) {
+    pub fn spawn(&mut self, id: JobId, launch: &Launch, wake: impl Fn() + Send + Sync + 'static) {
         self.running.retain(|_, child| {
             child
                 .lock()
@@ -49,7 +51,7 @@ impl Locals {
                 .try_wait()
                 .is_ok_and(|done| done.is_none())
         });
-        let Some((program, rest)) = argv.split_first() else {
+        let Some((program, rest)) = launch.argv.split_first() else {
             return;
         };
         let mut command = Command::new(program);
@@ -58,6 +60,21 @@ impl Locals {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(folder) = &launch.folder {
+            command.current_dir(folder);
+        }
+        if let Some(first) = &launch.path_first {
+            let path = std::env::var_os("PATH").unwrap_or_default();
+            let joined = std::env::join_paths(
+                std::iter::once(std::path::PathBuf::from(first))
+                    .chain(std::env::split_paths(&path)),
+            );
+            // A folder with the separator in its name cannot be put on the PATH: the program is then not found
+            // there, and says so.
+            if let Ok(joined) = joined {
+                command.env("PATH", joined);
+            }
+        }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -198,8 +215,8 @@ mod tests {
         }
     }
 
-    fn argv(words: &[&str]) -> Vec<String> {
-        words.iter().map(|w| (*w).to_owned()).collect()
+    fn argv(words: &[&str]) -> Launch {
+        Launch::plain(words.iter().map(|w| (*w).to_owned()).collect())
     }
 
     #[test]
@@ -213,6 +230,19 @@ mod tests {
         assert_eq!(
             until_ended(&locals, JobId(1)),
             ("æøå".to_owned(), JobEnding::Exited(3))
+        );
+    }
+
+    #[test]
+    fn a_program_starts_in_its_folder_with_a_folder_first_on_its_path_r_ssh_66() {
+        let mut locals = Locals::default();
+        let mut launch = argv(&["sh", "-c", "pwd; echo \"$PATH\" | cut -d: -f1"]);
+        launch.folder = Some("/".into());
+        launch.path_first = Some("/opt/æøå".into());
+        locals.spawn(JobId(4), &launch, || {});
+        assert_eq!(
+            until_ended(&locals, JobId(4)),
+            ("/\n/opt/æøå\n".to_owned(), JobEnding::Exited(0))
         );
     }
 

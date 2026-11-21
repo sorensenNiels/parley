@@ -3,7 +3,10 @@
 # --info=progress2. Built from the pinned source (checked against its SHA-256; the tarball's signature by Andrew
 # Tridgell, key 9FEF112DCE19A0DC7E882CB81BB24997A8535F6F, was checked when the checksum was pinned) with its own
 # zlib and popt and nothing optional, so the program needs only the system's libraries. Its licence (GPLv3) and
-# where its source is go beside it. Linux uses the distribution's rsync (the .deb depends on it).
+# where its source is go beside it. Linux uses the distribution's rsync (the .deb depends on it). Windows has the
+# same version from MSYS2 (scripts/fetch-rsync-windows.py).
+# Not 3.5.x yet: rsync 3.5.2's tarball (2026) is signed by a key (8EDF88F4…2C52EC2D, "Zen Dodd") that the key above
+# does not certify; move on once that key is confirmed as rsync's (rsync.samba.org, the rsync mailing list).
 #
 # Usage: scripts/build-rsync.sh OUT_DIR [TARGET_TRIPLE]   (aarch64-apple-darwin or x86_64-apple-darwin on macOS)
 set -euo pipefail

@@ -99,6 +99,19 @@ jobs:
         shell: bash
         run: bash scripts/build-rsync.sh target/rsync ${{ matrix.target }}
 
+      # Python 3.14 reads MSYS2's .tar.zst packages itself.
+      - if: runner.os == 'Windows'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: rsync for Parley SSH from MSYS2 (R-SSH-66)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python scripts/fetch-rsync-windows.py target/rsync-windows
+          # The installer template takes the files from here.
+          echo "PARLEY_RSYNC_DIR=$(cygpath -w "$PWD/target/rsync-windows")" >> "$GITHUB_ENV"
+
       - name: Package
         shell: bash
         env:
