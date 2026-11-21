@@ -27,6 +27,8 @@ data-encoding = "2"
 zeroize = "1"
 # The one-time tokens of desktop transfers' relay (R-SSH-55).
 getrandom.workspace = true
+# Making a key (R-SSH-68): the version russh pins, with the system's randomness.
+ssh-key = { version = "=0.7.0-rc.11", default-features = false, features = ["getrandom", "ed25519", "encryption"] }
 
 [dev-dependencies]
 # The in-process SSH server of tests/net.rs runs on its own runtime.

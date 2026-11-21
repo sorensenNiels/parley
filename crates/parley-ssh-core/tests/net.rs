@@ -19,7 +19,7 @@ use parley_ssh_core::net::agent::AgentAddress;
 use parley_ssh_core::net::jump::Jump;
 use parley_ssh_core::net::{
     AddressFamily, Command, Connection, Ending, Event, Exec, HostKeyAnswer, JobEnding, JobId,
-    Options, Proxy, Stream, Target, lock,
+    Options, Proxy, SignedOnWith, Stream, Target, lock,
 };
 use parley_ssh_core::term::Terminal;
 use parley_ssh_core::transfer::{self, Check};
@@ -603,7 +603,12 @@ fn a_whole_session_from_host_key_to_exit_status_r_ssh_3_r_ssh_4_r_ssh_5() {
         "asked again after a wrong password: {after_wrong:?}"
     );
     connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
-    assert_eq!(next(&connection), Event::Started);
+    assert_eq!(
+        next(&connection),
+        Event::Started {
+            with: SignedOnWith::Password
+        }
+    );
 
     // R-SSH-5: a pseudo-terminal of the window's size, xterm-256color, UTF-8.
     let pty = seen
@@ -738,7 +743,12 @@ fn a_session_without_a_user_asks_for_one_and_signs_on_as_it_r_ssh_62() {
         "{prompt:?}"
     );
     connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
-    assert_eq!(next(&connection), Event::Started);
+    assert_eq!(
+        next(&connection),
+        Event::Started {
+            with: SignedOnWith::Password
+        }
+    );
     assert_eq!(seen.lock().expect("not poisoned").users, ["æøå"]);
     connection.send(Command::Disconnect);
 }
@@ -820,7 +830,13 @@ fn a_key_file_signs_on_without_a_password_r_ssh_12() {
         ..Options::default()
     };
     let (connection, _, _) = signing_on("key", options);
-    assert_eq!(next(&connection), Event::Started, "no prompt");
+    assert_eq!(
+        next(&connection),
+        Event::Started {
+            with: SignedOnWith::KeyFile
+        },
+        "no prompt"
+    );
 }
 
 #[test]
@@ -831,7 +847,13 @@ fn a_putty_key_file_signs_on_too_r_ssh_12() {
         ..Options::default()
     };
     let (connection, _, _) = signing_on("ppk", options);
-    assert_eq!(next(&connection), Event::Started, "no prompt");
+    assert_eq!(
+        next(&connection),
+        Event::Started {
+            with: SignedOnWith::KeyFile
+        },
+        "no prompt"
+    );
 }
 
 #[test]
@@ -857,7 +879,12 @@ fn an_encrypted_key_asks_its_passphrase_again_when_wrong_r_ssh_12() {
         again.instructions
     );
     connection.send(Command::Answers(Some(vec![Secret::new(PASSPHRASE.into())])));
-    assert_eq!(next(&connection), Event::Started);
+    assert_eq!(
+        next(&connection),
+        Event::Started {
+            with: SignedOnWith::KeyFile
+        }
+    );
 }
 
 #[test]
@@ -876,7 +903,12 @@ fn a_key_file_that_cannot_be_read_is_said_and_the_password_still_works_r_ssh_12(
         panic!("password prompt")
     };
     connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
-    assert_eq!(next(&connection), Event::Started);
+    assert_eq!(
+        next(&connection),
+        Event::Started {
+            with: SignedOnWith::Password
+        }
+    );
 }
 
 /// Starts russh's own agent on a Unix socket, holding the client key.
@@ -924,13 +956,52 @@ fn the_agent_signs_on_and_is_forwarded_when_asked_r_ssh_13() {
     let (connection, terminal, seen) = signing_on("agent", options);
     assert_eq!(
         next(&connection),
-        Event::Started,
+        Event::Started {
+            with: SignedOnWith::Agent
+        },
         "the agent's key, no prompt"
     );
     assert!(seen.lock().expect("not poisoned").agent_requested);
     wait_until("the server to use the agent", || {
         screen_text(&terminal).contains("agent keys: 1")
     });
+}
+
+#[cfg(unix)]
+#[test]
+fn the_agent_s_keys_are_listed_on_request_r_ssh_67() {
+    let socket = start_agent("listed");
+    let options = Options {
+        agent: Some(AgentAddress::Socket(socket)),
+        ..Options::default()
+    };
+    let (connection, _, _) = signing_on("listed", options);
+    assert_eq!(
+        next(&connection),
+        Event::Started {
+            with: SignedOnWith::Agent
+        }
+    );
+    connection.send(Command::AgentKeys);
+    let Event::AgentKeys(Ok(keys)) = next(&connection) else {
+        panic!("the agent's keys")
+    };
+    let client = PrivateKey::from_openssh(CLIENT_KEY).expect("test key");
+    assert_eq!(keys.len(), 1);
+    assert_eq!(
+        keys[0].fingerprint,
+        parley_ssh_core::known_hosts::fingerprint(client.public_key())
+    );
+}
+
+#[test]
+fn without_an_agent_listing_its_keys_says_so_r_ssh_67() {
+    let (connection, _) = started("no-agent", Options::default());
+    connection.send(Command::AgentKeys);
+    assert_eq!(
+        next(&connection),
+        Event::AgentKeys(Err("No agent is running.".into()))
+    );
 }
 
 #[cfg(unix)]
@@ -947,7 +1018,12 @@ fn an_agent_key_not_named_is_not_used_and_forwarding_stays_off_r_ssh_13() {
         panic!("password prompt: the agent's key was not used")
     };
     connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
-    assert_eq!(next(&connection), Event::Started);
+    assert_eq!(
+        next(&connection),
+        Event::Started {
+            with: SignedOnWith::Password
+        }
+    );
     assert!(!seen.lock().expect("not poisoned").agent_requested);
 }
 
@@ -1024,7 +1100,12 @@ fn a_session_through_two_jump_hosts_checks_and_signs_on_to_each_r_ssh_43() {
     };
     assert_eq!(prompt.host, target_of(target).label());
     connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
-    assert_eq!(next(&connection), Event::Started);
+    assert_eq!(
+        next(&connection),
+        Event::Started {
+            with: SignedOnWith::Password
+        }
+    );
     wait_until("the greeting", || {
         screen_text(&terminal).contains("Velkommen æøå")
     });
@@ -1092,13 +1173,14 @@ fn through_to_started(connection: &Connection) {
                 connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
             }
             Event::Prompt(prompt) => panic!("unexpected prompt {prompt:?}"),
-            Event::Started => return,
+            Event::Started { .. } => return,
             Event::Ended(ending) => panic!("ended: {ending:?}"),
             Event::User(user) => panic!("asked for a user, got {user}"),
             Event::JobOutput { .. }
             | Event::JobEnded { .. }
             | Event::Door { .. }
-            | Event::Forwarded { .. } => panic!("a job before the shell"),
+            | Event::Forwarded { .. }
+            | Event::AgentKeys(_) => panic!("a job before the shell"),
             Event::Secured { .. } | Event::Banner(_) | Event::Problem(_) | Event::Log(_) => {}
         }
     }
@@ -1372,7 +1454,12 @@ fn started_seen(
     let (connection, terminal, seen) = signing_on(name, options);
     if let Event::Prompt(_) = next(&connection) {
         connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
-        assert_eq!(next(&connection), Event::Started);
+        assert_eq!(
+            next(&connection),
+            Event::Started {
+                with: SignedOnWith::Password
+            }
+        );
     }
     (connection, terminal, seen)
 }

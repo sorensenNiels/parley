@@ -3635,6 +3635,7 @@ dependencies = [
  "russh",
  "sha1 0.11.0",
  "socket2",
+ "ssh-key",
  "thiserror 2.0.21",
  "tokio",
  "unicode-width",

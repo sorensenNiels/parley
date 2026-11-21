@@ -8,6 +8,20 @@
 
 ## In progress
 
+- **R-SSH-67, R-SSH-68, Phase 32 step 1** (2026-11-21, Linux under WSL; D63): the engine. `Event::Started` says how
+  the user signed on (`SignedOnWith`: none, agent, key file, keyboard-interactive, password); `Command::AgentKeys`
+  lists the running agent's keys; `key_setup` builds and reads the commands that add a key to `authorized_keys`,
+  tell IBM i and find folders the group or others can write, and the Fix; `key_setup::make_key` makes an Ed25519 key
+  (`ssh-key` at russh's version, with its `getrandom` feature). **Automated** (`make test`): `key_setup.rs` (a key
+  line parsed with "æøå" in its comment, one line only; the answers added, already there and each failure with the
+  server's words; IBM i's open folders read and fixed one by one, a quote in a path; with a real `sh` in a temporary
+  home: a key added once with `~/.ssh` 700 and the file 600, the same key with another comment found, a file without
+  its last line end, an existing folder left as it is, the check finding a group- and an others-writable folder and
+  the Fix closing them), `key_setup/make.rs` (a key read back with its passphrase "hemmeligt æøå" and not with a
+  wrong one, 600 and 700, its public line read back; never over an existing `.pub`, numbered names, no passphrase),
+  `tests/net.rs` (every sign-on test now says how it signed on; the agent's keys listed; no agent said). **Still to
+  build**: the window (step 2); then the owner's checks on a Linux server and IBM i (step 3).
+
 - **R-SSH-55 and part of R-SSH-66, Phase 31 step 5** (2026-11-21, Linux under WSL): copies between this computer
   and a server. "This computer" is a choice for either end of the Transfer panel, with File… and Folder… buttons
   (the launcher's file window, `DesktopFiles`). rsync runs here (`transfer/local`) with `-e "parley-ssh --relay

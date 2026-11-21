@@ -52,6 +52,33 @@ pub async fn connect(address: &AgentAddress) -> Result<Agent, russh::keys::Error
     Ok(AgentClient::connect(stream))
 }
 
+/// The keys of the agent at `address`, as lines for `authorized_keys` (R-SSH-67).
+///
+/// # Errors
+/// There is no agent, or it would not list its keys, said for the user.
+pub(super) async fn keys(
+    address: Option<&AgentAddress>,
+) -> Result<Vec<crate::key_setup::PublicLine>, String> {
+    let address = address.ok_or("No agent is running.")?;
+    let mut client = connect(address)
+        .await
+        .map_err(|e| format!("The agent could not be reached: {e}"))?;
+    let identities = client
+        .request_identities()
+        .await
+        .map_err(|e| format!("The agent did not list its keys: {e}"))?;
+    identities
+        .iter()
+        .map(|identity| {
+            let line = identity
+                .public_key()
+                .to_openssh()
+                .map_err(|e| format!("The agent's key could not be read: {e}"))?;
+            crate::key_setup::PublicLine::parse(&line)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -11,7 +11,7 @@ use russh::keys::{Algorithm, PrivateKeyWithHashAlg};
 
 use super::client::Client;
 use super::sign_on::{Outcome, ask_or_skip};
-use super::{Commands, Event, Link, Options, Prompt, PromptField, Target, agent};
+use super::{Commands, Event, Link, Options, Prompt, PromptField, SignedOnWith, Target, agent};
 use crate::Error;
 use crate::known_hosts::fingerprint;
 
@@ -42,7 +42,7 @@ pub(super) async fn sign_on(
         )
         .await?
         {
-            AgentOutcome::SignedOn => return Ok(Outcome::Success),
+            AgentOutcome::SignedOn => return Ok(Outcome::Success(SignedOnWith::Agent)),
             AgentOutcome::Refused(methods) => remaining = methods,
             AgentOutcome::NoKeys => {}
         }
@@ -66,7 +66,7 @@ pub(super) async fn sign_on(
                     "Signed on with the key {shown} ({})",
                     fingerprint(&public)
                 ));
-                return Ok(Outcome::Success);
+                return Ok(Outcome::Success(SignedOnWith::KeyFile));
             }
             AuthResult::Failure {
                 remaining_methods, ..

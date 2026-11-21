@@ -377,7 +377,8 @@ impl Session {
                         self.state = State::SigningOn;
                     }
                 }
-                Event::Started => {
+                // How the user signed on is for the key sign-on offer (R-SSH-67, Phase 32 step 2).
+                Event::Started { with: _ } => {
                     if self.log_file.is_none() && self.source.log_mode != crate::log::LogMode::Off {
                         self.start_log();
                     }
@@ -394,6 +395,8 @@ impl Session {
                 | Event::JobEnded { .. }
                 | Event::Door { .. }
                 | Event::Forwarded { .. }) => self.jobs.push(job),
+                // Only the key setup asks for them (R-SSH-67, Phase 32 step 2).
+                Event::AgentKeys(_) => {}
                 Event::Ended(ending) => {
                     self.log.push(LogLine::now(ending_text(&ending)));
                     self.host_key = None;

@@ -152,6 +152,8 @@ pub enum Command {
     },
     /// Stops the forwarding of [`Command::Forward`].
     Unforward(JobId),
+    /// Lists the running agent's keys: [`Event::AgentKeys`] (R-SSH-67).
+    AgentKeys,
     /// Runs `command` for a desktop transfer, its data to and from the relay's `stream` (R-SSH-55, [`pipe`]); its
     /// end is [`Event::JobEnded`], and [`Command::EndJob`] ends it.
     Pipe {
@@ -226,8 +228,10 @@ pub enum Event {
         /// transfer to this host from another server (R-SSH-53, D58).
         host_key: String,
     },
-    /// Signed on and the shell is running.
-    Started,
+    /// Signed on and the shell is running; how the user signed on, for offering key sign-on (R-SSH-67).
+    Started {
+        with: SignedOnWith,
+    },
     /// Something went wrong that did not end the connection, in plain words (a key file that cannot be read).
     Problem(String),
     /// Output of a job started with [`Command::Exec`], as it comes.
@@ -251,7 +255,32 @@ pub enum Event {
         id: JobId,
         port: Result<u16, String>,
     },
+    /// The answer to [`Command::AgentKeys`]: the agent's keys, or why there are none.
+    AgentKeys(Result<Vec<crate::key_setup::PublicLine>, String>),
     Ended(Ending),
+}
+
+/// How the user signed on to the target (R-SSH-67).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignedOnWith {
+    /// The server asked for nothing ("none", RFC 4252 §5.2).
+    Nothing,
+    /// A key of the running agent.
+    Agent,
+    /// A key file.
+    KeyFile,
+    KeyboardInteractive,
+    Password,
+}
+
+impl SignedOnWith {
+    /// Whether it was something typed, so key sign-on is worth offering.
+    pub const fn typed(self) -> bool {
+        match self {
+            Self::KeyboardInteractive | Self::Password => true,
+            Self::Nothing | Self::Agent | Self::KeyFile => false,
+        }
+    }
 }
 
 /// How a connection ended (R-SSH-5).
@@ -428,7 +457,7 @@ async fn session(
             transport: options.transport.clone(),
             shell: Shell::default(),
         };
-        let handle = hop_connect(
+        let (handle, _) = hop_connect(
             &jump.target,
             &hop,
             jumps.last(),
@@ -446,7 +475,7 @@ async fn session(
     }
     let gate = jobs::AgentGate::new(options.agent_forwarding);
     let doors = relay::Doors::default();
-    let handle = hop_connect(
+    let (handle, with) = hop_connect(
         target,
         options,
         jumps.last(),
@@ -455,8 +484,8 @@ async fn session(
         commands,
         link,
     )
-    .await
-    .map(Arc::new)?;
+    .await?;
+    let handle = Arc::new(handle);
 
     let (columns, rows) = {
         let t = lock(terminal);
@@ -486,7 +515,7 @@ async fn session(
                 }
                 Some(ChannelMsg::Success) if !started => {
                     started = true;
-                    link.send(Event::Started);
+                    link.send(Event::Started { with });
                 }
                 Some(ChannelMsg::Failure) if !started => return Err(Error::ShellRefused),
                 Some(ChannelMsg::ExitStatus { exit_status }) => ending = Ending::Exited(exit_status),
@@ -507,6 +536,7 @@ async fn session(
                 Some(Command::OpenDoor(id)) => link.send(Event::Door { id, door: relay::Door::new(id, Arc::clone(&handle), target.port) }),
                 Some(Command::Forward { id, door }) => doors.forward(&handle, id, door, link).await,
                 Some(Command::Unforward(id)) => doors.unforward(&handle, id).await,
+                Some(Command::AgentKeys) => link.send(Event::AgentKeys(agent::keys(options.agent.as_ref()).await)),
                 Some(Command::Pipe { id, command, stream }) => side.pipe(&handle, (id, command, stream), link).await,
                 Some(Command::HostKey(_) | Command::Answers(_)) => {}
             },
@@ -535,7 +565,7 @@ async fn hop_connect(
     known_hosts: KnownHosts,
     commands: &Commands,
     link: &Link,
-) -> Result<ssh::Handle<client::Client>, Error> {
+) -> Result<(ssh::Handle<client::Client>, SignedOnWith), Error> {
     let via = through.map(|(_, label)| format!(" through {label}"));
     link.log(format!(
         "Connecting to {} port {}{}",
@@ -604,8 +634,8 @@ async fn hop_connect(
     } else {
         target
     };
-    sign_on::sign_on(&mut handle, target, options, commands, link).await?;
-    Ok(handle)
+    let with = sign_on::sign_on(&mut handle, target, options, commands, link).await?;
+    Ok((handle, with))
 }
 
 /// The pseudo-terminal, agent forwarding, the environment, then the shell or the command (R-SSH-5, R-SSH-13,

@@ -7,7 +7,8 @@ use russh::client::{self as ssh, AuthResult, KeyboardInteractiveAuthResponse};
 
 use super::client::Client;
 use super::{
-    Command, Commands, Event, Link, Options, Prompt, PromptField, Target, public_key, wait_for,
+    Command, Commands, Event, Link, Options, Prompt, PromptField, SignedOnWith, Target, public_key,
+    wait_for,
 };
 use crate::{Error, Secret};
 
@@ -36,10 +37,10 @@ pub(super) async fn sign_on(
     options: &Options,
     commands: &Commands,
     link: &Link,
-) -> Result<(), Error> {
+) -> Result<SignedOnWith, Error> {
     // "none" asks the server which methods it accepts (RFC 4252 §5.2), and a few servers let it through.
     let mut methods = match handle.authenticate_none(target.user.as_str()).await? {
-        AuthResult::Success => return Ok(()),
+        AuthResult::Success => return Ok(SignedOnWith::Nothing),
         AuthResult::Failure {
             remaining_methods, ..
         } => remaining_methods.to_vec(),
@@ -61,9 +62,9 @@ pub(super) async fn sign_on(
             _ => password(handle, target, commands, link).await?,
         };
         match outcome {
-            Outcome::Success => {
+            Outcome::Success(with) => {
                 link.log(format!("Signed on with {}", <&str>::from(&ORDER[index])));
-                return Ok(());
+                return Ok(with);
             }
             Outcome::Failure(remaining) => {
                 link.log(format!("{} was refused", <&str>::from(&ORDER[index])));
@@ -97,7 +98,7 @@ fn names(methods: &[MethodKind]) -> String {
 }
 
 pub(super) enum Outcome {
-    Success,
+    Success(SignedOnWith),
     Failure(Vec<MethodKind>),
 }
 
@@ -123,7 +124,7 @@ async fn password(
             .authenticate_password(target.user.as_str(), password.expose())
             .await?
         {
-            AuthResult::Success => Outcome::Success,
+            AuthResult::Success => Outcome::Success(SignedOnWith::Password),
             AuthResult::Failure {
                 remaining_methods, ..
             } => Outcome::Failure(remaining_methods.to_vec()),
@@ -142,7 +143,9 @@ async fn keyboard_interactive(
         .await?;
     loop {
         match response {
-            KeyboardInteractiveAuthResponse::Success => return Ok(Outcome::Success),
+            KeyboardInteractiveAuthResponse::Success => {
+                return Ok(Outcome::Success(SignedOnWith::KeyboardInteractive));
+            }
             KeyboardInteractiveAuthResponse::Failure {
                 remaining_methods, ..
             } => {
