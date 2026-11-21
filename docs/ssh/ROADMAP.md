@@ -52,8 +52,8 @@ Parley's principles apply ([../ROADMAP.md](../ROADMAP.md) §2), read for SSH:
 | [Phase 36: the command palette](phases/phase-36-the-command-palette.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-48. |
 | [Phase 28: the terminal, lean](phases/phase-28-the-terminal-lean.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-18 (2026-11-16), R-SSH-19, R-SSH-24, R-SSH-25; R-SSH-17, R-SSH-21..23 dropped (D46). |
 | Phase 31: transfers with rsync | Planned in detail 2026-11-20 (D48, D58): R-SSH-53..57, R-SSH-66. Steps 1–5 built and tested 2026-11-21 (R-SSH-57, R-SSH-53, R-SSH-56, R-SSH-54 with R-SSH-31's engine part, R-SSH-55); R-SSH-66 built: rsync for Windows, macOS and Linux, named on the About page; all to check on the owner's servers and in a release run. |
-| Phase 30: tunnels | Later. |
-| Phase 32: keys made here | Later. |
+| Phase 30: tunnels | On hold until a user asks for it (D59): port forwarding only, R-SSH-30..32, R-SSH-34; X11 forwarding (R-SSH-33) dropped. |
+| Phase 32: key sign-on, set up here | Planned (2026-11-21, D60, IDEA-41): R-SSH-67, R-SSH-68; replaces the PuTTYgen of Parley SSH's own (R-SSH-37, R-SSH-38). To be planned in detail. |
 
 The table is in the order the phases are built (the owner, 2026-11-16; 37, 38, 39 and 29 moved ahead of 35, 36 and the rest of 28 the same day; then R-SSH-24 first, as Phase 35's marks build on the scrollback search, Claude's choice when asked); numbers are kept, so they are not in order.
 
@@ -63,8 +63,9 @@ Phase numbers continue the shared sequence; the next free one is on the last lin
 
 ### Phase 30 — tunnels
 
-PuTTY's Tunnels and X11 pages: local, remote and dynamic (SOCKS) port forwarding, X11 forwarding, and changing the
-forwardings while connected. R-SSH-30..34.
+Local, remote and dynamic (SOCKS) port forwarding, and changing the forwardings while connected: R-SSH-30..32,
+R-SSH-34. On hold until a user asks for it (D59); X11 forwarding (R-SSH-33) is dropped. R-SSH-31's engine part was
+built for Phase 31 (R-SSH-54).
 
 ### Phase 31 — transfers with rsync
 
@@ -86,10 +87,11 @@ Built in this order, each step usable and checked on the owner's servers before 
 Tested without a network as the rest of `parley-ssh-core`: the pure functions with recorded rsync output, and whole
 transfers against the in-process russh server of `tests/net.rs` with a fake rsync on its side.
 
-### Phase 32 — keys made here
+### Phase 32 — key sign-on, set up here
 
-What PuTTY does with PuTTYgen: make a key pair, change its passphrase, convert between OpenSSH and PuTTY formats, and
-copy the public key for `authorized_keys`. R-SSH-37, R-SSH-38.
+From IDEA-41 (the owner, 2026-11-21, D60): after signing on with a password, set up signing on with a key from the
+window, making a key only when there is none. Smaller than the PuTTYgen of Parley SSH's own it replaces (R-SSH-37,
+R-SSH-38): every OS ships `ssh-keygen` for the rest. R-SSH-67, R-SSH-68.
 
 ### Later (unordered, to be planned)
 
@@ -118,18 +120,20 @@ planned, as Phase 22's rows were.
 | R-SSH-30 | **Local port forwarding** (`-L`, RFC 4254 §7.2): listen on a local port and forward each connection to a host and port seen from the server; bound to loopback unless "accept connections from other hosts" is on. | 30 |
 | R-SSH-31 | **Remote port forwarding** (`-R`, RFC 4254 §7.1): ask the server to listen and forward its connections to a local host and port. | 30 |
 | R-SSH-32 | **Dynamic forwarding** (`-D`): a local SOCKS 4 and 5 server whose connections go out through the server. | 30 |
-| R-SSH-33 | **X11 forwarding** (RFC 4254 §6.3): off by default; the X display and its MIT-MAGIC-COOKIE-1 from the Xauthority file, with a fake cookie towards the server as OpenSSH does. | 30 |
+| R-SSH-33 | ~~**X11 forwarding** (RFC 4254 §6.3): off by default; the X display and its MIT-MAGIC-COOKIE-1 from the Xauthority file, with a fake cookie towards the server as OpenSSH does.~~ Dropped (D59). | 30 |
 | R-SSH-34 | **Tunnels while connected**: a Tunnels dialog adds and removes forwardings on an open connection; the status bar shows how many forwardings and open tunnel connections there are; a port that cannot be opened is said in the Event Log and the status bar, not in a pop-up. | 30 |
 | R-SSH-35 | ~~**An SFTP panel** (draft-ietf-secsh-filexfer-02, version 3, as OpenSSH's server): beside the terminal, on the same connection: browse the server's folders starting in the home folder, download and upload files and folders (also by dragging from and to the desktop), rename, delete (asked first), make a folder, change permissions; transfers with progress and Cancel in the status bar; overwriting asks.~~ *Replaced 2026-11-16 by rsync (D48, R-SSH-53..57).* | 31 |
 | R-SSH-36 | ~~**SCP where there is no SFTP**: downloads and uploads through `scp -f`/`scp -t` when the server has no SFTP subsystem, in the same panel with fewer actions.~~ *Replaced 2026-11-16 by rsync (D48, R-SSH-53..57).* | 31 |
-| R-SSH-37 | **Make a key pair** (PuTTY's PuTTYgen): Ed25519 by default, ECDSA P-256/384/521 or RSA 3072/4096, with a comment and a passphrase (asked twice); save the private key as OpenSSH or `.ppk` v3 and the public key; show the public key line for `authorized_keys` with a Copy button and its SHA-256 fingerprint. | 32 |
-| R-SSH-38 | **Change a key**: load a private key file (both formats), change or remove its passphrase, and save it in the other format. | 32 |
+| R-SSH-37 | ~~**Make a key pair** (PuTTY's PuTTYgen): Ed25519 by default, ECDSA P-256/384/521 or RSA 3072/4096, with a comment and a passphrase (asked twice); save the private key as OpenSSH or `.ppk` v3 and the public key; show the public key line for `authorized_keys` with a Copy button and its SHA-256 fingerprint.~~ *Replaced 2026-11-21 by R-SSH-67, R-SSH-68 (D60).* | 32 |
+| R-SSH-38 | ~~**Change a key**: load a private key file (both formats), change or remove its passphrase, and save it in the other format.~~ *Replaced 2026-11-21 by R-SSH-67, R-SSH-68 (D60).* | 32 |
 | R-SSH-53 | **Server to server, direct** (2026-11-16, IDEA-43, D48; *details 2026-11-20, D58*). With sessions open to A and B, Parley runs rsync on A over a second channel of A's connection (an exec channel beside the shell, its output not on the screen), pushing a path to B: `rsync -az --partial --info=progress2 --no-inc-recursive --protect-args -e '<ssh to B>' SRC user@B:DST`, every argument shell-quoted. **Signing on to B:** with the user's agent, forwarded on that channel only (`auth-agent-req@openssh.com`) and accepted only while the transfer runs, whatever the session's forwarding setting; the panel says that A's administrator could use the keys meanwhile; no key is copied to A, and the data does not pass through the desktop. **B's host key:** Parley writes the key it verified for B's session to a temporary file on A (`mktemp`, mode 600) and runs ssh with `-o UserKnownHostsFile=<file> -o StrictHostKeyChecking=yes -o HostKeyAlias=<B>`, removed when the transfer ends however it ends. User, host and port for B are those of B's session (a jump host of B's: R-SSH-54 instead). | 31 |
 | R-SSH-54 | **Server to server, through Parley SSH** (2026-11-16, IDEA-43, D48; *details 2026-11-20, D58*). When A cannot reach B (the user says so, or the direct transfer fails to connect, offered as a try through Parley), Parley asks A to listen on a free loopback port (`tcpip-forward`, RFC 4254 §7.1, the engine part of R-SSH-31; the Tunnels dialog stays in Phase 30) and carries each connection to it through B's open connection to B's own SSH port (`direct-tcpip`, so a jump host of B's works too). A's rsync then connects to `127.0.0.1:<port>` with the same agent and host-key rules as R-SSH-53. The forwarding is cancelled when the transfer ends. Slower: the data passes through the desktop, and the panel says so. | 31 |
 | R-SSH-55 | **Desktop and server** (2026-11-16, IDEA-43, D48; *details 2026-11-20, D58*). Either way between the desktop and a server's open session, with the desktop's rsync (R-SSH-66) and Parley SSH as its remote shell: rsync is started with `-e` naming Parley SSH's relay mode, which carries rsync's stdin and stdout to an exec channel on the session's open connection through the running window (a loopback connection with a one-time token), so nothing signs on again. Desktop paths are chosen with the file window or typed; Windows paths are given to rsync in the form its build needs. | 31 |
 | R-SSH-56 | **The Transfer panel** (2026-11-16, IDEA-43, D48; *details 2026-11-20*). Opened from the Session menu, the palette and Ctrl+Shift+Y (Cmd+Y on macOS, as Parley SSH's other shortcuts): a source and a target, each an open session (or the desktop) and a path, and whether a folder's contents or the folder itself is copied (the trailing `/`, said in words). **Dry run first** (`--dry-run --itemize-changes`), listed as what will be added, changed and deleted, before anything is copied; then progress, bytes, speed and time left (from `--info=progress2`), Cancel (the rsync on the server is ended, its partial files kept), and Resume (`--partial`). **Switches:** delete extra files at the target (off; the dry run lists what goes), keep permissions, owner and times (`-a`, on), compress (on), excludes (one pattern a line). Errors in plain words from rsync's exit code and its last lines. **Saved transfers:** by name, with sessions by their saved name, run again from the panel and the palette (R-SSH-48). One transfer at a time per source session. | 31 |
 | R-SSH-57 | **rsync is checked first** (2026-11-16, IDEA-43, D48; *details 2026-11-20*). Before a dry run, `rsync --version` runs on each server end (exec channel) and on the desktop's rsync; both need 3.1 or later (for `--info=progress2`). When one has none, or an older one, this is said in plain words with the end, what was found and how to get it (`dnf`/`apt install rsync`; on IBM i, `yum install rsync` from the open-source packages), before anything is copied. A pure function in `parley-ssh-core` reads the version line, tested with GNU rsync 3.1–3.4, 2.6.9, openrsync and nonsense. | 31 |
 | R-SSH-66 | **rsync comes with Parley SSH** (2026-11-20, D58). The Windows and macOS installers ship rsync 3.x beside Parley SSH, used only by it (not put on the PATH): built in the release workflow at a pinned version with its checksum, on macOS for Apple silicon and Intel, on Windows from MSYS2's rsync with the DLLs it needs. Its licence (GPLv3) and where its source is ship with it, and the About page names it with its version. On Linux the distribution's rsync is used: the `parley-ssh` package depends on `rsync`, and the AppImage uses the one installed or says how to get it (R-SSH-57). Settings ▸ Transfers may name another rsync. | 31 |
+| R-SSH-67 | **Set up key sign-on** (2026-11-21, IDEA-41, D60). On an open session (offered after a password sign-on, and in the Session menu and the palette): the public key of the session's key file, or the agent's key chosen, or one made by R-SSH-68, is added to `~/.ssh/authorized_keys` on the server over a side channel (R-SSH-57's): `~/.ssh` made with mode 700 and the file 600 where missing, a key already there not added twice, and the server's answer said in plain words. On IBM i, the home folder is checked too, as its sshd refuses keys when the home folder or `.ssh` can be written by others (StrictModes), and what to change is said. The saved session then uses that key, and the next connection tries it. | 32 |
+| R-SSH-68 | **A key when there is none** (2026-11-21, D60). When neither the session, the agent nor `~/.ssh` holds a key, R-SSH-67 offers to make one: Ed25519, a comment (`user@computer`), a passphrase asked twice (none allowed, with a warning), saved as `~/.ssh/id_ed25519` and `.pub` (another name when those exist; never overwritten), private key readable by the user only. Other key types, changing a passphrase and converting formats are left to `ssh-keygen`. | 32 |
 
 ## 6. Open questions
 
@@ -154,4 +158,4 @@ D36–D38 in [../DECISIONS.md](../DECISIONS.md) bind this work too.
   `phases/phase-NN-<slug>.md`, and its §3 row links to it.
 - An idea is not a plan: it goes in [IDEAS.md](IDEAS.md) (by theme in [ideas/](ideas/)) until it is picked, then becomes requirements here.
 
-Next free ID: `R-SSH-67` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).
+Next free ID: `R-SSH-69` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).
