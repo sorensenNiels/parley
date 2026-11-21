@@ -54,7 +54,7 @@ Parley's principles apply ([../ROADMAP.md](../ROADMAP.md) §2), read for SSH:
 | [Phase 28: the terminal, lean](phases/phase-28-the-terminal-lean.md) | Done (2026-11-20). |
 | Phase 31: transfers with rsync | Built 2026-11-21 (D48, D58): R-SSH-53..57, R-SSH-66; the owner's checks on real servers and in a release run are open ([FEATURES.md](FEATURES.md)). |
 | Phase 30: tunnels | Parked until a user asks for it (D59): [../PARKED.md](../PARKED.md). |
-| Phase 32: key sign-on, set up here | Planned (2026-11-21, D60, IDEA-41): R-SSH-67, R-SSH-68; to be planned in detail. |
+| Phase 32: key sign-on, set up here | Planned in detail 2026-11-21 (D60, D63, IDEA-41): R-SSH-67, R-SSH-68; next to build. |
 
 The table is in the order the phases were built; numbers are kept, so they are not in order.
 
@@ -88,6 +88,22 @@ From IDEA-41 (the owner, 2026-11-21, D60): after signing on with a password, set
 window, making a key only when there is none. Smaller than the PuTTYgen of Parley SSH's own it replaces (R-SSH-37,
 R-SSH-38, dropped): every OS ships `ssh-keygen` for the rest. R-SSH-67, R-SSH-68.
 
+Built in this order, each step tested before the next:
+1. **The engine** (`parley-ssh-core`): `Event::Started` says how the user signed on (key file, agent, password,
+   keyboard-interactive); the running agent's keys listed on request; a new `keys` module with pure functions: the
+   command that adds a key line to `authorized_keys` (shell-quoted, not twice, `~/.ssh` 700 and the file 600), its
+   answer read, `uname` telling IBM i, and `ls -ld` output read for folders the group or others can write; making an
+   Ed25519 key with `ssh-key` (encrypted with the passphrase; never over an existing file; the system's randomness
+   through `ssh-key`'s `getrandom` feature, at the version `russh` pins). Tested with a real `sh`
+   in a temporary home on Unix, fixtures of `ls -ld` from Linux and IBM i, and a made key read back with its
+   passphrase.
+2. **The window** (`parley-ssh-ui`): the offer bar after a password sign-on, the Set up key sign-on dialog (which key,
+   making one, the result, IBM i's folders and Fix), the saved session updated, the Session menu and the palette;
+   kittest tests, buttons in place.
+3. **The owner's checks**: a Linux server and their IBM i, each from a password sign-on to a key sign-on on the next
+   connection, IBM i with a home folder the group can write (Claude does not sign on to SSH servers: D22 covers
+   SQL only).
+
 ### Later (unordered, to be planned)
 
 From PuTTY, after Phase 32 if still wanted: an agent of Parley SSH's own (PuTTY's Pageant; Phase 27 uses the agent
@@ -116,7 +132,7 @@ Open requirements, in the order they are planned, as `| ID | Requirement | Phase
 | R-SSH-56 | **The Transfer panel** (2026-11-16, IDEA-43, D48; *details 2026-11-20*). Opened from the Session menu, the palette and Ctrl+Shift+Y (Cmd+Y on macOS, as Parley SSH's other shortcuts): a source and a target, each an open session (or the desktop) and a path, and whether a folder's contents or the folder itself is copied (the trailing `/`, said in words). **Dry run first** (`--dry-run --itemize-changes`), listed as what will be added, changed and deleted, before anything is copied; then progress, bytes, speed and time left (from `--info=progress2`), Cancel (the rsync on the server is ended, its partial files kept), and Resume (`--partial`). **Switches:** delete extra files at the target (off; the dry run lists what goes), keep permissions, owner and times (`-a`, on), compress (on), excludes (one pattern a line). Errors in plain words from rsync's exit code and its last lines. **Saved transfers:** by name, with sessions by their saved name, run again from the panel and the palette (R-SSH-48). One transfer at a time per source session. | 31 |
 | R-SSH-57 | **rsync is checked first** (2026-11-16, IDEA-43, D48; *details 2026-11-20*). Before a dry run, `rsync --version` runs on each server end (exec channel) and on the desktop's rsync; both need 3.1 or later (for `--info=progress2`). When one has none, or an older one, this is said in plain words with the end, what was found and how to get it (`dnf`/`apt install rsync`; on IBM i, `yum install rsync` from the open-source packages), before anything is copied. A pure function in `parley-ssh-core` reads the version line, tested with GNU rsync 3.1–3.4, 2.6.9, openrsync and nonsense. | 31 |
 | R-SSH-66 | **rsync comes with Parley SSH** (2026-11-20, D58). The Windows and macOS installers ship rsync 3.x beside Parley SSH, used only by it (not put on the PATH): built in the release workflow at a pinned version with its checksum, on macOS for Apple silicon and Intel, on Windows from MSYS2's rsync with the DLLs it needs. Its licence (GPLv3) and where its source is ship with it, and the About page names it with its version. On Linux the distribution's rsync is used: the `parley-ssh` package depends on `rsync`, and the AppImage uses the one installed or says how to get it (R-SSH-57). Settings ▸ Transfers may name another rsync. | 31 |
-| R-SSH-67 | **Set up key sign-on** (2026-11-21, IDEA-41, D60). On an open session (offered after a password sign-on, and in the Session menu and the palette): the public key of the session's key file, or the agent's key chosen, or one made by R-SSH-68, is added to `~/.ssh/authorized_keys` on the server over a side channel (R-SSH-57's): `~/.ssh` made with mode 700 and the file 600 where missing, a key already there not added twice, and the server's answer said in plain words. On IBM i, the home folder is checked too, as its sshd refuses keys when the home folder or `.ssh` can be written by others (StrictModes), and what to change is said. The saved session then uses that key, and the next connection tries it. | 32 |
+| R-SSH-67 | **Set up key sign-on** (2026-11-21, IDEA-41, D60; *details 2026-11-21, D63*). **Offered:** after a sign-on with a password or keyboard-interactive, a one-line bar above the terminal: "Sign on with a key next time? Set up… · Not for this session" (the latter kept in the saved session, which then never shows the bar); and on any open session from the Session menu and the palette ("Set up key sign-on…"). **Which key:** the session's key file (its `.pub` beside it, or the public part an OpenSSH private key holds unencrypted), an agent key chosen from the running agent's list, `~/.ssh/id_ed25519`, `id_ecdsa` or `id_rsa` when one exists, or a new one (R-SSH-68), the first that exists chosen at first. **Adding it:** over a side channel (R-SSH-57's) one command makes `~/.ssh` (mode 700) and `authorized_keys` (600) where missing, adds the key line only when the same key is not there, and says which it did; the dialog says it in plain words, or the server's error. **IBM i** (`uname` says `OS400`): the home folder and `~/.ssh` are checked with `ls -ld`; one the group or others can write (sshd's StrictModes then refuses keys) is named with why, and Fix runs `chmod go-w` on just those folders after asking. **Then:** the saved session gets the key file (or the agent key's fingerprint, R-SSH-12's "Only the key"), and the next connection tries it; a session not saved is told what to choose. | 32 |
 | R-SSH-68 | **A key when there is none** (2026-11-21, D60). When neither the session, the agent nor `~/.ssh` holds a key, R-SSH-67 offers to make one: Ed25519, a comment (`user@computer`), a passphrase asked twice (none allowed, with a warning), saved as `~/.ssh/id_ed25519` and `.pub` (another name when those exist; never overwritten), private key readable by the user only. Other key types, changing a passphrase and converting formats are left to `ssh-keygen`. | 32 |
 
 ## 6. Decisions

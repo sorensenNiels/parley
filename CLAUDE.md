@@ -20,7 +20,7 @@ follow the roadmap's order. If a request is unclear, or would change a decision 
 | `docs/PARKED.md` | What is decided not to be built now, for all three programs (D62): waiting for a user, not now, dropped; with each item's text. | Not a plan. An item comes back only when a user needs it, with the same ID. |
 | `docs/IDEAS.md`, `docs/ideas/` | Ideas (`IDEA-n`) that may become requirements, one file per theme; next free ID on `IDEAS.md`'s last line. | Not a plan: new ideas go here. When one is picked, write requirements in the roadmap and mark the idea. |
 | `docs/sql/` | The same layout for SQL: every `R-SQL`, the SQL probes (R-NET-8/9), the assistant switch (R-ADD-3), decisions D19–D35, D39 and D52 in `sql/DECISIONS.md`. | Same rules. One sequence of numbers for both: `R-SQL` is counted on the SQL roadmap's last line; every other area, `D`, phases and `IDEA` on `docs/ROADMAP.md`'s and `docs/IDEAS.md`'s last lines, whichever product uses it. |
-| `docs/ssh/` | The same layout for Parley SSH: every `R-SSH` (counted on its roadmap's last line), D41–D51, D58 and D59 in `ssh/DECISIONS.md`, its ideas. | Same rules and the same shared sequence for `D`, phases and `IDEA`. |
+| `docs/ssh/` | The same layout for Parley SSH: every `R-SSH` (counted on its roadmap's last line), D41–D51, D58, D59 and D63 in `ssh/DECISIONS.md`, its ideas. | Same rules and the same shared sequence for `D`, phases and `IDEA`. |
 | `docs/PRD.md`, `docs/ARCHITECTURE.md` | The product summary and the design with diagrams (`docs/images/`), for readers new to Parley. | Summaries that link IDs, not specs: update them when a phase ends or the design changes; never copy requirement text into them. |
 
 ## Working efficiently
