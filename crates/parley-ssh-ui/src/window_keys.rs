@@ -26,6 +26,8 @@ pub enum WindowKey {
     Restart,
     /// The snippet picker (R-SSH-49).
     Snippets,
+    /// The Transfer panel (R-SSH-56).
+    Transfer,
     /// Find in the scrollback (R-SSH-24).
     Find,
     /// The command palette (R-SSH-48).
@@ -132,6 +134,7 @@ fn shortcut(key: Key, held: Held, mac: bool, split: bool) -> Option<WindowKey> {
         (Key::D, h) if h == ours => WindowKey::Duplicate,
         (Key::R, h) if h == ours => WindowKey::Restart,
         (Key::S, h) if h == ours => WindowKey::Snippets,
+        (Key::Y, h) if h == ours => WindowKey::Transfer,
         (Key::F, h) if h == ours => WindowKey::Find,
         (Key::P, h)
             if (!mac && h == ours)

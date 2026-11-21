@@ -61,6 +61,10 @@ pub struct Session {
     started: bool,
     pub algorithms: Option<Algorithms>,
     pub fingerprint: Option<String>,
+    /// The host key trusted, as an OpenSSH line, for transfers to this host (R-SSH-53).
+    pub host_key_line: Option<String>,
+    /// What the jobs on this connection said since the Transfer panel last looked (Phase 31).
+    jobs: Vec<Event>,
     /// What happened, for the event log (R-SSH-16).
     pub log: Vec<LogLine>,
     pub view: screen::View,
@@ -158,6 +162,8 @@ impl Session {
             started: false,
             algorithms: None,
             fingerprint: None,
+            host_key_line: None,
+            jobs: Vec::new(),
             log: Vec::new(),
             view: screen::View::default(),
             host_key: None,
@@ -322,6 +328,26 @@ impl Session {
         self.connection.send(Command::Disconnect);
     }
 
+    /// Runs a command on a side channel (Phase 31); what it says comes from [`Self::take_jobs`].
+    pub fn exec(&self, exec: parley_ssh_core::net::Exec) {
+        self.connection.send(Command::Exec(exec));
+    }
+
+    pub fn end_job(&self, id: parley_ssh_core::net::JobId) {
+        self.connection.send(Command::EndJob(id));
+    }
+
+    /// What the jobs said since the last call.
+    pub fn take_jobs(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.jobs)
+    }
+
+    /// Whether the connection goes through a jump host, which a server-to-server copy cannot follow yet
+    /// (R-SSH-54).
+    pub fn through_jump(&self) -> bool {
+        !self.source.proxy_jump.trim().is_empty()
+    }
+
     /// Takes in what the connection said since the last frame.
     pub fn poll(&mut self) {
         let events: Vec<Event> = self.connection.events().collect();
@@ -345,9 +371,11 @@ impl Session {
                 Event::Secured {
                     algorithms,
                     fingerprint,
+                    host_key,
                 } => {
                     self.algorithms = Some(algorithms);
                     self.fingerprint = Some(fingerprint);
+                    self.host_key_line = Some(host_key);
                     if self.state == State::Connecting {
                         self.state = State::SigningOn;
                     }
@@ -364,8 +392,8 @@ impl Session {
                     self.problem = None;
                     self.grab_focus = true;
                 }
-                // Nothing here starts a job yet: the Transfer panel will (Phase 31, R-SSH-56).
-                Event::JobOutput { .. } | Event::JobEnded { .. } => {}
+                // For the Transfer panel, which started them (Phase 31).
+                job @ (Event::JobOutput { .. } | Event::JobEnded { .. }) => self.jobs.push(job),
                 Event::Ended(ending) => {
                     self.log.push(LogLine::now(ending_text(&ending)));
                     self.host_key = None;

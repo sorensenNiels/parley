@@ -3,6 +3,11 @@
 
 use std::fmt;
 
+mod run;
+pub use run::{
+    Direct, Progress, Remote, bytes_text, direct_command, last_progress, outcome, quote,
+};
+
 /// The oldest rsync with `--info=progress2`, which the progress needs (R-SSH-57).
 pub const OLDEST: Version = Version {
     major: 3,

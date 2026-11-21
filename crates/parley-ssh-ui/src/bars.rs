@@ -53,6 +53,8 @@ pub enum Action {
     StopReconnect,
     /// Start or stop the session in front's log (R-SSH-25).
     ToggleLog,
+    /// The Transfer panel (Phase 31, R-SSH-56).
+    Transfer,
 }
 
 /// What the header shows.
@@ -98,6 +100,12 @@ pub fn menu_bar(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
             } else {
                 Item(open, icons::RECORD, "Start log", Action::ToggleLog)
             },
+            Item(
+                true,
+                icons::UPLOAD_SIMPLE,
+                "Transfer files…",
+                Action::Transfer,
+            ),
             broadcast_item(header.broadcast, false),
             broadcast_item(header.broadcast, true),
             Item(true, icons::SIGN_OUT, "Exit", Action::Exit),

@@ -8,6 +8,21 @@
 
 ## In progress
 
+- **R-SSH-53, R-SSH-56 (first part), Phase 31 step 2** (2026-11-20, Linux under WSL): server to server, direct,
+  from the Transfer panel (Session ▸ Transfer files…, the palette, Ctrl+Shift+Y / Cmd+Y): a source and a target
+  session with a path each, Copy, progress, Cancel, and the outcome in plain words. Copy checks rsync on both ends,
+  then runs `transfer::direct_command` on the source with the agent for that job only and B's host key (from
+  `Event::Secured`'s new `host_key`) in a temporary known_hosts file made with `set -C` and removed by a `trap`.
+  A target reached through a jump host is refused for now (R-SSH-54). **Automated**: `transfer::run::tests` (the
+  exact command with `æøå` and a quote in the paths, IPv6, a missing or odd host key, quoting, progress lines with
+  `,` and `.` separators, bytes, exit codes and ssh's messages, a file's `Permission denied` not read as a refused
+  sign-on), `tests/net.rs` (the host key line in `Secured`), `parley-ssh-ui`'s `transfer::tests` (check then copy
+  with the agent; progress only from the source's job; an old rsync stops it; a failed and a cancelled copy; a jump
+  host, the same session twice and no path refused; a lost session), `tests.rs` (Ctrl+Shift+Y opens the panel, Copy
+  disabled without sessions, Close). **Seen** (`--screenshot`, dark, the panel opened by a temporary line).
+  **To check on the owner's servers**: a copy between two servers with the agent, a cancel and a second Copy that
+  goes on, a wrong path, a target without the agent's key; the panel in light mode.
+
 - **R-SSH-57, Phase 31 step 1** (2026-11-20, Linux under WSL): side channels and the check for the servers; the
   desktop's rsync comes with step 5 and the panel that shows the check with step 2. `parley-ssh-core`'s `net/jobs.rs`
   runs commands on exec channels beside the shell (`Command::Exec`, `Command::EndJob`, `Event::JobOutput`,

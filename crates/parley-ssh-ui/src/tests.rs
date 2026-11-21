@@ -4,7 +4,7 @@
 use std::sync::Mutex;
 
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 
 use super::*;
 
@@ -1116,4 +1116,22 @@ fn escape_empties_the_search_and_a_long_list_folds_under_the_favourites_r_ssh_65
     };
     assert_eq!(form.search, "");
     h.get_by_label("ALL SESSIONS (12)");
+}
+
+#[test]
+fn ctrl_shift_y_opens_the_transfer_panel_and_close_closes_it_r_ssh_56() {
+    let mut h = app(Settings::default());
+    h.run_steps(2);
+    assert!(h.query_by_label("Copy").is_none());
+    press(&mut h, egui::Key::Y, CTRL_SHIFT);
+    let copy = h.get_by_label("Copy");
+    assert!(
+        copy.accesskit_node().is_disabled(),
+        "nothing to copy between without two sessions"
+    );
+    assert!(h.state().transfer.is_some());
+    h.get_by_label("Close").click();
+    h.run_steps(2);
+    assert!(h.state().transfer.is_none());
+    assert!(h.query_by_label("Copy").is_none());
 }

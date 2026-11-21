@@ -496,7 +496,16 @@ fn a_whole_session_from_host_key_to_exit_status_r_ssh_3_r_ssh_4_r_ssh_5() {
         question.fingerprint
     );
     connection.send(Command::HostKey(HostKeyAnswer::AcceptAndSave));
-    assert!(matches!(next(&connection), Event::Secured { .. }));
+    let Event::Secured { host_key, .. } = next(&connection) else {
+        panic!("secured")
+    };
+    let public = PrivateKey::from_openssh(HOST_KEY)
+        .expect("test key")
+        .public_key()
+        .to_openssh()
+        .expect("encoded");
+    assert_eq!(host_key, public, "the key a transfer trusts (R-SSH-53)");
+    assert_eq!(host_key.split_whitespace().count(), 2, "{host_key}");
     let saved = std::fs::read_to_string(known.own_file()).expect("saved");
     assert!(
         saved.starts_with(&format!("[127.0.0.1]:{} ssh-ed25519 ", address.port())),

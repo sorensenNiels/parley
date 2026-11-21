@@ -110,6 +110,8 @@ pub(super) struct Client {
     commands: Commands,
     link: Link,
     fingerprint: String,
+    /// The host key, as an OpenSSH line (R-SSH-53).
+    host_key: String,
 }
 
 impl Client {
@@ -131,6 +133,7 @@ impl Client {
             commands,
             link,
             fingerprint: String::new(),
+            host_key: String::new(),
         }
     }
 
@@ -181,6 +184,8 @@ impl ssh::Handler for Client {
             return Err(Error::HostKeyRejected);
         };
         self.fingerprint = known_hosts::fingerprint(key);
+        // An empty line only makes a later transfer to this host fail, saying why.
+        self.host_key = key.to_openssh().unwrap_or_default();
         self.link.log(format!(
             "Host key {} {}",
             known_hosts::key_type(key),
@@ -222,6 +227,7 @@ impl ssh::Handler for Client {
             Hop::Target => self.link.send(Event::Secured {
                 algorithms,
                 fingerprint: self.fingerprint.clone(),
+                host_key: self.host_key.clone(),
             }),
             // A jump host's are in the event log only (R-SSH-43).
             Hop::Jump => {}

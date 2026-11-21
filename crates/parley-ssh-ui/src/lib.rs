@@ -21,6 +21,7 @@ pub mod settings;
 pub mod snippets;
 mod start;
 mod tabs;
+mod transfer;
 mod window;
 mod window_keys;
 
@@ -122,6 +123,8 @@ pub struct ParleySshUi {
     /// The command palette, while open (R-SSH-48).
     palette: Option<palette::Palette>,
     beeper: Option<Beeper>,
+    /// The Transfer panel, while open (Phase 31).
+    transfer: Option<transfer::Panel>,
 }
 
 impl std::fmt::Debug for ParleySshUi {
@@ -166,6 +169,7 @@ impl ParleySshUi {
             notifier: None,
             palette: None,
             beeper: None,
+            transfer: None,
         }
     }
 
@@ -411,6 +415,7 @@ impl ParleySshUi {
         let action = action.or(status_action);
         self.drop_failed_panes();
         self.tab_bar(ui);
+        self.transfer_panel(ui);
         self.central(ui);
         if let Some(action) = action {
             self.carry_out(ui.ctx(), action);
@@ -624,6 +629,7 @@ impl ParleySshUi {
             }
             Action::SendSnippet(i) => self.send_snippet(i),
             Action::PickSnippet => self.open_picker(),
+            Action::Transfer => self.open_transfer(),
             Action::EditSnippets => {
                 self.settings_dialog =
                     Some(settings::Dialog::open(ctx, &self.settings).on(settings::Page::Snippets));

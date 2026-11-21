@@ -119,6 +119,7 @@ impl ParleySshUi {
             WindowKey::Restart => self.carry_out(ctx, crate::bars::Action::Restart),
             WindowKey::FontSize(step) => self.settings.step_font_size(step),
             WindowKey::Snippets => self.open_picker(),
+            WindowKey::Transfer => self.open_transfer(),
             WindowKey::Find => self.carry_out(ctx, crate::bars::Action::Find),
             WindowKey::Palette => self.palette = Some(crate::palette::Palette::default()),
             WindowKey::PreviousCommand | WindowKey::NextCommand => {

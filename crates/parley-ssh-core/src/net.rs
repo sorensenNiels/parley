@@ -202,6 +202,9 @@ pub enum Event {
     Secured {
         algorithms: Algorithms,
         fingerprint: String,
+        /// The host key the user trusted, as an OpenSSH line without a comment (`ssh-ed25519 AAAA…`), for a
+        /// transfer to this host from another server (R-SSH-53, D58).
+        host_key: String,
     },
     /// Signed on and the shell is running.
     Started,

@@ -387,6 +387,7 @@ pub fn shortcut_sheet(ctx: &Context, mac: bool, last_height: &mut f32) -> bool {
             format!("{command}+Up, {command}+Down"),
         ),
         ("Send a snippet", format!("{command}+S")),
+        ("Transfer files", format!("{command}+Y")),
         ("Broadcast to this tab, or stop", format!("{command}+B")),
         ("Stop broadcasting", "Escape twice".to_owned()),
         (
