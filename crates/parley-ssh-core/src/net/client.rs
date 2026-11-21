@@ -106,6 +106,8 @@ pub(super) struct Client {
     /// for it running (D58).
     forward_to: Option<AgentAddress>,
     gate: super::jobs::AgentGate,
+    /// The ports the server forwards through Parley, each to the other server's door (R-SSH-54).
+    doors: super::relay::Doors,
     hop: Hop,
     commands: Commands,
     link: Link,
@@ -118,7 +120,11 @@ impl Client {
     pub(super) fn new(
         target: &Target,
         known_hosts: KnownHosts,
-        (forward_to, gate): (Option<AgentAddress>, super::jobs::AgentGate),
+        (forward_to, gate, doors): (
+            Option<AgentAddress>,
+            super::jobs::AgentGate,
+            super::relay::Doors,
+        ),
         hop: Hop,
         commands: Commands,
         link: Link,
@@ -129,6 +135,7 @@ impl Client {
             known_hosts,
             forward_to,
             gate,
+            doors,
             hop,
             commands,
             link,
@@ -232,6 +239,29 @@ impl ssh::Handler for Client {
             // A jump host's are in the event log only (R-SSH-43).
             Hop::Jump => {}
         }
+        Ok(())
+    }
+
+    /// A connection came in on a port the server forwards (R-SSH-54): carried through the other server's door; one
+    /// on a port Parley did not ask for is refused.
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<ssh::Msg>,
+        _connected_address: &str,
+        connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: ssh::ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Error> {
+        let Some(door) = self.doors.get(connected_port) else {
+            reply
+                .reject(russh::ChannelOpenFailure::AdministrativelyProhibited)
+                .await;
+            return Ok(());
+        };
+        reply.accept().await;
+        super::relay::carry(channel, door, self.link.clone());
         Ok(())
     }
 

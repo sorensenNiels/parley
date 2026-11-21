@@ -51,7 +51,7 @@ Parley's principles apply ([../ROADMAP.md](../ROADMAP.md) §2), read for SSH:
 | [Phase 35: shell integration](phases/phase-35-shell-integration.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-44..47. |
 | [Phase 36: the command palette](phases/phase-36-the-command-palette.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-48. |
 | [Phase 28: the terminal, lean](phases/phase-28-the-terminal-lean.md) | Done (2026-11-20), checked by the owner on Windows, macOS, Linux and WSL: R-SSH-18 (2026-11-16), R-SSH-19, R-SSH-24, R-SSH-25; R-SSH-17, R-SSH-21..23 dropped (D46). |
-| Phase 31: transfers with rsync | Planned in detail 2026-11-20 (D48, D58): R-SSH-53..57, R-SSH-66. Steps 1–3 built and tested 2026-11-21 (R-SSH-57, R-SSH-53, R-SSH-56), to check on the owner's servers; step 4 next. |
+| Phase 31: transfers with rsync | Planned in detail 2026-11-20 (D48, D58): R-SSH-53..57, R-SSH-66. Steps 1–4 built and tested 2026-11-21 (R-SSH-57, R-SSH-53, R-SSH-56, R-SSH-54 with R-SSH-31's engine part), to check on the owner's servers; step 5 next. |
 | Phase 30: tunnels | Later. |
 | Phase 32: keys made here | Later. |
 

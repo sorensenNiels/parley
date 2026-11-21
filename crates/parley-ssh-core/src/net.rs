@@ -7,6 +7,7 @@ mod client;
 mod jobs;
 pub mod jump;
 mod public_key;
+mod relay;
 mod sign_on;
 mod transport;
 
@@ -20,6 +21,7 @@ use crate::known_hosts::{HostKeyStatus, KnownHosts};
 use crate::term::Terminal;
 use crate::{Error, Secret};
 pub use jobs::{Exec, JobEnding, JobId, Stream};
+pub use relay::Door;
 pub use transport::{AddressFamily, Proxy};
 
 /// How long connecting may take before it is given up.
@@ -139,6 +141,16 @@ pub enum Command {
     Exec(Exec),
     /// Ends a job started with [`Command::Exec`].
     EndJob(JobId),
+    /// Hands out a way into this server for a transfer through Parley SSH: [`Event::Door`] (R-SSH-54).
+    OpenDoor(JobId),
+    /// Asks this server to listen on a free loopback port and carry its connections through `door` to the other
+    /// server: [`Event::Forwarded`] says the port (R-SSH-54).
+    Forward {
+        id: JobId,
+        door: Door,
+    },
+    /// Stops the forwarding of [`Command::Forward`].
+    Unforward(JobId),
     Disconnect,
 }
 
@@ -220,6 +232,16 @@ pub enum Event {
     JobEnded {
         id: JobId,
         ending: JobEnding,
+    },
+    /// The answer to [`Command::OpenDoor`].
+    Door {
+        id: JobId,
+        door: Door,
+    },
+    /// The answer to [`Command::Forward`]: the loopback port the server listens on, or why it does not.
+    Forwarded {
+        id: JobId,
+        port: Result<u16, String>,
     },
     Ended(Ending),
 }
@@ -402,7 +424,11 @@ async fn session(
             &jump.target,
             &hop,
             jumps.last(),
-            (Hop::Jump, jobs::AgentGate::default()),
+            (
+                Hop::Jump,
+                jobs::AgentGate::default(),
+                relay::Doors::default(),
+            ),
             known_hosts.clone(),
             commands,
             link,
@@ -411,16 +437,18 @@ async fn session(
         jumps.push((handle, jump.target.label()));
     }
     let gate = jobs::AgentGate::new(options.agent_forwarding);
+    let doors = relay::Doors::default();
     let handle = hop_connect(
         target,
         options,
         jumps.last(),
-        (Hop::Target, gate.clone()),
+        (Hop::Target, gate.clone(), doors.clone()),
         known_hosts,
         commands,
         link,
     )
-    .await?;
+    .await
+    .map(Arc::new)?;
 
     let (columns, rows) = {
         let t = lock(terminal);
@@ -468,6 +496,9 @@ async fn session(
                 }
                 Some(Command::Exec(exec)) => side.start(&handle, exec, &gate, options.agent.is_some(), link).await,
                 Some(Command::EndJob(id)) => side.end(id),
+                Some(Command::OpenDoor(id)) => link.send(Event::Door { id, door: relay::Door::new(id, Arc::clone(&handle), target.port) }),
+                Some(Command::Forward { id, door }) => doors.forward(&handle, id, door, link).await,
+                Some(Command::Unforward(id)) => doors.unforward(&handle, id).await,
                 Some(Command::HostKey(_) | Command::Answers(_)) => {}
             },
         }
@@ -491,7 +522,7 @@ async fn hop_connect(
     target: &Target,
     options: &Options,
     through: Option<&Through>,
-    (hop, gate): (Hop, jobs::AgentGate),
+    (hop, gate, doors): (Hop, jobs::AgentGate, relay::Doors),
     known_hosts: KnownHosts,
     commands: &Commands,
     link: &Link,
@@ -506,7 +537,7 @@ async fn hop_connect(
     let handler = client::Client::new(
         target,
         known_hosts,
-        (options.agent.clone(), gate),
+        (options.agent.clone(), gate, doors),
         hop,
         Arc::clone(commands),
         link.clone(),

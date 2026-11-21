@@ -329,12 +329,9 @@ impl Session {
     }
 
     /// Runs a command on a side channel (Phase 31); what it says comes from [`Self::take_jobs`].
-    pub fn exec(&self, exec: parley_ssh_core::net::Exec) {
-        self.connection.send(Command::Exec(exec));
-    }
-
-    pub fn end_job(&self, id: parley_ssh_core::net::JobId) {
-        self.connection.send(Command::EndJob(id));
+    /// Sends a transfer's command: a job, or a forwarding (Phase 31).
+    pub fn send_job(&self, command: Command) {
+        self.connection.send(command);
     }
 
     /// What the jobs said since the last call.
@@ -342,8 +339,8 @@ impl Session {
         std::mem::take(&mut self.jobs)
     }
 
-    /// Whether the connection goes through a jump host, which a server-to-server copy cannot follow yet
-    /// (R-SSH-54).
+    /// Whether the connection goes through a jump host: another server cannot reach it directly, so a copy to it
+    /// goes through Parley SSH (R-SSH-54).
     pub fn through_jump(&self) -> bool {
         !self.source.proxy_jump.trim().is_empty()
     }
@@ -393,7 +390,10 @@ impl Session {
                     self.grab_focus = true;
                 }
                 // For the Transfer panel, which started them (Phase 31).
-                job @ (Event::JobOutput { .. } | Event::JobEnded { .. }) => self.jobs.push(job),
+                job @ (Event::JobOutput { .. }
+                | Event::JobEnded { .. }
+                | Event::Door { .. }
+                | Event::Forwarded { .. }) => self.jobs.push(job),
                 Event::Ended(ending) => {
                     self.log.push(LogLine::now(ending_text(&ending)));
                     self.host_key = None;

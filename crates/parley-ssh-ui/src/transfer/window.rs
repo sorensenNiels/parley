@@ -2,6 +2,7 @@
 //! and what the panel asks the sessions to do.
 
 use egui::Ui;
+use parley_ssh_core::net::{Command, Event};
 
 use super::{End, Order, Panel, Request, view::Choice};
 use crate::ParleySshUi;
@@ -107,14 +108,23 @@ impl ParleySshUi {
             return;
         };
         let mut orders = Vec::new();
+        let mut forwards = Vec::new();
         for (pane, event) in news {
-            orders.extend(panel.feed(pane, event));
+            match event {
+                // The target's way in goes to the source's connection, which the panel names (R-SSH-54).
+                Event::Door { id, door } => {
+                    if let Some(source) = panel.door(pane, id) {
+                        forwards.push((source, Command::Forward { id, door }));
+                    }
+                }
+                event => orders.extend(panel.feed(pane, event)),
+            }
         }
         let connected = |pane: PaneId| sessions.iter().any(|(id, _, on)| *id == pane && *on);
         if let Some(run) = &panel.run {
             for pane in [run.source.pane, run.target.pane] {
                 if !connected(pane) {
-                    panel.lost(pane);
+                    orders.extend(panel.lost(pane));
                 }
             }
         }
@@ -128,6 +138,11 @@ impl ParleySshUi {
             request = Some(Request::Copy);
         }
         orders.extend(self.transfer_request(ui.ctx(), request));
+        for (pane, command) in forwards {
+            if let Some(session) = self.session_in(pane) {
+                session.send_job(command);
+            }
+        }
         self.carry_orders(orders);
     }
 
@@ -160,11 +175,17 @@ impl ParleySshUi {
                 .as_mut()
                 .map(Panel::cancel)
                 .unwrap_or_default(),
+            Request::TryThrough => {
+                if let Some(panel) = &mut self.transfer {
+                    panel.switches.route = super::Route::Through;
+                }
+                self.transfer_request(ctx, Some(Request::Copy))
+            }
             Request::Close => {
                 let orders = self
                     .transfer
                     .as_mut()
-                    .map(Panel::cancel)
+                    .map(Panel::abandon)
                     .unwrap_or_default();
                 self.transfer = None;
                 orders
@@ -217,17 +238,14 @@ impl ParleySshUi {
 
     fn carry_orders(&self, orders: Vec<Order>) {
         for order in orders {
-            match order {
-                Order::Exec(pane, exec) => {
-                    if let Some(session) = self.session_in(pane) {
-                        session.exec(exec);
-                    }
-                }
-                Order::End(pane, id) => {
-                    if let Some(session) = self.session_in(pane) {
-                        session.end_job(id);
-                    }
-                }
+            let (pane, command) = match order {
+                Order::Exec(pane, exec) => (pane, Command::Exec(exec)),
+                Order::End(pane, id) => (pane, Command::EndJob(id)),
+                Order::OpenDoor(pane, id) => (pane, Command::OpenDoor(id)),
+                Order::Unforward(pane, id) => (pane, Command::Unforward(id)),
+            };
+            if let Some(session) = self.session_in(pane) {
+                session.send_job(command);
             }
         }
     }

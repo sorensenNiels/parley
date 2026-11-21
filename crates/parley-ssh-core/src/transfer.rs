@@ -8,7 +8,7 @@ mod run;
 pub use changes::{Changes, Listed};
 pub use run::{
     Direct, Mode, Options, Progress, Remote, bytes_text, direct_command, last_progress, outcome,
-    quote,
+    quote, unreachable,
 };
 
 /// The oldest rsync with `--info=progress2`, which the progress needs (R-SSH-57).

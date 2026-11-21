@@ -102,12 +102,19 @@ struct Seen {
     env: Vec<(String, String)>,
     /// The user names passwords were tried for (R-SSH-62).
     users: Vec<String>,
+    /// Refuse `tcpip-forward`, as `AllowTcpForwarding no` (R-SSH-54).
+    refuse_forwarding: bool,
+    /// The ports forwarded, and those whose forwarding was cancelled (R-SSH-54).
+    forwards: Vec<u32>,
+    cancelled: Vec<u32>,
 }
 
 struct Server {
     seen: Arc<Mutex<Seen>>,
     /// russh closes a session channel whose handle is dropped.
     channels: Vec<Channel<Msg>>,
+    /// The listeners of forwarded ports, by port (R-SSH-54).
+    listeners: std::collections::HashMap<u32, tokio::task::JoinHandle<()>>,
 }
 
 impl server::Handler for Server {
@@ -197,6 +204,62 @@ impl server::Handler for Server {
             }
         }
         Ok(())
+    }
+
+    /// As OpenSSH's remote forwarding (RFC 4254 §7.1): listens on a free port of the address asked for and opens a
+    /// `forwarded-tcpip` channel to the client for each connection to it (R-SSH-54).
+    async fn tcpip_forward(
+        &mut self,
+        address: &str,
+        port: &mut u32,
+        session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        if self.seen.lock().expect("not poisoned").refuse_forwarding {
+            return Ok(false);
+        }
+        let Ok(listener) = tokio::net::TcpListener::bind((address, 0)).await else {
+            return Ok(false);
+        };
+        let bound = u32::from(listener.local_addr().map_err(russh::Error::from)?.port());
+        *port = bound;
+        self.seen.lock().expect("not poisoned").forwards.push(bound);
+        let handle = session.handle();
+        let address = address.to_owned();
+        let listening = tokio::spawn(async move {
+            while let Ok((mut socket, from)) = listener.accept().await {
+                let Ok(channel) = handle
+                    .channel_open_forwarded_tcpip(
+                        address.clone(),
+                        bound,
+                        from.ip().to_string(),
+                        u32::from(from.port()),
+                    )
+                    .await
+                else {
+                    continue;
+                };
+                tokio::spawn(async move {
+                    let mut channel = channel.into_stream();
+                    // Either side closing ends the relay.
+                    let _ = tokio::io::copy_bidirectional(&mut channel, &mut socket).await;
+                });
+            }
+        });
+        self.listeners.insert(bound, listening);
+        Ok(true)
+    }
+
+    async fn cancel_tcpip_forward(
+        &mut self,
+        _address: &str,
+        port: u32,
+        _session: &mut Session,
+    ) -> Result<bool, Self::Error> {
+        self.seen.lock().expect("not poisoned").cancelled.push(port);
+        Ok(self.listeners.remove(&port).is_some_and(|l| {
+            l.abort();
+            true
+        }))
     }
 
     /// Takes LANG and refuses everything else, as OpenSSH's default `AcceptEnv` (R-SSH-28).
@@ -410,6 +473,7 @@ fn start_server(seen: Arc<Mutex<Seen>>) -> SocketAddr {
                 let handler = Server {
                     seen: Arc::clone(&seen),
                     channels: Vec::new(),
+                    listeners: std::collections::HashMap::new(),
                 };
                 let config = Arc::clone(&config);
                 tokio::spawn(async move {
@@ -1017,7 +1081,10 @@ fn through_to_started(connection: &Connection) {
             Event::Started => return,
             Event::Ended(ending) => panic!("ended: {ending:?}"),
             Event::User(user) => panic!("asked for a user, got {user}"),
-            Event::JobOutput { .. } | Event::JobEnded { .. } => panic!("a job before the shell"),
+            Event::JobOutput { .. }
+            | Event::JobEnded { .. }
+            | Event::Door { .. }
+            | Event::Forwarded { .. } => panic!("a job before the shell"),
             Event::Secured { .. } | Event::Banner(_) | Event::Problem(_) | Event::Log(_) => {}
         }
     }
@@ -1280,12 +1347,20 @@ fn ipv6_only_to_a_name_with_only_ipv4_says_so_r_ssh_26() {
 
 /// Signs on with the password up to the running shell.
 fn started(name: &str, options: Options) -> (Connection, Arc<Mutex<Terminal>>) {
-    let (connection, terminal, _) = signing_on(name, options);
+    let (connection, terminal, _) = started_seen(name, options);
+    (connection, terminal)
+}
+
+fn started_seen(
+    name: &str,
+    options: Options,
+) -> (Connection, Arc<Mutex<Terminal>>, Arc<Mutex<Seen>>) {
+    let (connection, terminal, seen) = signing_on(name, options);
     if let Event::Prompt(_) = next(&connection) {
         connection.send(Command::Answers(Some(vec![Secret::new(PASSWORD.into())])));
         assert_eq!(next(&connection), Event::Started);
     }
-    (connection, terminal)
+    (connection, terminal, seen)
 }
 
 /// What job `id` wrote to stdout and stderr, and how it ended.
@@ -1394,4 +1469,78 @@ fn the_agent_is_forwarded_only_while_a_job_that_asked_runs_d58() {
         "0",
         "refused once no job asks for it"
     );
+}
+
+/// The answer to `Command::Forward` on `connection`.
+fn forwarded(connection: &Connection, id: JobId) -> Result<u16, String> {
+    loop {
+        if let Event::Forwarded { id: of, port } = next(connection)
+            && of == id
+        {
+            return port;
+        }
+    }
+}
+
+/// What a connection to `port` on this machine says first, up to its first line end.
+fn first_line_at(port: u16) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut socket = std::net::TcpStream::connect(("127.0.0.1", port))?;
+    socket.set_read_timeout(Some(Duration::from_secs(10)))?;
+    let mut said = Vec::new();
+    let mut byte = [0u8];
+    while said.last() != Some(&b'\n') && socket.read(&mut byte)? == 1 {
+        said.push(byte[0]);
+    }
+    Ok(String::from_utf8_lossy(&said).into_owned())
+}
+
+#[test]
+fn a_port_forwarded_on_one_server_reaches_the_other_servers_ssh_port_through_parley_r_ssh_54() {
+    let (a, _, seen_a) = started_seen("relay-a", Options::default());
+    let (b, _, seen_b) = started_seen("relay-b", Options::default());
+    b.send(Command::OpenDoor(JobId(1)));
+    let door = loop {
+        if let Event::Door { id, door } = next(&b) {
+            assert_eq!(id, JobId(1));
+            break door;
+        }
+    };
+    a.send(Command::Forward { id: JobId(2), door });
+    let port = forwarded(&a, JobId(2)).expect("a port");
+    assert_eq!(
+        seen_a.lock().expect("not poisoned").forwards,
+        [u32::from(port)]
+    );
+
+    // rsync's ssh on A connecting to the forwarded port meets B's SSH server, through Parley.
+    let said = first_line_at(port).expect("connected");
+    assert!(said.starts_with("SSH-2.0-"), "{said:?}");
+    let b_port = seen_b.lock().expect("not poisoned").forwarded.clone();
+    assert_eq!(b_port.len(), 1, "one direct-tcpip on B");
+    assert_eq!(
+        b_port[0].0, "127.0.0.1",
+        "B's own SSH port, as B reaches it"
+    );
+
+    a.send(Command::Unforward(JobId(2)));
+    wait_until("the forwarding is cancelled", || {
+        seen_a.lock().expect("not poisoned").cancelled == [u32::from(port)]
+    });
+}
+
+#[test]
+fn a_server_that_does_not_forward_says_so_in_plain_words_r_ssh_54() {
+    let (a, _, seen_a) = started_seen("relay-refused-a", Options::default());
+    let (b, _, _) = started_seen("relay-refused-b", Options::default());
+    seen_a.lock().expect("not poisoned").refuse_forwarding = true;
+    b.send(Command::OpenDoor(JobId(1)));
+    let door = loop {
+        if let Event::Door { door, .. } = next(&b) {
+            break door;
+        }
+    };
+    a.send(Command::Forward { id: JobId(2), door });
+    let refused = forwarded(&a, JobId(2)).expect_err("refused");
+    assert!(refused.contains("AllowTcpForwarding"), "{refused}");
 }

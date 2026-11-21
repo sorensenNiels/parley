@@ -183,6 +183,20 @@ fn sign_on_refused(errors: &str) -> bool {
     })
 }
 
+/// Whether ssh on the source said it could not reach the target at all: then copying through Parley SSH may
+/// work (R-SSH-54).
+pub fn unreachable(errors: &str) -> bool {
+    [
+        "Could not resolve hostname",
+        "Connection refused",
+        "timed out",
+        "No route to host",
+        "Network is unreachable",
+    ]
+    .iter()
+    .any(|s| errors.contains(s))
+}
+
 /// Bytes for people: `980 B`, `1.2 MB`, `3.4 GB` (powers of 1000, as rsync's speed).
 pub fn bytes_text(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["kB", "MB", "GB", "TB", "PB"];
@@ -218,15 +232,7 @@ pub fn outcome(exit_status: u32, errors: &str) -> Result<(), String> {
     } else if sign_on_refused(errors) {
         "The target server refused the sign-on: add a key of your agent's to its authorized_keys"
             .to_owned()
-    } else if [
-        "Could not resolve hostname",
-        "Connection refused",
-        "timed out",
-        "No route to host",
-    ]
-    .iter()
-    .any(|s| errors.contains(s))
-    {
+    } else if unreachable(errors) {
         "The source server cannot reach the target server".to_owned()
     } else {
         match exit_status {
@@ -395,6 +401,12 @@ mod tests {
             unreachable.starts_with("The source server cannot reach"),
             "{unreachable}"
         );
+        assert!(super::unreachable(
+            "ssh: connect to host backup port 22: Network is unreachable"
+        ));
+        assert!(!super::unreachable(
+            "niels@backup: Permission denied (publickey)."
+        ));
         assert_eq!(
             outcome(23, "rsync: [sender] send_files failed to open \"/a/æøå\": Permission denied (13)\n"),
             Err("Some files could not be copied (exit status 23): rsync: [sender] send_files failed to open \"/a/æøå\": Permission denied (13)".into()),

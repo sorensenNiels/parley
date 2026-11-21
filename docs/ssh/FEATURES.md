@@ -8,6 +8,28 @@
 
 ## In progress
 
+- **R-SSH-54, the engine part of R-SSH-31, Phase 31 step 4** (2026-11-21, Linux under WSL): server to server
+  through Parley SSH. `net/relay.rs`: `Command::OpenDoor` hands out a `Door` (the target connection's handle, now
+  kept in an `Arc`, and its SSH port); `Command::Forward` asks the source to listen on `127.0.0.1:0`
+  (`tcpip-forward`) and says the port in `Event::Forwarded`; each connection that comes in is carried through the
+  door with `direct-tcpip` to `127.0.0.1:<the target session's port>` on the target, and a port Parley did not ask
+  for is refused; `Command::Unforward` cancels it. The panel goes through Parley when "Through Parley SSH" is chosen
+  over "Straight" (`Route`, saved with a transfer) or the target is reached through a jump host (no longer refused), and offers "Try through
+  Parley SSH" when a straight dry run says the source cannot reach the target. rsync on the source then runs as in
+  R-SSH-53 against `127.0.0.1:<port>` with the same agent and `HostKeyAlias` rules. The forwarding stops however
+  the run ends: done, up to date, failed, cancelled, a session lost, or the panel closed (`Panel::abandon`). A
+  failed copy through Parley adds that the target must allow forwarding to its own SSH port. **Automated**:
+  `tests/net.rs` (a connection to the forwarded port on one test server meets the other test server's SSH banner
+  through Parley, then the forwarding is cancelled; a server that refuses forwarding is said), `transfer::tests`
+  (door, forward and the dry run against the forwarded port; a jump host's target goes through by itself; every
+  ending stops the forwarding; a refused forwarding; the offer after "Connection timed out"),
+  `transfer::run::tests` (`unreachable`). **Seen** (`--screenshot`, dark, the panel opened by a temporary line: the
+  Straight / Through Parley SSH choice and its hint). **Known limit**: the target's SSH port is taken as its session's port, so a
+  target reached through a port mapping (outside port 2222 to inside 22) cannot be reached this way. **To check on
+  the owner's servers**: a copy between two servers that cannot reach each other (or with Through Parley SSH chosen), a target
+  behind a jump host, a source with `AllowTcpForwarding no`, and Cancel and Close while copying (the port is closed
+  on the source afterwards: `ss -ltn` there).
+
 - **R-SSH-56 (the rest), Phase 31 step 3** (2026-11-21, Linux under WSL): Copy… now runs a dry run first
   (`--dry-run --itemize-changes -8`, with the agent as the copy) and lists what will be added (+), changed (~) and
   deleted (-, in red, with a warning), counted in full with the first 200 names of each; an up-to-date target says

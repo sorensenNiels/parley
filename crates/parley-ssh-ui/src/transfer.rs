@@ -1,8 +1,8 @@
 //! The Transfer panel (Phase 31, R-SSH-56, R-SSH-53): a source and a target, each an open session and a path, and
 //! rsync's switches. Copy checks rsync on both ends (R-SSH-57), runs a dry run that lists what will be added,
 //! changed and deleted, and copies once that is confirmed: rsync on the source straight to the target, with
-//! progress and Cancel. Transfers are saved by name with their sessions' saved names. Beside the panes, so the
-//! terminals stay in use while it copies. `view` draws the panel, `window` ties it to the window's sessions.
+//! progress and Cancel; through Parley SSH when the servers cannot reach each other (R-SSH-54). Transfers are
+//! saved by name with their sessions' saved names. Beside the panes, so the terminals stay in use while it copies. `view` draws the panel, `window` ties it to the window's sessions.
 
 use parley_ssh_core::net::{Event, Exec, JobEnding, JobId, Stream};
 use parley_ssh_core::transfer::{self, Changes, Check, Direct, Mode, Progress, Remote};
@@ -29,6 +29,18 @@ pub struct Switches {
     pub compress: bool,
     /// Patterns left out, one a line.
     pub excludes: String,
+    /// Straight from server to server, or through Parley SSH for servers that cannot reach each other.
+    pub route: Route,
+}
+
+/// Which way a copy goes (R-SSH-53, R-SSH-54).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Route {
+    /// rsync on the source reaches the target itself.
+    #[default]
+    Straight,
+    /// The source's forwarded port is carried through the target's connection in Parley SSH.
+    Through,
 }
 
 impl Default for Switches {
@@ -38,6 +50,7 @@ impl Default for Switches {
             keep: true,
             compress: true,
             excludes: String::new(),
+            route: Route::Straight,
         }
     }
 }
@@ -96,6 +109,11 @@ impl End {
 pub enum Order {
     Exec(PaneId, Exec),
     End(PaneId, JobId),
+    /// Ask the target's connection for a way in (R-SSH-54); the window passes it on to the source with
+    /// [`Panel::door`].
+    OpenDoor(PaneId, JobId),
+    /// Stop the source's forwarding.
+    Unforward(PaneId, JobId),
 }
 
 /// A job's output so far, kept short.
@@ -130,6 +148,8 @@ enum Stage {
         source: (JobId, Output, Option<Check>),
         target: (JobId, Output, Option<Check>),
     },
+    /// Through Parley SSH: the target's door, then the source's forwarded port (R-SSH-54).
+    Relaying { job: JobId },
     /// The dry run, with the copy's command for once it is confirmed.
     Looking {
         job: JobId,
@@ -153,6 +173,10 @@ struct Run {
     target: End,
     source_path: String,
     target_path: String,
+    /// Each end's rsync, as its check found it.
+    rsync: (String, String),
+    /// The source's forwarding while the copy goes through Parley SSH, to stop when the run ends.
+    relay: Option<JobId>,
     stage: Stage,
 }
 
@@ -176,6 +200,8 @@ pub struct Panel {
     pub name: String,
     /// Start as soon as both sessions are connected: a saved transfer run from the palette.
     pub waiting: bool,
+    /// The source could not reach the target: offer to go through Parley SSH (R-SSH-54).
+    pub offer_through: bool,
     run: Option<Run>,
     pub outcome: Option<Outcome>,
     next_job: u64,
@@ -195,6 +221,8 @@ pub enum Request {
     Save,
     /// Forget the saved transfer at this index.
     Forget(usize),
+    /// Copy again through Parley SSH.
+    TryThrough,
 }
 
 /// How a job that did not end well ended, in plain words; `err` is what it wrote to stderr.
@@ -210,6 +238,17 @@ fn failure(ending: JobEnding, err: &str) -> Option<Outcome> {
         }
         JobEnding::Refused(why) => Outcome::Failed(why),
     })
+}
+
+/// `failed` for a copy through Parley SSH: a connection that failed may be the target refusing to carry it.
+fn through_failure(failed: Outcome, ending: &JobEnding) -> Outcome {
+    match (failed, ending) {
+        (Outcome::Failed(why), JobEnding::Exited(12 | 255)) => Outcome::Failed(format!(
+            "{why}\nThrough Parley SSH, the target server must allow forwarding to its own SSH port \
+             (AllowTcpForwarding in its sshd_config)."
+        )),
+        (other, _) => other,
+    }
 }
 
 impl Panel {
@@ -249,13 +288,9 @@ impl Panel {
     pub fn start(&mut self, source: End, target: End) -> Vec<Order> {
         self.outcome = None;
         self.waiting = false;
+        self.offer_through = false;
         let problem = if source.pane == target.pane {
             Some("Choose two different sessions.".to_owned())
-        } else if target.through_jump {
-            Some(format!(
-                "{} is reached through a jump host: copying through Parley SSH comes later (R-SSH-54).",
-                target.label
-            ))
         } else if self.source_path.trim().is_empty() || self.target_path.trim().is_empty() {
             Some("Give a path on both servers.".to_owned())
         } else {
@@ -280,6 +315,8 @@ impl Panel {
             target,
             source_path: self.source_path.trim().to_owned(),
             target_path: self.target_path.trim().to_owned(),
+            rsync: (String::new(), String::new()),
+            relay: None,
             stage: Stage::Checking {
                 source: (a, Output::default(), None),
                 target: (b, Output::default(), None),
@@ -324,7 +361,7 @@ impl Panel {
         let Some(run) = &mut self.run else {
             return Vec::new();
         };
-        let (orders, outcome) = match &mut run.stage {
+        let (mut orders, outcome) = match &mut run.stage {
             Stage::Checking { source, target } => (
                 vec![
                     Order::End(run.source.pane, source.0),
@@ -332,6 +369,7 @@ impl Panel {
                 ],
                 Some(Outcome::Cancelled),
             ),
+            Stage::Relaying { .. } => (Vec::new(), Some(Outcome::Cancelled)),
             // A dry run changes nothing, so it need not be waited for.
             Stage::Looking { job, .. } => (
                 vec![Order::End(run.source.pane, *job)],
@@ -343,25 +381,58 @@ impl Panel {
                 return vec![Order::End(run.source.pane, *job)];
             }
         };
-        self.run = None;
-        self.outcome = outcome;
+        orders.extend(self.end(outcome));
         orders
     }
 
+    /// Ends whatever runs at once, the panel closing: the copy is ended without waiting for rsync to stop.
+    pub fn abandon(&mut self) -> Vec<Order> {
+        let mut orders = self.cancel();
+        orders.extend(self.end(None));
+        orders
+    }
+
+    /// Ends the run with `outcome`, stopping the source's forwarding if there is one.
+    fn end(&mut self, outcome: Option<Outcome>) -> Vec<Order> {
+        self.outcome = outcome;
+        match self.run.take() {
+            Some(Run {
+                source,
+                relay: Some(id),
+                ..
+            }) => vec![Order::Unforward(source.pane, id)],
+            _ => Vec::new(),
+        }
+    }
+
     /// The session in `pane` is gone or no longer connected.
-    pub fn lost(&mut self, pane: PaneId) {
-        if let Some(run) = &self.run
-            && (run.source.pane == pane || run.target.pane == pane)
-        {
-            let label = if run.source.pane == pane {
-                &run.source.label
-            } else {
-                &run.target.label
-            };
-            self.outcome = Some(Outcome::Failed(format!(
-                "The connection to {label} ended; copy again once it is back to go on where it stopped."
-            )));
-            self.run = None;
+    pub fn lost(&mut self, pane: PaneId) -> Vec<Order> {
+        let Some(run) = &self.run else {
+            return Vec::new();
+        };
+        let label = if run.source.pane == pane {
+            run.source.label.clone()
+        } else if run.target.pane == pane {
+            run.target.label.clone()
+        } else {
+            return Vec::new();
+        };
+        self.end(Some(Outcome::Failed(format!(
+            "The connection to {label} ended; copy again once it is back to go on where it stopped."
+        ))))
+    }
+
+    /// The target's connection in `pane` handed out its door for job `id`: the source's pane to forward through
+    /// it, while the run is waiting for that door (R-SSH-54).
+    pub fn door(&self, pane: PaneId, id: JobId) -> Option<PaneId> {
+        match &self.run {
+            Some(Run {
+                stage: Stage::Relaying { job },
+                source,
+                target,
+                ..
+            }) if *job == id && target.pane == pane => Some(source.pane),
+            _ => None,
         }
     }
 
@@ -372,6 +443,17 @@ impl Panel {
         };
         let from_source = pane == run.source.pane;
         match (&mut run.stage, event) {
+            (Stage::Relaying { job }, Event::Forwarded { id, port })
+                if *job == id && from_source =>
+            {
+                match port {
+                    Ok(port) => {
+                        run.relay = Some(id);
+                        self.look("127.0.0.1", port)
+                    }
+                    Err(why) => self.end(Some(Outcome::Failed(why))),
+                }
+            }
             (Stage::Checking { source, target }, Event::JobOutput { id, stream, data }) => {
                 for (job, output, _) in [source, target] {
                     if *job == id {
@@ -413,8 +495,7 @@ impl Panel {
             (Stage::Looking { job, .. }, Event::JobEnded { id, ending })
                 if *job == id && from_source =>
             {
-                self.looked(ending);
-                Vec::new()
+                self.looked(&ending)
             }
             (
                 Stage::Copying {
@@ -434,8 +515,7 @@ impl Panel {
             (Stage::Copying { job, .. }, Event::JobEnded { id, ending })
                 if *job == id && from_source =>
             {
-                self.copied(ending);
-                Vec::new()
+                self.copied(&ending)
             }
             // Another job's news, or not a job's at all (sessions keep only jobs' events).
             _ => Vec::new(),
@@ -443,43 +523,45 @@ impl Panel {
     }
 
     /// The dry run has ended: its list to review, or why there is none.
-    fn looked(&mut self, ending: JobEnding) {
-        let Some(mut run) = self.run.take() else {
-            return;
+    fn looked(&mut self, ending: &JobEnding) -> Vec<Order> {
+        let Some(run) = &mut self.run else {
+            return Vec::new();
         };
+        let through = run.relay.is_some();
         let Stage::Looking {
             output,
-            mut changes,
+            changes,
             copy,
             ..
-        } = std::mem::replace(
-            &mut run.stage,
-            Stage::Review {
-                changes: Changes::default(),
-                copy: String::new(),
-            },
-        )
+        } = &mut run.stage
         else {
-            return;
+            return Vec::new();
         };
-        if let Some(failed) = failure(ending, &output.err) {
-            self.outcome = Some(failed);
-            return;
+        if let Some(failed) = failure(ending.clone(), &output.err) {
+            self.offer_through = !through
+                && matches!(ending, JobEnding::Exited(n) if *n != 0)
+                && transfer::unreachable(&output.err);
+            let failed = if through {
+                through_failure(failed, ending)
+            } else {
+                failed
+            };
+            return self.end(Some(failed));
         }
         changes.finish();
         if changes.is_empty() {
-            self.outcome = Some(Outcome::Done(format!(
-                "Nothing to copy: {} is up to date.",
-                run.target.label
-            )));
-            return;
+            let done = format!("Nothing to copy: {} is up to date.", run.target.label);
+            return self.end(Some(Outcome::Done(done)));
         }
-        run.stage = Stage::Review { changes, copy };
-        self.run = Some(run);
+        run.stage = Stage::Review {
+            changes: std::mem::take(changes),
+            copy: std::mem::take(copy),
+        };
+        Vec::new()
     }
 
     /// The copy has ended.
-    fn copied(&mut self, ending: JobEnding) {
+    fn copied(&mut self, ending: &JobEnding) -> Vec<Order> {
         let Some(Run {
             stage:
                 Stage::Copying {
@@ -488,21 +570,25 @@ impl Panel {
                     cancelled,
                     ..
                 },
+            relay,
             ..
-        }) = self.run.take()
+        }) = &self.run
         else {
-            return;
+            return Vec::new();
         };
-        self.outcome = Some(match failure(ending, &output.err) {
+        let outcome = match failure(ending.clone(), &output.err) {
             None => Outcome::Done(done_text(progress.as_ref())),
-            Some(_) if cancelled => Outcome::Cancelled,
+            Some(_) if *cancelled => Outcome::Cancelled,
+            Some(failed) if relay.is_some() => through_failure(failed, ending),
             Some(failed) => failed,
-        });
+        };
+        self.end(Some(outcome))
     }
 
-    /// Both checks are in: the dry run, or say what is wrong.
+    /// Both checks are in: the dry run, straight or through Parley SSH, or say what is wrong.
     fn checked(&mut self, a: &Check, b: &Check) -> Vec<Order> {
-        let Some(run) = self.run.take() else {
+        let job = self.job();
+        let Some(run) = &mut self.run else {
             return Vec::new();
         };
         let (Check::Usable { path: rsync_a, .. }, Check::Usable { path: rsync_b, .. }) = (a, b)
@@ -511,18 +597,32 @@ impl Panel {
                 .into_iter()
                 .filter_map(|(check, label)| check.problem(label))
                 .collect();
-            self.outcome = Some(Outcome::Failed(problems.join("\n")));
+            return self.end(Some(Outcome::Failed(problems.join("\n"))));
+        };
+        run.rsync = (rsync_a.clone(), rsync_b.clone());
+        if self.switches.route == Route::Through || run.target.through_jump {
+            run.stage = Stage::Relaying { job };
+            return vec![Order::OpenDoor(run.target.pane, job)];
+        }
+        let (host, port) = (run.target.host.clone(), run.target.port);
+        self.look(&host, port)
+    }
+
+    /// Starts the dry run, rsync on the source reaching the target at `host` and `port`.
+    fn look(&mut self, host: &str, port: u16) -> Vec<Order> {
+        let job = self.job();
+        let Some(run) = &mut self.run else {
             return Vec::new();
         };
         let direct = Direct {
-            rsync: rsync_a.clone(),
+            rsync: run.rsync.0.clone(),
             source: run.source_path.clone(),
             target: Remote {
                 user: run.target.user.clone(),
-                host: run.target.host.clone(),
-                port: run.target.port,
+                host: host.to_owned(),
+                port,
                 host_key: run.target.host_key.clone().unwrap_or_default(),
-                rsync: rsync_b.clone(),
+                rsync: run.rsync.1.clone(),
             },
             target_path: run.target_path.clone(),
             options: self.switches.options(),
@@ -531,30 +631,22 @@ impl Panel {
             .and_then(|dry| transfer::direct_command(&direct, Mode::Copy).map(|copy| (dry, copy)));
         let (dry, copy) = match commands {
             Ok(commands) => commands,
-            Err(why) => {
-                self.outcome = Some(Outcome::Failed(why));
-                return Vec::new();
-            }
+            Err(why) => return self.end(Some(Outcome::Failed(why))),
         };
-        let job = self.job();
-        let order = Order::Exec(
+        run.stage = Stage::Looking {
+            job,
+            output: Output::default(),
+            changes: Changes::default(),
+            copy,
+        };
+        vec![Order::Exec(
             run.source.pane,
             Exec {
                 id: job,
                 command: dry,
                 agent: true,
             },
-        );
-        self.run = Some(Run {
-            stage: Stage::Looking {
-                job,
-                output: Output::default(),
-                changes: Changes::default(),
-                copy,
-            },
-            ..run
-        });
-        vec![order]
+        )]
     }
 }
 

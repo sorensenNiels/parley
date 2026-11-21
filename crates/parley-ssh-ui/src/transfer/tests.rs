@@ -129,6 +129,7 @@ fn the_switches_go_into_both_commands_r_ssh_56() {
         keep: false,
         compress: false,
         excludes: "*.log\n\ncache/\n".into(),
+        route: Route::Straight,
     };
     let dry = dry_run(&mut p);
     assert!(
@@ -255,12 +256,8 @@ fn cancel_ends_the_dry_run_at_once_and_the_copy_once_rsync_has_ended_r_ssh_56() 
 }
 
 #[test]
-fn what_cannot_be_copied_directly_is_said_at_once_r_ssh_53() {
+fn what_cannot_be_copied_is_said_at_once_r_ssh_53() {
     let mut p = panel();
-    let mut b = end(2, "b");
-    b.through_jump = true;
-    assert_eq!(p.start(end(1, "a"), b), NONE);
-    assert!(matches!(&p.outcome, Some(Outcome::Failed(why)) if why.contains("jump host")));
     assert!(
         p.start(end(1, "a"), end(1, "a")).is_empty(),
         "the same session twice"
@@ -274,9 +271,9 @@ fn what_cannot_be_copied_directly_is_said_at_once_r_ssh_53() {
 fn a_session_lost_while_copying_ends_the_transfer_r_ssh_56() {
     let mut p = panel();
     checked(&mut p, RSYNC, RSYNC);
-    p.lost(3);
+    assert_eq!(p.lost(3), NONE);
     assert!(p.running(), "another session is of no concern");
-    p.lost(2);
+    assert_eq!(p.lost(2), NONE, "nothing forwarded to stop");
     assert!(!p.running());
     assert!(matches!(&p.outcome, Some(Outcome::Failed(why)) if why.contains("niels@b")));
 }
@@ -319,4 +316,171 @@ fn the_trailing_slash_is_said_in_words_r_ssh_56() {
         copies_text("rapport.pdf", ""),
         "Copies rapport.pdf itself into the target."
     );
+}
+
+/// Through Parley SSH up to the dry run: the door asked of the target, passed to the source, the port forwarded
+/// there; the forwarding's job and the dry run.
+fn through(p: &mut Panel) -> (JobId, Exec) {
+    let orders = checked(p, RSYNC, RSYNC);
+    let [Order::OpenDoor(2, id)] = orders.as_slice() else {
+        panic!("the target's door first: {orders:?}")
+    };
+    let id = *id;
+    assert_eq!(
+        p.door(1, id),
+        None,
+        "a door from the source is not the target's"
+    );
+    assert_eq!(p.door(2, JobId(999)), None, "another job's door");
+    assert_eq!(p.door(2, id), Some(1), "forwarded on the source");
+    let forwarded = |port| Event::Forwarded { id, port };
+    assert_eq!(
+        p.feed(2, forwarded(Ok(1))),
+        NONE,
+        "only the source forwards"
+    );
+    let orders = p.feed(1, forwarded(Ok(40_022)));
+    let [Order::Exec(1, dry)] = orders.as_slice() else {
+        panic!("the dry run: {orders:?}")
+    };
+    (id, dry.clone())
+}
+
+#[test]
+fn a_copy_through_parley_reaches_the_target_on_the_sources_forwarded_port_r_ssh_54() {
+    let mut p = panel();
+    p.switches.route = Route::Through;
+    let (relay, dry) = through(&mut p);
+    assert!(dry.agent);
+    assert!(
+        dry.command.contains("ssh -p 40022 ") && dry.command.contains("'niels@127.0.0.1:/backup'"),
+        "{}",
+        dry.command
+    );
+    assert!(
+        dry.command.contains("HostKeyAlias=parley-target"),
+        "B's own key, whatever the address"
+    );
+    p.feed(1, out(dry.id, LISTED));
+    p.feed(1, ended(dry.id, JobEnding::Exited(0)));
+    let orders = p.confirm();
+    let [Order::Exec(1, copy)] = orders.as_slice() else {
+        panic!("copying: {orders:?}")
+    };
+    assert!(copy.command.contains("ssh -p 40022 "), "{}", copy.command);
+    assert_eq!(
+        p.feed(1, ended(copy.id, JobEnding::Exited(0))),
+        [Order::Unforward(1, relay)],
+        "the forwarding stops with the copy"
+    );
+    assert!(matches!(p.outcome, Some(Outcome::Done(_))));
+}
+
+#[test]
+fn a_target_behind_a_jump_host_goes_through_parley_by_itself_r_ssh_54() {
+    let mut p = panel();
+    let mut b = end(2, "b");
+    b.through_jump = true;
+    let orders = p.start(end(1, "a"), b);
+    let [Order::Exec(1, ca), Order::Exec(2, cb)] = orders.as_slice() else {
+        panic!("the checks")
+    };
+    let (ia, ib) = (ca.id, cb.id);
+    p.feed(1, out(ia, RSYNC));
+    p.feed(1, ended(ia, JobEnding::Exited(0)));
+    p.feed(2, out(ib, RSYNC));
+    assert!(matches!(
+        p.feed(2, ended(ib, JobEnding::Exited(0))).as_slice(),
+        [Order::OpenDoor(2, _)]
+    ));
+}
+
+#[test]
+fn every_way_a_run_through_parley_ends_stops_the_forwarding_r_ssh_54() {
+    // Cancelled while the list is reviewed.
+    let mut p = panel();
+    p.switches.route = Route::Through;
+    let (relay, dry) = through(&mut p);
+    p.feed(1, out(dry.id, LISTED));
+    p.feed(1, ended(dry.id, JobEnding::Exited(0)));
+    assert_eq!(p.cancel(), [Order::Unforward(1, relay)]);
+
+    // Up to date.
+    let (relay, dry) = through(&mut p);
+    assert_eq!(
+        p.feed(1, ended(dry.id, JobEnding::Exited(0))),
+        [Order::Unforward(1, relay)]
+    );
+
+    // The target's connection lost while looking.
+    let (relay, _) = through(&mut p);
+    assert_eq!(p.lost(2), [Order::Unforward(1, relay)]);
+
+    // The panel closed while copying: rsync is ended and the forwarding stopped at once.
+    let (relay, dry) = through(&mut p);
+    p.feed(1, out(dry.id, LISTED));
+    p.feed(1, ended(dry.id, JobEnding::Exited(0)));
+    let copy = p.confirm();
+    let [Order::Exec(1, copy)] = copy.as_slice() else {
+        panic!("copying")
+    };
+    assert_eq!(
+        p.abandon(),
+        [Order::End(1, copy.id), Order::Unforward(1, relay)]
+    );
+    assert!(!p.running());
+
+    // A failed copy says that the target may not carry the connection.
+    let (relay, dry) = through(&mut p);
+    p.feed(
+        1,
+        Event::JobOutput {
+            id: dry.id,
+            stream: Stream::Err,
+            data: b"kex_exchange_identification: Connection closed by remote host\n".to_vec(),
+        },
+    );
+    assert_eq!(
+        p.feed(1, ended(dry.id, JobEnding::Exited(255))),
+        [Order::Unforward(1, relay)]
+    );
+    assert!(
+        matches!(&p.outcome, Some(Outcome::Failed(why)) if why.contains("AllowTcpForwarding")),
+        "{:?}",
+        p.outcome
+    );
+    assert!(!p.offer_through, "already through Parley");
+}
+
+#[test]
+fn a_source_that_cannot_forward_or_reach_the_target_is_said_r_ssh_54() {
+    let mut p = panel();
+    p.switches.route = Route::Through;
+    let orders = checked(&mut p, RSYNC, RSYNC);
+    let [Order::OpenDoor(2, id)] = orders.as_slice() else {
+        panic!("the door")
+    };
+    let refused = Event::Forwarded {
+        id: *id,
+        port: Err("The source server does not allow forwarding".into()),
+    };
+    assert_eq!(p.feed(1, refused), NONE, "nothing forwarded to stop");
+    assert!(matches!(&p.outcome, Some(Outcome::Failed(why)) if why.contains("does not allow")));
+
+    // Straight, a source that cannot reach the target is offered the way through Parley SSH.
+    p.switches.route = Route::Straight;
+    let dry = dry_run(&mut p);
+    p.feed(
+        1,
+        Event::JobOutput {
+            id: dry.id,
+            stream: Stream::Err,
+            data: b"ssh: connect to host b port 22: Connection timed out\n".to_vec(),
+        },
+    );
+    p.feed(1, ended(dry.id, JobEnding::Exited(255)));
+    assert!(p.offer_through);
+    assert!(matches!(&p.outcome, Some(Outcome::Failed(why)) if why.contains("cannot reach")));
+    p.start(end(1, "a"), end(2, "b"));
+    assert!(!p.offer_through, "a new run forgets the offer");
 }

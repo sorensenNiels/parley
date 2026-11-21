@@ -5,7 +5,7 @@ use egui::{ComboBox, ProgressBar, ScrollArea, TextEdit, Ui};
 use parley_ssh_core::transfer::{self, Changes, Listed};
 use parley_ui_egui::theme;
 
-use super::{Outcome, PaneId, Panel, Request, SavedTransfer, Stage, copies_text};
+use super::{Outcome, PaneId, Panel, Request, Route, SavedTransfer, Stage, copies_text};
 
 /// A session to choose: its pane, its name, and whether it is connected.
 pub type Choice = (PaneId, String, bool);
@@ -137,6 +137,14 @@ impl Panel {
             "Delete extra files at the target",
             &mut self.switches.delete,
         );
+        theme::segmented(
+            ui,
+            &mut self.switches.route,
+            &[
+                (Route::Straight, "Straight"),
+                (Route::Through, "Through Parley SSH"),
+            ],
+        );
         ui.label("Leave out (one pattern a line)");
         ui.add(
             TextEdit::multiline(&mut self.switches.excludes)
@@ -146,8 +154,16 @@ impl Panel {
         );
         theme::hint(
             ui,
-            "rsync on the first server copies straight to the second, which it signs on to with your agent while \
-             the transfer runs; that server's administrator could use the agent meanwhile.",
+            if self.switches.route == Route::Through {
+                "rsync on the first server reaches the second through this computer, for servers that cannot reach \
+                 each other: slower, as every byte passes through here. It signs on to the second with your agent \
+                 while the transfer runs; the first server's administrator could use the agent meanwhile. A target \
+                 reached through a jump host always goes this way."
+            } else {
+                "rsync on the first server copies straight to the second, which it signs on to with your agent while \
+                 the transfer runs; that server's administrator could use the agent meanwhile. A target reached \
+                 through a jump host goes through Parley SSH."
+            },
         );
         request
     }
@@ -212,6 +228,17 @@ impl Panel {
             }
             Some(Outcome::Failed(why)) => theme::error(ui, why.clone()),
             None => {}
+        }
+        if self.offer_through && !self.running() {
+            theme::button_row(ui, |ui| {
+                if ui
+                    .button("Try through Parley SSH")
+                    .on_hover_text("Carries the copy through this computer: slower, but the servers need not reach each other")
+                    .clicked()
+                {
+                    request = Some(Request::TryThrough);
+                }
+            });
         }
         request
     }
@@ -329,6 +356,7 @@ fn review(ui: &mut Ui, changes: &Changes) {
 fn show_stage(ui: &mut Ui, stage: &Stage) {
     match stage {
         Stage::Checking { .. } => waiting(ui, "Checking rsync on both servers…"),
+        Stage::Relaying { .. } => waiting(ui, "Opening the way through Parley SSH…"),
         Stage::Looking { changes, .. } => {
             let found = changes.added.count + changes.changed.count + changes.deleted.count;
             waiting(ui, &format!("Looking at what to copy… {found} so far"));
