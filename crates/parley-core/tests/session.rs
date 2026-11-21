@@ -1740,3 +1740,78 @@ fn cancelling_the_password_stops_the_macro_and_sends_nothing_r_key_4() {
         "nothing typed"
     );
 }
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+#[test]
+fn a_screen_is_kept_when_a_host_write_unlocks_the_keyboard_and_only_once_r_ui_37() {
+    let mut s = signed_on();
+    assert_eq!(s.history().len(), 1);
+    let kept = &s.history().screens()[0];
+    assert_eq!(
+        kept.screen.cursor,
+        address(&s, 6, 53),
+        "with the cursor's place"
+    );
+    assert!(kept.screen.text(s.code_page()).contains("Sign On"));
+
+    // The same screen again is not kept again.
+    s.receive(&host(&sign_on()));
+    assert_eq!((s.history().len(), s.history().added()), (1, 1));
+
+    // A write that leaves the keyboard locked keeps nothing.
+    s.key(Key::Aid(Aid::ENTER));
+    let mut write = vec![ESC, 0x11, 0x00, 0x00, SBA, 1, 2];
+    write.extend(ebcdic("Working æøå"));
+    s.receive(&host(&write));
+    assert_eq!(s.keyboard(), KeyboardState::Locked);
+    assert_eq!(s.history().len(), 1);
+
+    // Its unlock keeps the screen as it then is.
+    s.receive(&host(&READ_MDT));
+    assert_eq!(s.history().len(), 2);
+    assert!(
+        s.history().screens()[1]
+            .screen
+            .text(s.code_page())
+            .contains("Working æøå")
+    );
+}
+
+#[test]
+fn a_typed_password_never_reaches_the_kept_screens_r_ui_37() {
+    let mut s = signed_on();
+    keys(&mut s, "qsecofr");
+    s.key(Key::Tab);
+    keys(&mut s, "secret");
+    s.key(Key::Aid(Aid::ENTER));
+    sent(&mut s);
+    // The host unlocks again without writing the fields anew: the password is still in the live screen.
+    s.receive(&host(&READ_MDT));
+    assert!(contains(s.screen().buffer(), &ebcdic("secret")));
+    assert_eq!(
+        s.history().len(),
+        2,
+        "the typed user name makes it another screen"
+    );
+    for kept in s.history().screens() {
+        assert!(!contains(kept.screen.buffer(), &ebcdic("secret")));
+    }
+    assert!(contains(
+        s.history().screens()[1].screen.buffer(),
+        &ebcdic("QSECOFR")
+    ));
+}
+
+#[test]
+fn the_history_goes_on_in_the_session_that_replaces_this_one_r_ui_37() {
+    let mut old = signed_on();
+    old.set_screens_kept(20);
+    let mut new = session();
+    new.adopt_history(old.take_history());
+    assert!(old.history().is_empty());
+    assert_eq!(old.history().limit(), 20, "the setting stays");
+    assert_eq!((new.history().len(), new.history().limit()), (1, 20));
+}

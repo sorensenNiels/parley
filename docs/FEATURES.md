@@ -15,6 +15,15 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
+- **R-UI-37** (step 1 of Phase 42 built 2026-11-21, Linux under WSL; D61): screens kept in the engine
+  (`parley-core`'s `session/history.rs`). **Automated** (`make test`): the same screen twice is kept once, the oldest
+  go past the limit, and the limit stays within 10 to 500; text after a non-display attribute is blanked in the copy
+  and looks the same; on a whole session (`tests/session.rs`) the sign-on screen is kept with the cursor's place, a
+  write that leaves the keyboard locked keeps nothing and its unlock keeps the screen with "æøå"; a typed password
+  is in the live screen but in no kept screen; the history and its limit go over to the session that replaces it.
+  **Still to build**: the view (R-UI-38), saving and the setting (R-UI-39), keeping the history across a reconnect in
+  the UI.
+
 - **R-DS-11, R-DS-12** (built 2026-11-20, Linux under WSL; D57): GUI selection fields and the mouse; scroll bars,
   Write Data and programmable mouse buttons, behind the session switch "GUI elements (beta)", which is back in the
   session dialog and stored. **Automated** (`make test`): `parley-core`'s `screen/selection.rs` (radio buttons, check

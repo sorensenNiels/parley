@@ -6,12 +6,14 @@ mod checks;
 mod choices;
 mod datastream;
 mod gui;
+mod history;
 mod input;
 mod mouse;
 mod playback;
 mod reply;
 mod typeahead;
 
+pub use history::{History, KeptScreen, SCREENS_KEPT, SCREENS_KEPT_RANGE};
 pub use typeahead::TYPE_AHEAD_KEYS;
 
 use serde::{Deserialize, Serialize};
@@ -262,6 +264,10 @@ pub struct Session {
     player: Option<playback::Player>,
     /// How often the host has unlocked the keyboard: a macro's `wait` step watches it.
     unlocks: u64,
+    /// The screens kept for the history view (R-UI-37), and whether a host write unlocked the keyboard since the
+    /// last one was kept.
+    history: history::History,
+    unlocked_since_kept: bool,
     /// Type-ahead is on (R-KEY-11).
     type_ahead_on: bool,
     /// Keys kept while the keyboard waits for the host (R-KEY-11).
@@ -295,6 +301,8 @@ impl Session {
             recording: None,
             player: None,
             unlocks: 0,
+            history: history::History::default(),
+            unlocked_since_kept: false,
             type_ahead_on: false,
             typed_ahead: typeahead::TypedAhead::new(),
             mouse_buttons: Vec::new(),
@@ -361,6 +369,7 @@ impl Session {
                 self.notice = Some(e.to_string());
             }
         }
+        self.keep_unlocked_screen();
         self.replay_typed_ahead();
         self.advance_macro();
     }
@@ -417,6 +426,7 @@ impl Session {
         }
         self.locked = false;
         self.unlocks = self.unlocks.wrapping_add(1);
+        self.unlocked_since_kept = true;
         self.screen.reset_selections();
     }
 }
