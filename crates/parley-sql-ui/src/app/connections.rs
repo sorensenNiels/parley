@@ -9,7 +9,7 @@ use parley_sql_core::options::{
 };
 use serde::{Deserialize, Serialize};
 
-use parley_ui_egui::connect::Entry;
+use parley_ui_egui::connect::{self, Saved};
 use parley_ui_egui::{dialog, theme};
 
 const HELP: &str = "\
@@ -39,6 +39,8 @@ pub struct SqlConnection {
     pub user: String,
     /// Naming, libraries, commitment control and formats (R-SQL-97..100).
     pub options: ConnectOptions,
+    /// Listed first on the start screen, under Favourites (R-SQL-105).
+    pub favourite: bool,
 }
 
 impl Default for SqlConnection {
@@ -52,6 +54,7 @@ impl Default for SqlConnection {
             code_page: CodePage::default(),
             user: String::new(),
             options: ConnectOptions::default(),
+            favourite: false,
         }
     }
 }
@@ -82,23 +85,27 @@ impl SqlConnection {
             code_page: config.code_page,
             user: String::new(),
             options: ConnectOptions::default(),
+            favourite: false,
         }
     }
 
-    /// Its card on the start screen: the host, TLS and the user.
-    pub fn entry(&self) -> Entry<'_> {
-        let mut address = self.host.clone();
-        if self.tls {
-            address.push_str("  ·  TLS");
+    /// Its line on the start screen: the host, TLS and the user (R-SQL-105).
+    pub fn saved(&self) -> Saved {
+        Saved {
+            name: self.name.clone(),
+            address: self.address(),
+            favourite: self.favourite,
         }
+    }
+
+    /// The host, TLS and the user, as one line.
+    pub fn address(&self) -> String {
+        let mut address = connect::address(self.host.trim(), None, self.tls);
         if !self.user.is_empty() {
             address.push_str("  ·  ");
             address.push_str(&self.user);
         }
-        Entry {
-            name: &self.name,
-            address,
-        }
+        address
     }
 }
 
@@ -123,6 +130,17 @@ pub struct Editor {
 }
 
 impl Editor {
+    /// A new connection filled in with `draft`: a recent one not saved, to be saved (R-SQL-105).
+    pub fn open_new(draft: SqlConnection) -> Self {
+        Self {
+            index: None,
+            draft,
+            show_help: false,
+            message: None,
+            renamed: None,
+        }
+    }
+
     /// Opens on the saved connection at `index`, or on a new one.
     pub fn open(connections: &[SqlConnection], index: Option<usize>) -> Self {
         let connection = index.and_then(|i| connections.get(i));
@@ -479,11 +497,11 @@ mod tests {
     }
 
     #[test]
-    fn the_card_names_the_host_tls_and_user_r_sql_46() {
+    fn the_line_names_the_host_tls_and_user_r_sql_46() {
         let mut connection = named("Prod");
         connection.user = "QPGMR".to_owned();
         assert_eq!(
-            connection.entry().address,
+            connection.saved().address,
             "prod.example.com  ·  TLS  ·  QPGMR"
         );
     }

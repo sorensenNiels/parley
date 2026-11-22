@@ -4,9 +4,8 @@
 use egui::{ComboBox, TextEdit};
 use serde::{Deserialize, Serialize};
 
-use crate::menu::Action;
 use crate::profile::Profile;
-use crate::{ParleyUi, connect, dialog, theme};
+use crate::{ParleyUi, dialog, theme};
 
 /// A named list of saved sessions, by name (R-UI-31); a session may be in several groups.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -268,28 +267,6 @@ impl ParleyUi {
             group
                 .sessions
                 .retain(|n| profiles.iter().any(|p| p.name == *n));
-        }
-    }
-
-    /// The groups on the start screen, under the saved sessions, each with Start and Edit… (R-UI-32).
-    pub(crate) fn start_screen_groups(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        if self.settings.session_groups.is_empty() {
-            return;
-        }
-        let entries: Vec<connect::Entry<'_>> = self
-            .settings
-            .session_groups
-            .iter()
-            .map(|g| connect::Entry {
-                name: &g.name,
-                address: g.sessions.join(", "),
-            })
-            .collect();
-        ui.add_space(16.0);
-        match connect::group(ui, "Groups", &entries, "Start", "Edit…") {
-            Some(connect::Choice::Connect(i)) => actions.push(Action::StartGroup(i)),
-            Some(connect::Choice::Edit(i)) => self.open_groups(Some(i)),
-            Some(connect::Choice::New) | None => {}
         }
     }
 }

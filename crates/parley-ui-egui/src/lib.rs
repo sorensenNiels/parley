@@ -7,6 +7,7 @@ pub mod addons;
 pub mod connect;
 pub mod dialog;
 pub mod fonts;
+pub mod fuzzy;
 mod groups;
 pub mod icons;
 pub mod keymap;
@@ -19,6 +20,7 @@ pub mod session_color;
 mod sessions;
 pub mod settings;
 mod shortcuts;
+mod start;
 pub mod status;
 mod tabs;
 mod terminal;
@@ -173,6 +175,10 @@ pub struct ParleyUi {
     window_opener: Option<tabs::WindowOpener>,
     /// File ▸ Session groups…, while open (R-UI-31).
     groups_dialog: Option<groups::Dialog>,
+    /// The start screen's search and quick connect (R-UI-41, R-UI-42).
+    start: connect::Form,
+    /// A session not saved to connect to once the frame is done: quick connect's, or a recent one (R-UI-41).
+    pending: Option<Profile>,
 }
 
 impl Default for ParleyUi {
@@ -221,6 +227,8 @@ impl ParleyUi {
             closing_tab: None,
             window_opener: None,
             groups_dialog: None,
+            start: connect::Form::default(),
+            pending: None,
         }
     }
 
@@ -357,6 +365,7 @@ impl ParleyUi {
             self.play(&mut connection.session(), &profile.run_macro);
         }
         self.connection = Some(connection);
+        self.remember_connection(&profile);
         self.current = Some(profile);
         self.online = false;
         self.closed = None;
@@ -688,6 +697,8 @@ impl ParleyUi {
     ) -> Vec<Function> {
         let mut asked = Vec::new();
         if let Some(session) = session {
+            // The search has the keyboard when the start screen shows again (R-UI-42).
+            self.start.focus_search();
             CentralPanel::default()
                 .frame(
                     Frame::new()
@@ -707,17 +718,7 @@ impl ParleyUi {
                         terminal::show(ui, session, &mut self.key_input, map, grab, &mut self.view);
                 });
         } else {
-            CentralPanel::default().show(ui, |ui| {
-                let entries: Vec<_> = self.profiles.iter().map(connect::Entry::session).collect();
-                let words = connect::SESSIONS;
-                match connect::show(ui, words, &entries, self.closed.as_deref()) {
-                    Some(connect::Choice::Connect(i)) => actions.push(Action::Connect(i)),
-                    Some(connect::Choice::Edit(i)) => self.open_editor(Some(i)),
-                    Some(connect::Choice::New) => actions.push(Action::NewSession),
-                    None => {}
-                }
-                self.start_screen_groups(ui, actions);
-            });
+            CentralPanel::default().show(ui, |ui| self.start_screen(ui, actions));
         }
         asked
     }
@@ -742,6 +743,9 @@ impl ParleyUi {
         }
         if let Some(index) = next.connect {
             self.connect_saved(ctx, index);
+        }
+        if let Some(profile) = self.pending.take() {
+            self.connect(ctx, profile);
         }
     }
 
@@ -1299,10 +1303,20 @@ mod tests {
     /// kittest's default of 4.
     const SETTLE_STEPS: u64 = 16;
 
+    /// The settings [`app_with`] starts with: the defaults, "All sessions" open (R-UI-42).
+    fn start_settings() -> Settings {
+        Settings {
+            all_sessions_open: true,
+            ..Settings::default()
+        }
+    }
+
+    /// Parley with `profiles`, "All sessions" open (R-UI-42) and quick connect beside the list, after it.
     fn app_with(profiles: Vec<Profile>) -> Harness<'static, ParleyUi> {
-        let app = ParleyUi::new(profiles);
+        let mut app = ParleyUi::new(profiles);
+        app.settings = start_settings();
         Harness::builder()
-            .with_size(egui::vec2(1000.0, 800.0))
+            .with_size(egui::vec2(1100.0, 800.0))
             .with_max_steps(SETTLE_STEPS)
             .build_ui_state(|ui, app: &mut ParleyUi| app.ui(ui), app)
     }
@@ -1350,7 +1364,7 @@ mod tests {
         harness.get_by_label("Close").click();
         harness.run();
         assert!(harness.state().settings_dialog.is_none());
-        assert_eq!(harness.state().settings(), &Settings::default());
+        assert_eq!(harness.state().settings(), &start_settings());
     }
 
     #[test]
@@ -1455,7 +1469,7 @@ mod tests {
         harness.run();
         harness.get_by_label("Cancel").click();
         harness.run();
-        assert_eq!(harness.state().settings(), &Settings::default());
+        assert_eq!(harness.state().settings(), &start_settings());
     }
 
     /// egui panics on a character its fonts lack: every symbol the UI draws is listed here
@@ -1800,7 +1814,8 @@ mod tests {
         harness.get_by_label("Connect to IBM i");
         harness.get_by_label("Production");
         harness.get_by_label("Test");
-        assert_eq!(harness.get_all_by_label("Connect").count(), 2);
+        // Quick connect's too (R-UI-41).
+        assert_eq!(harness.get_all_by_label("Connect").count(), 3);
         harness.get_by_label("New session…");
     }
 
@@ -2343,7 +2358,7 @@ mod tests {
         harness.get_by_label("Cancel").click();
         harness.run();
         assert!(harness.state().addon_on(AddOn::Macros));
-        assert_eq!(harness.state().settings(), &Settings::default());
+        assert_eq!(harness.state().settings(), &start_settings());
     }
 
     #[test]

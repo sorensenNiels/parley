@@ -48,6 +48,7 @@ modern take on what surrounds the screen: sessions, keyboard mapping, copy and p
 | Phases 26–39, 41: SSH | [ssh/ROADMAP.md](ssh/ROADMAP.md). |
 | Phase 22: GUI elements (beta) | Built behind a session switch (D38, D57): R-DS-10..12; the owner's checks in the running app are open ([FEATURES.md](FEATURES.md)), then it stays a beta switch (D60). |
 | Phase 42: screen history | Built 2026-11-21 (D60, D61): R-UI-37..39; the owner's checks in the running app are open ([FEATURES.md](FEATURES.md)). |
+| Phase 43: a start screen for many sessions | Planned 2026-11-22 (D64): R-UI-40..42, and R-SQL-105 for Parley SQL. |
 
 ## 4. Phases
 
@@ -83,6 +84,21 @@ Built in this order, each step tested and seen in the running app before the nex
 Checked by the owner against PUB400's sign-on screen (no account: the password field shows the history's blanking)
 and their own system.
 
+### Phase 43 — a start screen for many sessions
+
+Asked by the owner (2026-11-22, D64): Parley 5250 and Parley SQL get the start screen Parley SSH got in its Phase 41
+(R-SSH-63..65): favourites marked with a star and listed first, the recent connections, a search at the top that
+forgives a typo and is driven by the keyboard, "All sessions" folding, and quick connect beside the list. Parley 5250
+keeps its session groups on it, in a section of their own. R-UI-40..42; Parley SQL's saved connections, R-SQL-105.
+
+Built in this order, each step tested before the next:
+1. **The shared parts** (D64): Parley SSH's list rows, folding headings and the search's score move into
+   `parley-ui-egui`, which Parley SSH then uses; no change in how Parley SSH looks or behaves.
+2. **Parley 5250's start screen** (R-UI-40..42) on them, in place of `connect`'s cards.
+3. **Parley SQL's** (R-SQL-105) on the same screen.
+
+Checked by the owner in the running apps with their own sessions and connections.
+
 ### Later (unordered, to be planned)
 
 The ideas still open: Insert mode and trailing blanks (IDEA-8), printer sessions (IDEA-18), a command bar (IDEA-27);
@@ -103,6 +119,9 @@ the SQL window's add-on switches, probes and assistant, are in [sql/ROADMAP.md](
 | R-UI-37 | **Screens kept** (2026-11-21, IDEA-21, D60, D61). Each time the host has written and unlocks the keyboard, the session keeps a copy of the screen: its text, attributes, extended attributes and GUI windows, the cursor's place and when it came; the same screen as the last one kept is not kept again. Non-display fields and other non-display text are blanked in the copy, so a password never reaches the history. The newest screens are kept, as many as the setting says (R-UI-39, 50 by default), in memory only: the history lasts while the session's tab is open, across a reconnect, and is gone when the tab closes. | 42 |
 | R-UI-38 | **The history view** (2026-11-21, D60, D61). Ctrl+Page Up (remappable, in the shortcut sheet and the Edit menu as Screen history, beside Find) shows the screen before the live one in its place, read-only, under a bar: "Screen 12 of 50 · 10:42:13", ‹ and ›, and Back to live. Ctrl+Page Up goes further back and Ctrl+Page Down forward; past the newest, and with Esc or Back to live, the live screen returns with the cursor where it was. While the history is open no key reaches the host and the status bar says History; the host's new screens are kept without moving the view, and the bar says how many came. Find (Ctrl+F, R-UI-20's bar) searches the screen shown, a selection and Ctrl+C or Ctrl+T copy from it, and hotspots are not offered. With no screen kept yet, Ctrl+Page Up says so in the status bar. | 42 |
 | R-UI-39 | **Saving a screen, and how many are kept** (2026-11-21, D60, D61). The history's bar has Save…: the screen shown, as text (its rows, trailing blanks cut, UTF-8) or as HTML (one file of its own: the screen in the session's colour scheme and font family, each attribute's colour, underline, reverse and column separators as drawn, the session's name and when the screen came in its title), through the launcher's file window. Settings ▸ Terminal ▸ Screens kept: 10 to 500, 50 by default; lowering it drops the oldest at once. | 42 |
+| R-UI-40 | **Favourite sessions** (2026-11-22, asked by the owner; D64; as R-SSH-63). A star on each saved session's row on the start screen marks it as a favourite or not, kept with the session; the favourites are listed first, under "Favourites", and also under "All sessions", which lists every saved session. | 43 |
+| R-UI-41 | **Recent connections and quick connect** (2026-11-22, asked by the owner; D64; as R-SSH-64 and R-SSH-11's quick connect). Quick connect, a card on the start screen: Host (a name or address, `host:port` for another port), a TLS switch (on at first; port 992 with TLS, 23 without, unless the host names one) and Connect; the session is not saved, its tab and title named by its address, with the default settings. Under the favourites, "Recent" lists the last five connections made (saved sessions and quick connects), newest first, kept in the settings. A saved session (found by its name, or for a quick connect by its address) is shown by its name, with its star and Edit…, and connects with its settings as they are now; one since renamed or deleted, and a quick connect, is shown by its address with "Save as session…", which opens the session dialog filled in with it. Not shown while searching. | 43 |
+| R-UI-42 | **A start screen for many sessions** (2026-11-22, asked by the owner; D64; as R-SSH-65). Why the last connection ended is said at the top. The search field (from four saved sessions on) is under it and has the keyboard when the start screen shows; it looks in names and addresses and forgives a typo; its matches are one list, the best fits first, then the favourites; Up and Down choose one, Enter connects it, Escape empties the search. Each saved session is one line: star, name, address, Edit…, Connect. Without a search, "All sessions" and "Groups" (R-UI-31: each group's name, its sessions, Edit… and Start, R-UI-32) show their count and fold under their heading; "All sessions" is open while nothing is listed above it; under favourites or recent connections it is folded until the user opens it and stays as left, also after a restart (the owner, 2026-11-22); "Groups" is open at first. Quick connect, New session… and Session groups… (the groups dialog) stay in view: beside the list when the window is wide enough, above it when not. | 43 |
 
 ## 6. Ideas
 
@@ -128,4 +147,4 @@ The decisions, with the question, the choice and the alternatives, are in [DECIS
   (`D`), phases and ideas (`IDEA`, in [IDEAS.md](IDEAS.md)) take their next number here, whichever roadmap uses it,
   so a number never means two things.
 
-Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-12` · `R-DS-13` · `R-EBC-3` · `R-KEY-13` · `R-UI-40` · `R-ADD-4` · `R-NF-6` · `D64` · `Phase 43` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); `R-SSH`: [ssh/ROADMAP.md](ssh/ROADMAP.md); ideas: last line of IDEAS.md).
+Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-12` · `R-DS-13` · `R-EBC-3` · `R-KEY-13` · `R-UI-43` · `R-ADD-4` · `R-NF-6` · `D65` · `Phase 44` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); `R-SSH`: [ssh/ROADMAP.md](ssh/ROADMAP.md); ideas: last line of IDEAS.md).

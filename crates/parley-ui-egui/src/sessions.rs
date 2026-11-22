@@ -46,7 +46,7 @@ pub enum Outcome {
 pub struct Editor {
     /// The saved session being edited; `None` for a new one.
     index: Option<usize>,
-    draft: Profile,
+    pub(crate) draft: Profile,
     show_help: bool,
     message: Option<String>,
     /// The body's height last frame (see [`dialog::fitting_scroll_area`]).
@@ -77,6 +77,18 @@ impl Editor {
         };
         editor.select(profiles, index);
         editor
+    }
+
+    /// A new session filled in with `draft`: a recent connection not saved, to be saved (R-UI-41).
+    pub fn open_new(draft: Profile) -> Self {
+        Self {
+            index: None,
+            draft,
+            show_help: false,
+            message: None,
+            body_height: 0.0,
+            saved: None,
+        }
     }
 
     fn select(&mut self, profiles: &[Profile], index: Option<usize>) {

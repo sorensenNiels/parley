@@ -31,6 +31,8 @@ pub struct Profile {
     pub screen_colors: Option<crate::terminal::Scheme>,
     /// The session's colour, shown as stripes and lines, never as a background (R-UI-35).
     pub color: crate::session_color::SessionColor,
+    /// Listed first on the start screen, under Favourites (R-UI-40).
+    pub favourite: bool,
 }
 
 impl Default for Profile {
@@ -51,6 +53,7 @@ impl Default for Profile {
             reconnect: false,
             screen_colors: None,
             color: crate::session_color::SessionColor::None,
+            favourite: false,
         }
     }
 }

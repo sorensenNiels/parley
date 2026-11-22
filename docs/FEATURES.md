@@ -15,6 +15,18 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
+- **R-UI-40, R-UI-41, R-UI-42** (Phase 43 built 2026-11-22, Linux under WSL; D64): Parley's start screen on the
+  shared one in `connect` (Parley SSH's list rows and folding headings moved to `connect/list`, its search score to
+  `fuzzy`), Parley's side in `start.rs`; `Profile::favourite`, `Settings::recent_sessions` and `all_sessions_open`.
+  **Automated** (`make test`): `connect`'s unit tests (the search over names and addresses, a typo forgiven, the
+  favourites first on equal fits, `æøå`; what a click in each kind of row chooses; quick connect's `host:port`, IPv6
+  and bad ports), `start`'s (TLS's or telnet's port, named by its address; recent newest first, no repeats, at most
+  five, a quick connect kept without a name; a renamed session no longer found) and kittest tests (the star and
+  Favourites; All sessions open with nothing above it, folded under a favourite, opened and kept; quick connect to a local port, unsaved, then Recent with "Not
+  saved" and Save as session… filled in; the search with the keyboard, Down and Enter connecting the second match;
+  Groups with Start and Session groups…). Seen once in a screenshot of the running app (Linux under WSL, dark, two
+  saved sessions, before All sessions opened with nothing above it): quick connect beside the list. **Open:** the owner's check with their own sessions.
+
 - **R-UI-37** (step 1 of Phase 42 built 2026-11-21, Linux under WSL; D61): screens kept in the engine
   (`parley-core`'s `session/history.rs`). **Automated** (`make test`): the same screen twice is kept once, the oldest
   go past the limit, and the limit stays within 10 to 500; text after a non-display attribute is blanked in the copy

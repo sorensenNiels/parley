@@ -183,14 +183,19 @@ fn a_new_session_is_saved_from_the_editor_and_listed_r_ssh_11() {
         ("Web æøå", "web.lan", 22)
     );
     assert!(
-        h.query_by_label("Web æøå").is_none(),
-        "All sessions starts folded (R-SSH-65)"
+        h.query_by_label("Web æøå").is_some(),
+        "listed: All sessions is open with nothing above it (R-SSH-65, D64)"
+    );
+    // A favourite above it: All sessions folds as the user left it.
+    h.state_mut().settings.sessions[0].favourite = true;
+    h.run_steps(2);
+    assert_eq!(
+        h.get_all_by_label("Web æøå").count(),
+        1,
+        "under Favourites only"
     );
     pointer_click(&mut h, "ALL SESSIONS (1)", 0);
-    assert!(
-        h.query_by_label("Web æøå").is_some(),
-        "listed on the start screen"
-    );
+    assert_eq!(h.get_all_by_label("Web æøå").count(), 2);
     assert!(
         h.state().settings.all_sessions_open,
         "kept in the settings for the next start"

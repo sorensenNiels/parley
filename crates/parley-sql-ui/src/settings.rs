@@ -101,6 +101,11 @@ pub struct Settings {
     pub sql_side: crate::side::SideLayout,
     /// The SQL assistant's provider, model and address; never a key (R-SQL-48, D27).
     pub assistant: parley_sql_core::assistant::AssistantConfig,
+    /// The last connections made, newest first, at most [`parley_ui_egui::connect::RECENT_KEPT`]; one not saved has
+    /// no name (R-SQL-105).
+    pub recent_connections: Vec<crate::app::SqlConnection>,
+    /// "All connections" is open on the start screen (R-SQL-105).
+    pub all_connections_open: bool,
 }
 
 impl Default for Settings {
@@ -127,6 +132,8 @@ impl Default for Settings {
             sql_groups: BTreeMap::new(),
             sql_side: crate::side::SideLayout::default(),
             assistant: parley_sql_core::assistant::AssistantConfig::default(),
+            recent_connections: Vec::new(),
+            all_connections_open: false,
         }
     }
 }

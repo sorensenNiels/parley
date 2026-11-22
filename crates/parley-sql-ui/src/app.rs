@@ -5,8 +5,9 @@
 
 mod bars;
 mod connections;
+mod start;
 
-use egui::{CentralPanel, Margin, Panel, Ui, ViewportCommand};
+use egui::{Margin, Panel, Ui, ViewportCommand};
 
 pub use connections::SqlConnection;
 
@@ -15,13 +16,6 @@ use parley_ui_egui::{connect, theme, updates};
 
 use crate::SqlWindow;
 use crate::settings::{self, Assistant, Settings};
-
-/// The start screen's words: saved connections.
-const CONNECTIONS: connect::Words = connect::Words {
-    heading: "Connect to IBM i",
-    none: "No connections yet.",
-    new: "New connection…",
-};
 
 /// How often the launcher saves the settings, the scripts in them (R-SQL-74): a crash loses at
 /// most this much typing. eframe writes only what changed.
@@ -54,6 +48,8 @@ pub struct ParleySqlUi {
     /// The main window was closed while changes were not committed: it closes once the SQL
     /// window has asked and closed (R-SQL-5).
     exit_after_window: bool,
+    /// The start screen's search and quick connect (R-SQL-105).
+    start: connect::Form,
 }
 
 impl ParleySqlUi {
@@ -76,6 +72,7 @@ impl ParleySqlUi {
             note: None,
             scripts_kept: 0,
             exit_after_window: false,
+            start: connect::Form::default(),
         }
     }
 
@@ -163,9 +160,16 @@ impl ParleySqlUi {
         if self.window.is_some() {
             return;
         }
-        let Some(connection) = self.connections.get(index).cloned() else {
+        if let Some(connection) = self.connections.get(index).cloned() {
+            self.open(connection);
+        }
+    }
+
+    /// Opens the SQL window on `connection`, saved or not, and keeps it among the recent ones (R-SQL-105).
+    fn open(&mut self, connection: SqlConnection) {
+        if self.window.is_some() {
             return;
-        };
+        }
         match crate::hosting::open(
             &connection.name,
             &connection.config(),
@@ -176,8 +180,10 @@ impl ParleySqlUi {
             Ok(window) => {
                 let window = window.with_options(connection.options.clone());
                 self.window = Some(window.embedded());
+                self.remember_connection(&connection);
                 self.current = Some(connection);
                 self.note = None;
+                self.start.focus_search();
             }
             Err(e) => self.notice = Some(e),
         }
@@ -256,18 +262,6 @@ impl ParleySqlUi {
         Panel::bottom("sql-app-status")
             .frame(frame)
             .show(ui, |ui| bars::status_bar(ui, &footer));
-    }
-
-    fn start_screen(&mut self, ui: &mut Ui) {
-        CentralPanel::default().show(ui, |ui| {
-            let entries: Vec<_> = self.connections.iter().map(SqlConnection::entry).collect();
-            match connect::show(ui, CONNECTIONS, &entries, None) {
-                Some(connect::Choice::Connect(i)) => self.connect(i),
-                Some(connect::Choice::Edit(i)) => self.open_editor(Some(i)),
-                Some(connect::Choice::New) => self.open_editor(None),
-                None => {}
-            }
-        });
     }
 
     /// The SQL window in the rest of the main window; what it changed into the settings.
@@ -426,14 +420,15 @@ mod tests {
         }
     }
 
+    /// Parley SQL with `connections`, "All connections" open and quick connect beside the list, after it
+    /// (R-SQL-105).
     fn app_with(connections: Vec<SqlConnection>) -> Harness<'static, ParleySqlUi> {
+        let mut app = ParleySqlUi::new(connections);
+        app.settings.all_connections_open = true;
         Harness::builder()
-            .with_size(egui::vec2(1000.0, 700.0))
+            .with_size(egui::vec2(1100.0, 700.0))
             .with_max_steps(SETTLE_STEPS)
-            .build_ui_state(
-                |ui, app: &mut ParleySqlUi| app.ui(ui),
-                ParleySqlUi::new(connections),
-            )
+            .build_ui_state(|ui, app: &mut ParleySqlUi| app.ui(ui), app)
     }
 
     #[test]
@@ -771,7 +766,11 @@ mod tests {
     #[test]
     fn connecting_without_the_helper_says_why_the_window_cannot_open_r_sql_45() {
         let mut harness = app_with(vec![prod()]);
-        harness.get_by_label("Connect").click();
+        harness
+            .get_all_by_label("Connect")
+            .next()
+            .expect("Prod's Connect, before quick connect's")
+            .click();
         harness.run();
         harness.get_by_label_contains("installed without the SQL helper");
         assert!(harness.state().window.is_none());

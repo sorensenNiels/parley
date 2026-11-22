@@ -496,9 +496,10 @@ mod tests {
         let mut app = ParleyUi::new(profiles);
         let mut settings = app.settings.clone();
         settings.more_sessions = more;
+        settings.all_sessions_open = true;
         app.set_settings(settings);
         Harness::builder()
-            .with_size(egui::vec2(1000.0, 800.0))
+            .with_size(egui::vec2(1100.0, 800.0))
             .with_max_steps(16)
             .build_ui_state(|ui, app: &mut ParleyUi| app.ui(ui), app)
     }
@@ -522,7 +523,12 @@ mod tests {
     }
 
     fn connect_first(harness: &mut Harness<'static, ParleyUi>) {
-        harness.get_by_label("Connect").click();
+        // The session's, before quick connect's beside the list (R-UI-41).
+        harness
+            .get_all_by_label("Connect")
+            .next()
+            .expect("the session's Connect")
+            .click();
         harness.run();
         until(harness, online);
     }
@@ -703,7 +709,11 @@ mod tests {
         let mut ended = local("A", &listener);
         ended.exit_on_close = true;
         let mut harness = app(vec![ended], MoreSessions::Tab);
-        harness.get_by_label("Connect").click();
+        harness
+            .get_all_by_label("Connect")
+            .next()
+            .expect("the session's Connect")
+            .click();
         harness.run();
         let (first, _): (TcpStream, _) = listener.accept().expect("the first session");
         until(&mut harness, online);

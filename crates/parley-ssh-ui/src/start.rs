@@ -3,11 +3,10 @@
 //! For many sessions (R-SSH-65): the favourites first (R-SSH-63), the recent connections (R-SSH-64), the rest under
 //! headings that fold, a search at the top that the keyboard drives, and quick connect beside the list.
 
-mod list;
-
-use egui::{Key, Modifiers, Ui};
+use egui::{Key, Ui};
 use parley_ssh_core::net::Target;
 use parley_ssh_core::openssh_config::Host;
+use parley_ui_egui::fuzzy::fit;
 use parley_ui_egui::theme;
 
 use crate::openssh;
@@ -15,7 +14,7 @@ use crate::palette;
 use crate::sessions::{DEFAULT_SETTINGS, SavedSession};
 use crate::settings::Settings;
 
-use list::{Clicked, Fold, Row, Star};
+use parley_ui_egui::connect::list::{self, Clicked, Fold, Row, Star};
 
 /// From this many saved sessions and config hosts on, the list has a search field.
 const SEARCH_FROM: usize = 4;
@@ -23,10 +22,6 @@ const SEARCH_FROM: usize = 4;
 const RECENT_SHOWN: usize = 5;
 /// The config's hosts start folded when there are more than this and something is shown above them (R-SSH-65).
 const FOLD_FROM: usize = 10;
-/// The widths of the list and of quick connect beside it, and the room between them.
-const LIST_WIDTH: f32 = 560.0;
-const SIDE_WIDTH: f32 = 400.0;
-const GAP: f32 = 24.0;
 
 /// What the user chose on the start screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +112,7 @@ impl Lists<'_> {
             name: s.name.clone(),
             address: s.address(),
             star: if s.favourite { Star::On } else { Star::Off },
+            primary: "Connect",
             second: "Edit…",
             selected,
         };
@@ -128,6 +124,7 @@ impl Lists<'_> {
                     name: host.alias.clone(),
                     address: address(host),
                     star: Star::None,
+                    primary: "Connect",
                     second: "Save as session…",
                     selected,
                 }
@@ -136,6 +133,7 @@ impl Lists<'_> {
                 name: self.recent.get(r)?.address(),
                 address: "Not saved".to_owned(),
                 star: Star::None,
+                primary: "Connect",
                 second: "Save as session…",
                 selected,
             },
@@ -194,38 +192,12 @@ impl Form {
                     ui.heading("Connect to a server");
                     ui.add_space(16.0);
                 });
-                let both = LIST_WIDTH + GAP + SIDE_WIDTH;
-                if ui.available_width() >= both + 32.0 {
-                    let margin = (ui.available_width() - both) / 2.0;
-                    ui.horizontal_top(|ui| {
-                        ui.add_space(margin);
-                        ui.vertical(|ui| {
-                            ui.set_width(LIST_WIDTH);
-                            choice = self.lists(ui, lists, active);
-                        });
-                        ui.add_space(GAP);
-                        ui.vertical(|ui| {
-                            ui.set_width(SIDE_WIDTH);
-                            if let Some(c) = self.side(ui) {
-                                choice = Some(c);
-                            }
-                        });
-                    });
-                } else {
-                    let width = LIST_WIDTH.min(ui.available_width());
-                    let margin = (ui.available_width() - width) / 2.0;
-                    ui.horizontal_top(|ui| {
-                        ui.add_space(margin);
-                        ui.vertical(|ui| {
-                            ui.set_width(width);
-                            choice = self.side(ui);
-                            ui.add_space(20.0);
-                            if let Some(c) = self.lists(ui, lists, active) {
-                                choice = Some(c);
-                            }
-                        });
-                    });
-                }
+                choice = list::columns(
+                    ui,
+                    self,
+                    |form, ui| form.lists(ui, lists, active),
+                    Form::side,
+                );
                 ui.add_space(24.0);
             });
         choice
@@ -279,48 +251,30 @@ impl Form {
 
     /// The search field: Up and Down choose a match, Enter connects it, Escape empties it (R-SSH-65).
     fn search(&mut self, ui: &mut Ui, lists: Lists<'_>, active: bool) -> Option<Choice> {
-        let id = ui.make_persistent_id("ssh-start-search");
-        // Taken before the field sees them: a one-line field has no use for them.
-        let (down, up) = if ui.memory(|m| m.has_focus(id)) {
-            ui.input_mut(|i| {
-                (
-                    i.consume_key(Modifiers::NONE, Key::ArrowDown),
-                    i.consume_key(Modifiers::NONE, Key::ArrowUp),
-                )
-            })
-        } else {
-            (false, false)
-        };
-        let edit = egui::TextEdit::singleline(&mut self.search)
-            .id(id)
-            .hint_text("Find a session");
-        let response = theme::sized_edit(ui, ui.available_width(), edit);
-        if active && self.focus {
-            response.request_focus();
-            self.focus = false;
+        let mut focus = active && self.focus;
+        let keys = list::search_field(
+            ui,
+            "ssh-start-search",
+            &mut self.search,
+            "Find a session",
+            &mut focus,
+        );
+        if active {
+            self.focus = focus;
         }
-        if response.changed() {
+        if keys.changed || keys.escape {
             self.selected = 0;
         }
         let found = found(lists, &self.search);
-        if down {
+        if keys.down {
             self.selected = (self.selected + 1).min(found.len().saturating_sub(1));
             self.scroll = true;
         }
-        if up {
+        if keys.up {
             self.selected = self.selected.saturating_sub(1);
             self.scroll = true;
         }
-        if !response.lost_focus() {
-            return None;
-        }
-        let (enter, escape) = ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
-        if escape {
-            self.search.clear();
-            self.selected = 0;
-            response.request_focus();
-        }
-        if !enter || self.search.trim().is_empty() {
+        if !keys.enter {
             return None;
         }
         found
@@ -417,14 +371,15 @@ fn sections(ui: &mut Ui, lists: Lists<'_>) -> Option<Choice> {
         above = true;
     }
     if !all.is_empty() {
-        let fold = Fold::Kept(lists.all_open);
+        let open = list::all_open(lists.all_open, above);
+        let fold = Fold::Kept(open);
         let (shown, clicked) =
             list::section(ui, "ssh-start-all", "All sessions", all.len(), fold, |ui| {
                 lists.rows(ui, &all, None, false)
             });
         pick(shown.flatten());
         if clicked {
-            pick(Some(Choice::AllSessionsOpen(!lists.all_open)));
+            pick(Some(Choice::AllSessionsOpen(!open)));
         }
         ui.add_space(12.0);
         above = true;
@@ -460,17 +415,6 @@ fn config_section(ui: &mut Ui, lists: Lists<'_>, above: bool) -> Option<Choice> 
         theme::warning(ui, format!("Skipped: {first}{more}"));
     }
     choice
-}
-
-/// How well `search` fits a row named `name` with the other words `other`: the name as the palette reads a label,
-/// forgiving a typo (R-SSH-48), the others only when they hold it.
-fn fit(search: &str, name: &str, other: &[&str]) -> Option<u32> {
-    let lower = search.trim().to_lowercase();
-    let holds = other
-        .iter()
-        .any(|o| o.to_lowercase().contains(&lower))
-        .then_some(1500);
-    palette::score(search, name).map(|s| s + 100).max(holds)
 }
 
 /// The saved sessions and config hosts that fit `search`, the best fits first, then the favourites, then as listed

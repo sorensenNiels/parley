@@ -42,6 +42,7 @@ as its recorded exception (D20).
 | [Phase 19: a fuller History](phases/phase-19-a-fuller-history.md) | Done (2026-11-15). |
 | [Phase 25: connection settings](phases/phase-25-connection-settings.md) | Done (2026-11-16). |
 | [Phase 23: a library's SQL and backups](phases/phase-23-a-librarys-sql-and-backups.md) | Done (2026-11-16). |
+| Phase 43: a start screen for many sessions | Planned 2026-11-22 with Parley 5250's (D64, [../ROADMAP.md](../ROADMAP.md)): R-SQL-105. |
 
 ## 4. Phases
 
@@ -63,6 +64,7 @@ rows from Parley's areas belong here too: `ADD` (the assistant's add-on switch) 
 | ID | Requirement | Phase |
 |---|---|---|
 | R-SQL-92 | **A compound statement is one statement** (2026-11-15; asked by the owner after the code audit. *Changes R-SQL-7:* statements end with `;` outside a compound statement. *Built and tested 2026-11-20; to be checked in the running app, see [FEATURES.md](FEATURES.md).*) A `;` inside `BEGIN … END` does not end the statement, so `CREATE PROCEDURE`, `CREATE FUNCTION`, `CREATE TRIGGER` (`BEGIN ATOMIC`) and a dynamic compound statement run whole, from Run, Run all and a selection. Nested `BEGIN … END`, `END IF`, `END WHILE`, `END LOOP`, `END FOR`, `END REPEAT`, `END CASE` and `CASE … END` expressions are told apart; `BEGIN` and `END` in strings, quoted names and comments count for nothing. A `BEGIN` never closed runs to the end of the text, and the host says what is wrong. A pure function in `parley_sql_core::text`, tested with procedures, triggers, functions, CASE expressions, `æøå` and unclosed text. | Code audit |
+| R-SQL-105 | **A start screen for many connections** (2026-11-22, asked by the owner; D64; as R-UI-40..42 for Parley 5250's sessions). Parley SQL's start screen lists the saved connections as Parley 5250's lists its sessions: a star marks a favourite, kept with the connection, and "Favourites" lists them first; "Recent" the last five connections made, newest first, kept in the settings, with "Save as connection…" for one not saved; the search (from four saved connections on) with the keyboard, Up, Down, Enter and Escape; "All connections" open while nothing is listed above it, else folding, kept as left. Quick connect beside the list (above it when the window is narrow): Host, a TLS switch (on at first) and Connect, a connection not saved, named by its host, its user asked at sign-on. No groups. | 43 |
 
 ## 6. Decisions
 
@@ -83,4 +85,4 @@ The decisions, with the question, the choice and the alternatives, are in [DECIS
 - An idea is not a plan: it goes in [IDEAS.md](IDEAS.md) (by theme in [ideas/](ideas/)) until it is picked, then becomes requirements here.
 - What is decided not to be built now moves with its text to [../PARKED.md](../PARKED.md) (D62).
 
-Next free ID: `R-SQL-105` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).
+Next free ID: `R-SQL-106` (other areas, decisions and phases: last line of [../ROADMAP.md](../ROADMAP.md); ideas: last line of [../IDEAS.md](../IDEAS.md)).

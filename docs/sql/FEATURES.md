@@ -13,6 +13,13 @@
 
 ## In progress
 
+- **R-SQL-105** (Phase 43 built 2026-11-22, Linux under WSL, tests only; D64): Parley SQL's start screen on
+  Parley's shared one (`app/start.rs`); `SqlConnection::favourite`, `Settings::recent_connections` and
+  `all_connections_open`. **Automated** (`make test`): recent connections newest first, no repeats, at most five, one
+  not saved kept by its host; found again by name, or by host and TLS; kittest tests for the star, Favourites and All
+  connections open with nothing above it, then folding and kept; Recent with "Not saved" and Save as connection…; quick connect refusing a port; no
+  groups. **Open:** seen in the running app, and the owner's check.
+
 - **R-SQL-92** (built 2026-11-15 in the code audit, finished 2026-11-20; Linux under WSL, tests only). `text::segments`
   skips the `;`s inside `BEGIN … END`, tells `END IF`/`WHILE`/`LOOP`/`FOR`/`REPEAT`/`CASE` and `CASE … END`
   expressions apart, and ignores `BEGIN`/`END` in strings, quoted names and comments; an unclosed `BEGIN` runs to the

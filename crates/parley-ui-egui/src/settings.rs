@@ -72,6 +72,11 @@ pub struct Settings {
     pub more_sessions: MoreSessions,
     /// Named groups of saved sessions (R-UI-31).
     pub session_groups: Vec<SessionGroup>,
+    /// The last connections made, newest first, at most [`crate::connect::RECENT_KEPT`]; one not saved has no name
+    /// (R-UI-41).
+    pub recent_sessions: Vec<crate::profile::Profile>,
+    /// "All sessions" is open on the start screen (R-UI-42).
+    pub all_sessions_open: bool,
 }
 
 /// Where more sessions open (R-UI-34, D53).
@@ -106,6 +111,8 @@ impl Default for Settings {
             keyboard_maps: Vec::new(),
             more_sessions: MoreSessions::default(),
             session_groups: Vec::new(),
+            recent_sessions: Vec::new(),
+            all_sessions_open: false,
         }
     }
 }
