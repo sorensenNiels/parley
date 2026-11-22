@@ -168,24 +168,25 @@
             </Component>
             {{/each~}}
             {{resources}}
-            <!-- R-SSH-66: rsync for Parley SSH, from MSYS2 (scripts/fetch-rsync-windows.py into PARLEY_RSYNC_DIR), in a
-                 folder of its own so that it is not on the PATH with the programs. -->
+            <!-- R-SSH-66: rsync for Parley SSH, from MSYS2 (scripts/fetch-rsync-windows.py into CARGO_PACKAGER_RSYNC_DIR), in a
+                 folder of its own so that it is not on the PATH with the programs.
+                 The name must start with CARGO_PACKAGER: cargo-packager runs candle with every other variable cleared. -->
             <Directory Id="RsyncDir" Name="rsync">
                 <Component Id="ParleySshRsync" Guid="61443A10-BFD9-4793-A3D4-D56939F3D20E" Win64="$(var.Win64)">
-                    <File Id="Rsync_rsync_exe" Source="$(env.PARLEY_RSYNC_DIR)\rsync.exe" KeyPath="yes"/>
-                    <File Id="Rsync_msys_2_0_dll" Source="$(env.PARLEY_RSYNC_DIR)\msys-2.0.dll"/>
-                    <File Id="Rsync_msys_crypto_3_dll" Source="$(env.PARLEY_RSYNC_DIR)\msys-crypto-3.dll"/>
-                    <File Id="Rsync_msys_iconv_2_dll" Source="$(env.PARLEY_RSYNC_DIR)\msys-iconv-2.dll"/>
-                    <File Id="Rsync_msys_lz4_1_dll" Source="$(env.PARLEY_RSYNC_DIR)\msys-lz4-1.dll"/>
-                    <File Id="Rsync_msys_xxhash_0_dll" Source="$(env.PARLEY_RSYNC_DIR)\msys-xxhash-0.dll"/>
-                    <File Id="Rsync_msys_zstd_1_dll" Source="$(env.PARLEY_RSYNC_DIR)\msys-zstd-1.dll"/>
-                    <File Id="Rsync_rsync_COPYING_txt" Source="$(env.PARLEY_RSYNC_DIR)\rsync-COPYING.txt"/>
-                    <File Id="Rsync_rsync_SOURCE_txt" Source="$(env.PARLEY_RSYNC_DIR)\rsync-SOURCE.txt"/>
-                    <File Id="Rsync_openssl_LICENSE_txt" Source="$(env.PARLEY_RSYNC_DIR)\openssl-LICENSE.txt"/>
-                    <File Id="Rsync_xxhash_LICENSE_txt" Source="$(env.PARLEY_RSYNC_DIR)\xxhash-LICENSE.txt"/>
-                    <File Id="Rsync_zstd_LICENSE_txt" Source="$(env.PARLEY_RSYNC_DIR)\zstd-LICENSE.txt"/>
-                    <File Id="Rsync_LGPL_2_1_txt" Source="$(env.PARLEY_RSYNC_DIR)\LGPL-2.1.txt"/>
-                    <File Id="Rsync_GPL_2_0_txt" Source="$(env.PARLEY_RSYNC_DIR)\GPL-2.0.txt"/>
+                    <File Id="Rsync_rsync_exe" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\rsync.exe" KeyPath="yes"/>
+                    <File Id="Rsync_msys_2_0_dll" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\msys-2.0.dll"/>
+                    <File Id="Rsync_msys_crypto_3_dll" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\msys-crypto-3.dll"/>
+                    <File Id="Rsync_msys_iconv_2_dll" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\msys-iconv-2.dll"/>
+                    <File Id="Rsync_msys_lz4_1_dll" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\msys-lz4-1.dll"/>
+                    <File Id="Rsync_msys_xxhash_0_dll" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\msys-xxhash-0.dll"/>
+                    <File Id="Rsync_msys_zstd_1_dll" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\msys-zstd-1.dll"/>
+                    <File Id="Rsync_rsync_COPYING_txt" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\rsync-COPYING.txt"/>
+                    <File Id="Rsync_rsync_SOURCE_txt" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\rsync-SOURCE.txt"/>
+                    <File Id="Rsync_openssl_LICENSE_txt" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\openssl-LICENSE.txt"/>
+                    <File Id="Rsync_xxhash_LICENSE_txt" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\xxhash-LICENSE.txt"/>
+                    <File Id="Rsync_zstd_LICENSE_txt" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\zstd-LICENSE.txt"/>
+                    <File Id="Rsync_LGPL_2_1_txt" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\LGPL-2.1.txt"/>
+                    <File Id="Rsync_GPL_2_0_txt" Source="$(env.CARGO_PACKAGER_RSYNC_DIR)\GPL-2.0.txt"/>
                 </Component>
             </Directory>
             <Component Id="CMP_UninstallShortcut" Guid="*">

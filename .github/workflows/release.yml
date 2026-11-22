@@ -109,8 +109,8 @@ jobs:
         shell: bash
         run: |
           python scripts/fetch-rsync-windows.py target/rsync-windows
-          # The installer template takes the files from here.
-          echo "PARLEY_RSYNC_DIR=$(cygpath -w "$PWD/target/rsync-windows")" >> "$GITHUB_ENV"
+          # The installer template takes the files from here; cargo-packager hands candle only CARGO_PACKAGER_* variables.
+          echo "CARGO_PACKAGER_RSYNC_DIR=$(cygpath -w "$PWD/target/rsync-windows")" >> "$GITHUB_ENV"
 
       - name: Package
         shell: bash

@@ -59,7 +59,7 @@
   rsync.exe and those DLLs, with every licence (the texts the packages lack are in `crates/parley-app/windows/rsync/`)
   and `rsync-SOURCE.txt` naming each part's licence and MSYS2 source package. The installer template puts them in an
   `rsync` folder of the install folder (component `ParleySshRsync` of the Parley SSH feature, from
-  `PARLEY_RSYNC_DIR`), off the PATH the installer sets; Parley SSH looks there first. MSYS2's rsync gets no drive
+  `CARGO_PACKAGER_RSYNC_DIR`), off the PATH the installer sets; Parley SSH looks there first. MSYS2's rsync gets no drive
   letter whatever its mount table (`transfer::windows_place`): it starts in the desktop path's drive with the rest
   as a relative path, and finds `parley-ssh` by name, its folder put first on rsync's PATH (`Launch`). The release
   workflow's Windows job and `make package` on Windows run the script. **About page** (2026-11-21): the shared
