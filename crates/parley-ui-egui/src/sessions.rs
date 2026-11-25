@@ -261,9 +261,13 @@ impl Editor {
             let connect = theme::primary_button(ui, "Connect");
             theme::button_row(ui, |ui| {
                 let mut outcome = None;
-                let connect = ui
-                    .add_enabled(!connected, connect)
-                    .on_disabled_hover_text("Disconnect first: one session per window.");
+                // R-UI-43: while connected, it opens beside the session in use.
+                let mut connect = ui.add(connect);
+                if connected {
+                    connect = connect.on_hover_text(
+                        "Opens beside the session in use: in a tab or a window, as the settings say.",
+                    );
+                }
                 if connect.clicked()
                     && let Some(index) = self.apply(profiles)
                 {

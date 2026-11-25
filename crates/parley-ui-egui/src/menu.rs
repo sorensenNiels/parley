@@ -68,6 +68,8 @@ pub enum Action {
     /// Tools ▸ Run macro ▸: the macro at this index of the menu's list (R-KEY-4).
     RunMacro(usize),
     StopMacro,
+    /// The status bar's "Message waiting": System Request, option 4 (R-UI-44).
+    DisplayMessages,
     /// Tools ▸ Macros…
     Macros,
 }
@@ -181,7 +183,8 @@ fn file_menu(ui: &mut Ui, header: &Header<'_>) -> Option<Action> {
         if item(ui, header, true, (icons::PENCIL, "Edit sessions…"), None) {
             action = Some(Action::EditSessions);
         }
-        let can_connect = !header.connected() && !header.profiles.is_empty();
+        // R-UI-43: while connected, the chosen session opens beside the one in use.
+        let can_connect = !header.profiles.is_empty();
         let names = header.profiles.iter().map(|p| p.name.as_str());
         if let Some(i) = connect_menu(ui, can_connect, names, None) {
             action = Some(Action::Connect(i));

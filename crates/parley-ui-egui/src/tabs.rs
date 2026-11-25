@@ -77,6 +77,14 @@ impl Mark {
     }
 }
 
+#[cfg(test)]
+impl Tab {
+    /// Whether the tab's session has a connection.
+    pub(crate) fn is_open(&self) -> bool {
+        self.connection.is_some()
+    }
+}
+
 /// The front session's fields and `tab`'s change places.
 fn swap_front(ui: &mut ParleyUi, tab: &mut Tab) {
     std::mem::swap(&mut ui.current, &mut tab.current);
@@ -359,6 +367,15 @@ impl ParleyUi {
                 duplicate: false,
             })
             .collect()
+    }
+
+    /// Saved session `index`, to open beside the one in use (R-UI-43).
+    pub(crate) fn opening_of(&self, index: usize) -> Option<NewWindow> {
+        self.profiles.get(index).map(|p| NewWindow {
+            profile: p.clone(),
+            saved: true,
+            duplicate: false,
+        })
     }
 
     /// The session in use again, without its device name (R-UI-30, D53); none while not connected.
@@ -701,6 +718,58 @@ mod tests {
             ui.tabs[0].current.as_ref().map(|p| p.name.as_str()),
             Some("A")
         );
+    }
+
+    #[test]
+    fn connect_to_while_connected_opens_another_tab_and_keeps_the_first_r_ui_43() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a local port");
+        let mut harness = app(
+            vec![local("A", &listener), local("B", &listener)],
+            MoreSessions::Tab,
+        );
+        connect_first(&mut harness);
+        harness.get_by_label("File").click();
+        harness.run();
+        harness.get_by_label("Connect to").hover();
+        harness.run();
+        harness
+            .query_all_by_label("B")
+            .last()
+            .expect("in the menu")
+            .click();
+        harness.run();
+        let ui = harness.state();
+        assert_eq!((ui.tabs.len(), ui.active), (2, 1));
+        assert_eq!(ui.current.as_ref().map(|p| p.name.as_str()), Some("B"));
+        assert!(ui.tabs[0].connection.is_some(), "A is still connected");
+    }
+
+    #[test]
+    fn connect_to_while_connected_opens_another_window_by_default_r_ui_43() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a local port");
+        let mut harness = app(
+            vec![local("A", &listener), local("B", &listener)],
+            MoreSessions::Window,
+        );
+        let opened = opened(&mut harness);
+        connect_first(&mut harness);
+        harness.get_by_label("File").click();
+        harness.run();
+        harness.get_by_label("Connect to").hover();
+        harness.run();
+        harness
+            .query_all_by_label("B")
+            .last()
+            .expect("in the menu")
+            .click();
+        harness.run();
+        let names: Vec<_> = opened
+            .borrow()
+            .iter()
+            .map(|o| o.profile.name.clone())
+            .collect();
+        assert_eq!(names, ["B"]);
+        assert!(online(harness.state()), "A stays connected here");
     }
 
     #[test]

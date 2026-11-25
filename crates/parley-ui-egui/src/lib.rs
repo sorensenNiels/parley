@@ -448,6 +448,7 @@ impl ParleyUi {
             status::StatusAction::CancelReconnect => self.reconnect = None,
             status::StatusAction::UseMap(name) => self.use_keyboard_map(&name),
             status::StatusAction::Key(key) => actions.push(Action::Key(key)),
+            status::StatusAction::DisplayMessages => actions.push(Action::DisplayMessages),
         }
     }
 
@@ -832,11 +833,9 @@ impl ParleyUi {
                         .or((!self.profiles.is_empty()).then_some(0));
                     self.open_editor(index);
                 }
-                Action::Connect(i) => {
-                    // From the session pill: the open session closes first.
-                    next.disconnect = connected;
-                    next.connect = Some(i);
-                }
+                // R-UI-43: with a session open, another opens beside it, where R-UI-34 says.
+                Action::Connect(i) if connected => next.open.extend(self.opening_of(i)),
+                Action::Connect(i) => next.connect = Some(i),
                 Action::Disconnect => next.disconnect = true,
                 Action::Duplicate => next.open.extend(self.duplicate_of(connected)),
                 Action::StartGroup(i) => next.open.extend(self.group_openings(i)),
@@ -896,6 +895,14 @@ impl ParleyUi {
                 Action::StopMacro => {
                     if let Some(s) = session.as_deref_mut() {
                         s.key(parley_core::Key::Reset);
+                    }
+                }
+                Action::DisplayMessages => {
+                    if let Some(s) = session.as_deref_mut()
+                        && s.display_messages()
+                    {
+                        self.focus_terminal = true;
+                        ctx.request_repaint();
                     }
                 }
                 Action::Macros => {
@@ -1129,7 +1136,13 @@ impl ParleyUi {
             Some(Outcome::Close) => self.editor = None,
             Some(Outcome::Connect(index)) => {
                 self.editor = None;
-                self.connect_saved(ctx, index);
+                if connected {
+                    // R-UI-43: the open session stays; this one opens beside it.
+                    let opening = self.opening_of(index).into_iter().collect();
+                    self.open_more(ctx, opening);
+                } else {
+                    self.connect_saved(ctx, index);
+                }
             }
             None => {}
         }
@@ -1278,7 +1291,7 @@ struct Next {
     disconnect: bool,
     /// Connect to the saved session at this index.
     connect: Option<usize>,
-    /// Sessions to open beside this one (R-UI-30, R-UI-32).
+    /// Sessions to open beside this one (R-UI-30, R-UI-32, R-UI-43).
     open: Vec<NewWindow>,
 }
 
@@ -1600,13 +1613,20 @@ mod tests {
     }
 
     #[test]
-    fn connect_in_the_session_dialog_is_off_while_connected_r_ui_5() {
-        use egui_kittest::kittest::NodeT;
+    fn connect_in_the_session_dialog_while_connected_opens_a_tab_beside_r_ui_43() {
         let (mut harness, _host) = connected_app();
+        let mut settings = harness.state().settings.clone();
+        settings.more_sessions = MoreSessions::Tab;
+        harness.state_mut().set_settings(settings);
         harness.state_mut().open_editor(Some(1));
         harness.run();
-        let connect = harness.get_by_label("Connect");
-        assert!(connect.accesskit_node().is_disabled());
+        harness.get_by_label("Connect").click();
+        harness.run();
+        let app = harness.state();
+        assert!(app.editor.is_none());
+        assert_eq!((app.tabs.len(), app.active), (2, 1));
+        assert_eq!(app.current.as_ref().map(|p| p.name.as_str()), Some("Other"));
+        assert!(app.tabs[0].is_open(), "the first stays connected");
     }
 
     #[test]
@@ -3025,20 +3045,24 @@ mod tests {
     }
 
     #[test]
-    fn connect_to_another_session_while_connected_closes_the_open_one_first_r_ui_15() {
+    fn connect_to_another_session_while_connected_opens_it_beside_the_open_one_r_ui_43() {
         let (mut harness, _host) = connected_app();
         let ctx = harness.ctx.clone();
         let app = harness.state_mut();
         let next = app.carry_out(&ctx, vec![Action::Connect(1)], None);
         assert!(!next.disconnect, "nothing open: only connect");
+        assert_eq!(next.connect, Some(1));
         let connection = app.connection.take().expect("connected");
         let next = app.carry_out(
             &ctx,
             vec![Action::Connect(1)],
             Some(&mut connection.session()),
         );
-        assert!(next.disconnect, "the open session closes first");
-        assert_eq!(next.connect, Some(1));
+        assert!(!next.disconnect, "the open session stays");
+        assert_eq!(next.connect, None);
+        let opened: Vec<_> = next.open.iter().map(|o| o.profile.name.clone()).collect();
+        assert_eq!(opened, [app.profiles[1].name.clone()]);
+        assert!(next.open.iter().all(|o| o.saved && !o.duplicate));
     }
 
     #[test]

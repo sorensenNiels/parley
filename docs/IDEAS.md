@@ -21,4 +21,4 @@
 - [Working with the screen](ideas/working-with-the-screen.md)
 - [Automation](ideas/automation.md)
 
-Next free ID: `IDEA-44`.
+Next free ID: `IDEA-61`.

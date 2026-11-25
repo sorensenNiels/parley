@@ -144,6 +144,24 @@ impl Session {
         self.advance_macro();
     }
 
+    /// Shows the operator's messages (R-UI-44): System Request, then option 4 of IBM i's
+    /// System Request menu, Display messages, typed on the System Request line the host shows.
+    /// It runs as a macro, so it waits for the host. False, and nothing is done, while a macro
+    /// runs or is recorded or the keyboard is in error.
+    pub fn display_messages(&mut self) -> bool {
+        if self.player.is_some() || self.recording.is_some() || self.error.is_some() {
+            return false;
+        }
+        let steps = vec![
+            Step::Key(Key::SystemRequest),
+            Step::Wait,
+            Step::Text("4".to_owned()),
+            Step::Key(Key::Aid(crate::session::Aid::ENTER)),
+        ];
+        self.play("Display messages", steps);
+        true
+    }
+
     /// The password a `password` step asked for; `None` stops the macro.
     pub fn give_macro_password(&mut self, password: Option<&Password>) {
         let Some(player) = self.player.as_mut().filter(|p| p.needs_password) else {

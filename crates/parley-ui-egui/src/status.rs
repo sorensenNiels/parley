@@ -56,6 +56,8 @@ pub enum StatusAction {
     UseMap(String),
     /// A 5250 key from the Keys menu (R-UI-16).
     Key(parley_core::Key),
+    /// "Message waiting" was clicked: show the messages (R-UI-44).
+    DisplayMessages,
 }
 
 /// The times the status bar shows, from the keyboard and macro state seen frame by frame.
@@ -381,9 +383,7 @@ fn show_chip(ui: &mut Ui, chip: &Chip, status: &Status<'_>) -> Option<StatusActi
         Chip::Insert => {
             ui.label(theme::semibold(text)).on_hover_text("Insert mode");
         }
-        Chip::MessageWaiting => {
-            theme::icon_badge(ui, icons::ENVELOPE, text, p.warning_text);
-        }
+        Chip::MessageWaiting => return message_chip(ui, text, status.session),
         Chip::Tls => {
             muted(ui, icon, text).on_hover_text(tls_hover(status.config));
         }
@@ -400,6 +400,34 @@ fn show_chip(ui: &mut Ui, chip: &Chip, status: &Status<'_>) -> Option<StatusActi
         }
     }
     None
+}
+
+/// "Message waiting", which shows the messages when clicked (R-UI-44): not while a macro runs
+/// or is recorded, nor while the keyboard is in error, as [`Session::display_messages`].
+fn message_chip(ui: &mut Ui, text: String, session: Option<&Session>) -> Option<StatusAction> {
+    let p = theme::palette(ui);
+    let badge = theme::icon_badge(ui, icons::ENVELOPE, text, p.warning_text);
+    let ready = session.is_some_and(|s| {
+        s.macro_state() == MacroState::Off && !matches!(s.keyboard(), KeyboardState::Error(_))
+    });
+    // The badge's frame is drawn around its label, 8 by 2 points wider.
+    let area = badge.rect.expand2(egui::vec2(8.0, 2.0));
+    let sense = if ready {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let response = ui.interact(area, ui.scope_id().with("message_waiting"), sense);
+    if !ready {
+        response.on_hover_text("A message is waiting");
+        return None;
+    }
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Display messages"));
+    let response = response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text("A message is waiting: click to display it (System Request, option 4)");
+    response.clicked().then_some(StatusAction::DisplayMessages)
 }
 
 /// The keyboard map chip: a menu of the maps, the one in use ticked.
@@ -446,6 +474,7 @@ fn response_text(time: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui_kittest::kittest::Queryable;
 
     #[test]
     fn response_time_reads_in_milliseconds_under_a_second_r_ui_14() {
@@ -480,6 +509,69 @@ mod tests {
         clock.observe(None, Instant::now());
         assert_eq!(clock.response(), None);
         assert_eq!(clock.recording(Instant::now()), None);
+    }
+
+    /// The status bar of `session`, wide enough for every chip; what was clicked in its state.
+    fn status_harness(
+        session: Session,
+    ) -> egui_kittest::Harness<'static, (Session, Option<StatusAction>)> {
+        egui_kittest::Harness::builder()
+            .with_size(egui::vec2(1200.0, 40.0))
+            .build_ui_state(
+                |ui, (session, clicked): &mut (Session, Option<StatusAction>)| {
+                    crate::test_support::install_fonts(ui);
+                    let keymap = KeyMap::default();
+                    let clock = Clock::default();
+                    let status = Status {
+                        session: Some(session),
+                        link: None,
+                        config: None,
+                        note: None,
+                        macros: true,
+                        can_connect_again: false,
+                        reconnect_in: None,
+                        map: "Default",
+                        keymap: &keymap,
+                        mac: false,
+                        maps: &[],
+                        clock: &clock,
+                        color: crate::session_color::SessionColor::default(),
+                        history: None,
+                    };
+                    if let Some(action) = status_bar(ui, &status) {
+                        *clicked = Some(action);
+                    }
+                },
+                (session, None),
+            )
+    }
+
+    fn message_waiting_session() -> Session {
+        use parley_core::record::{self, Opcode};
+        let mut session = crate::test_support::waiting_session();
+        let light = record::build(0, Opcode::MessageLightOn, &[]);
+        session.receive(&parley_core::telnet::Telnet::frame(&light));
+        assert!(session.message_waiting());
+        session
+    }
+
+    #[test]
+    fn clicking_message_waiting_displays_the_messages_r_ui_44() {
+        let mut harness = status_harness(message_waiting_session());
+        harness.run();
+        harness.get_by_label("Display messages").click();
+        harness.run();
+        assert_eq!(harness.state().1, Some(StatusAction::DisplayMessages));
+    }
+
+    #[test]
+    fn message_waiting_cannot_be_clicked_while_recording_a_macro_r_ui_44() {
+        let mut session = message_waiting_session();
+        session.start_recording();
+        let mut harness = status_harness(session);
+        harness.run();
+        assert!(harness.query_by_label("Display messages").is_none());
+        assert!(harness.query_by_label_contains("Message waiting").is_some());
     }
 
     #[test]

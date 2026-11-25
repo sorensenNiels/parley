@@ -1278,6 +1278,41 @@ fn a_macro_plays_waits_for_the_host_and_asks_for_a_password_r_key_4() {
 }
 
 #[test]
+fn display_messages_sends_system_request_then_option_4_on_the_line_the_host_shows_r_ui_44() {
+    let mut s = session();
+    s.receive(&host(&menu_screen()));
+    s.receive(&host_record(Opcode::MessageLightOn, &[]));
+    assert!(s.display_messages());
+    let (opcode, flags, _) = sent_one(&mut s);
+    assert_eq!(opcode, Opcode::NoOperation);
+    assert_eq!(flags, record::flags::SYSTEM_REQUEST);
+    assert_eq!(s.macro_state(), MacroState::Playing, "waits for the host");
+    // The host's System Request line: an input field the keyboard unlocks on.
+    s.receive(&host(&menu_screen()));
+    let (opcode, _, data) = sent_one(&mut s);
+    assert_eq!(opcode, Opcode::PutGet);
+    let mut expected = vec![5, 11, 0xF1, SBA, 5, 10];
+    expected.extend(ebcdic("4         "));
+    assert_eq!(data, expected, "Enter with option 4, Display messages");
+    s.receive(&host(&menu_screen())); // Display Messages
+    assert_eq!(s.macro_state(), MacroState::Off);
+}
+
+#[test]
+fn display_messages_does_nothing_while_a_macro_is_recorded_r_ui_44() {
+    let mut s = session();
+    s.receive(&host(&menu_screen()));
+    s.start_recording();
+    assert!(!s.display_messages());
+    assert_eq!(sent(&mut s), Vec::<Vec<u8>>::new());
+    assert_eq!(
+        s.macro_state(),
+        MacroState::Recording,
+        "the recording is kept"
+    );
+}
+
+#[test]
 fn reset_stops_a_running_macro_and_other_keys_are_ignored_r_key_4() {
     let mut s = session();
     s.receive(&host(&menu_screen()));

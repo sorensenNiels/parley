@@ -15,6 +15,17 @@ Claude's checks ran on Linux/WSL2 against PUB400.COM (IBM i 7.5) and the owner's
 
 ## In progress
 
+- **R-UI-44** (built 2026-11-25, Linux under WSL): click "Message waiting" to see the messages.
+  **Automated** (`make test`): `Session::display_messages` sends System Request, then option 4 and Enter on the line
+  the host shows, and does nothing while recording; the status bar's chip is a "Display messages" button, not while
+  recording. **Open:** the owner's check in the running app against IBM i (SNDMSG to oneself, click the chip).
+
+- **R-UI-43** (built 2026-11-25, Linux under WSL; D65): Connect while connected opens beside the open session.
+  **Automated** (`make test`): `carry_out` turns Connect with a session open into an opening, not a disconnect;
+  File ▸ Connect to ▸ opens a second tab with the first still connected, or asks for another window by default; the
+  session dialog's Connect while connected opens a tab beside. **Open:** the owner's check in the running app,
+  connected to two IBM i at once.
+
 - **R-UI-40, R-UI-41, R-UI-42** (Phase 43 built 2026-11-22, Linux under WSL; D64): Parley's start screen on the
   shared one in `connect` (Parley SSH's list rows and folding headings moved to `connect/list`, its search score to
   `fuzzy`), Parley's side in `start.rs`; `Profile::favourite`, `Settings::recent_sessions` and `all_sessions_open`.
