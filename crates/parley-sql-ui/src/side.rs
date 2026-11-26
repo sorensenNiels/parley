@@ -257,7 +257,7 @@ impl SqlWindow {
     }
 
     /// A section's header: its caret and name fold it; Libraries' has New group and the
-    /// button that folds the panel.
+    /// button that folds the panel, Snippets' New snippet (R-SQL-106).
     fn section_header(&mut self, ui: &mut Ui, section: Section) {
         let open = match section {
             Section::Explorer => self.side.libraries_open,
@@ -284,6 +284,15 @@ impl SqlWindow {
                     if panel_button(ui, icons::PLUS, "New group…") {
                         self.side.libraries_open = true;
                         self.browser.new_group();
+                    }
+                });
+            } else {
+                theme::button_row(ui, |ui| {
+                    // R-SQL-106: a new snippet, from the selection or empty.
+                    if panel_button(ui, icons::PLUS, "New snippet…") {
+                        self.side.snippets_open = true;
+                        let selected = self.scripts.selected_text().unwrap_or_default();
+                        self.snippets.new_snippet(&selected);
                     }
                 });
             }

@@ -582,8 +582,10 @@ impl Browser {
                     }
                 });
         }
-        if objects.len() >= catalog::MAX_OBJECTS as usize {
-            theme::hint(ui, format!("The first {} only.", catalog::MAX_OBJECTS));
+        // R-SQL-127: as many as the settings say were read.
+        let most = db.max_objects;
+        if objects.len() >= usize::try_from(most).unwrap_or(usize::MAX) {
+            theme::hint(ui, format!("The first {most} only."));
         }
         picked
     }
@@ -769,6 +771,28 @@ mod tests {
             system_name: name.to_owned(),
             text: text.to_owned(),
         }
+    }
+
+    #[test]
+    fn library_names_come_from_the_library_list_then_the_groups_once_r_sql_115() {
+        let group = LibraryGroup {
+            name: "Mine".to_owned(),
+            libraries: vec!["QSYS2".to_owned(), "MYLIB".to_owned(), "QÆØÅ".to_owned()],
+            open: true,
+        };
+        let browser = Browser::with_groups(vec![group], false, false);
+        let list = [
+            ("QGPL".to_owned(), "SYSTEM".to_owned()),
+            ("QSYS2".to_owned(), "SYSTEM".to_owned()),
+        ];
+        assert_eq!(browser.library_names("Q", &list), ["QGPL", "QSYS2", "QÆØÅ"]);
+        assert_eq!(browser.library_names("", &list).len(), 4);
+        assert_eq!(
+            browser.library_names("QGPL", &list),
+            ["QGPL"],
+            "typed whole"
+        );
+        assert_eq!(browser.library_names("X", &list), Vec::<String>::new());
     }
 
     #[test]

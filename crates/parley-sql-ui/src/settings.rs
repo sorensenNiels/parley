@@ -58,6 +58,10 @@ impl Toggle for Assistant {
 /// terminal's) are ignored when read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each is an on/off choice of its own in the settings dialog"
+)]
 pub struct Settings {
     pub theme: Theme,
     /// Everything's size, in percent.
@@ -84,6 +88,28 @@ pub struct Settings {
     pub sql_close_pairs: bool,
     /// How Format SQL writes: keyword case, indentation, commas (R-SQL-77).
     pub sql_format: Style,
+    /// SQL run from the editor asks for its `${…}` values first (R-SQL-120).
+    pub sql_placeholders: bool,
+    /// Runs are kept in the history (R-SQL-121, D66).
+    pub sql_history_keep: bool,
+    /// How many runs the history keeps per connection (R-SQL-121).
+    pub sql_history_size: usize,
+    /// Placeholder values are kept across restarts (R-SQL-122, D66).
+    pub sql_remember_values: bool,
+    /// Ask before risky statements (R-SQL-123).
+    pub sql_confirm_risky: bool,
+    /// What a NULL shows as in the grid (R-SQL-124).
+    pub sql_null_text: String,
+    /// What a NULL is in CSV (R-SQL-124).
+    pub sql_csv_null: parley_sql_core::transfer::CsvNull,
+    /// CSV starts with a byte-order mark (R-SQL-126).
+    pub sql_csv_bom: bool,
+    /// CSV has a header row (R-SQL-126).
+    pub sql_csv_header: bool,
+    /// Show Results or Messages after a run (R-SQL-125).
+    pub sql_show_outcome: bool,
+    /// The most objects read per library (R-SQL-127).
+    pub sql_max_objects: u32,
     /// Parley SQL's shortcuts that differ from their own keys, by action (R-SQL-60).
     pub sql_keys: crate::keys::Overrides,
     /// A folder of snippets shared with others, besides the operator's own; empty for none (R-SQL-24).
@@ -97,6 +123,8 @@ pub struct Settings {
     pub sql_pinned: BTreeMap<String, Vec<String>>,
     /// The SQL window's library groups, by saved connection (R-SQL-83).
     pub sql_groups: BTreeMap<String, Vec<crate::browser::LibraryGroup>>,
+    /// The snippets' placeholder values used, by saved connection (R-SQL-113).
+    pub sql_snippet_values: BTreeMap<String, crate::RecentValues>,
     /// The SQL window's side panel: its width, folded, its sections (R-SQL-82, R-SQL-84).
     pub sql_side: crate::side::SideLayout,
     /// The SQL assistant's provider, model and address; never a key (R-SQL-48, D27).
@@ -126,10 +154,22 @@ impl Default for Settings {
             sql_format: Style::default(),
             sql_keys: crate::keys::Overrides::new(),
             sql_snippets_shared: String::new(),
+            sql_placeholders: true,
+            sql_history_keep: true,
+            sql_history_size: parley_sql_core::history::LIMIT,
+            sql_remember_values: true,
+            sql_confirm_risky: true,
+            sql_null_text: crate::grid::NULL.to_owned(),
+            sql_csv_null: parley_sql_core::transfer::CsvNull::default(),
+            sql_csv_bom: true,
+            sql_csv_header: true,
+            sql_show_outcome: true,
+            sql_max_objects: parley_sql_core::catalog::MAX_OBJECTS,
             sql_history: BTreeMap::new(),
             sql_scripts: BTreeMap::new(),
             sql_pinned: BTreeMap::new(),
             sql_groups: BTreeMap::new(),
+            sql_snippet_values: BTreeMap::new(),
             sql_side: crate::side::SideLayout::default(),
             assistant: parley_sql_core::assistant::AssistantConfig::default(),
             recent_connections: Vec::new(),
@@ -139,6 +179,22 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// What the SQL window is to do, as these settings say (R-SQL-123..127).
+    pub fn sql_choices(&self) -> crate::Choices {
+        crate::Choices {
+            confirm_risky: self.sql_confirm_risky,
+            show_outcome: self.sql_show_outcome,
+            null_text: self.sql_null_text.clone(),
+            csv: parley_sql_core::transfer::CsvOptions {
+                delimiter: self.sql_csv_delimiter,
+                bom: self.sql_csv_bom,
+                header: self.sql_csv_header,
+                null: self.sql_csv_null,
+            },
+            max_objects: self.sql_max_objects,
+        }
+    }
+
     /// How Parley SQL looks with these settings. It has no terminal: its monospace font is
     /// Parley's default.
     pub fn look(&self) -> Look {
@@ -194,8 +250,19 @@ impl Page {
                 settings.sql_rows = defaults.sql_rows;
                 settings.sql_timeout = defaults.sql_timeout;
                 settings.sql_snippets_shared = defaults.sql_snippets_shared;
+                settings.sql_placeholders = defaults.sql_placeholders;
                 settings.sql_format = defaults.sql_format;
                 settings.sql_csv_delimiter = defaults.sql_csv_delimiter;
+                settings.sql_history_keep = defaults.sql_history_keep;
+                settings.sql_history_size = defaults.sql_history_size;
+                settings.sql_remember_values = defaults.sql_remember_values;
+                settings.sql_confirm_risky = defaults.sql_confirm_risky;
+                settings.sql_null_text = defaults.sql_null_text;
+                settings.sql_csv_null = defaults.sql_csv_null;
+                settings.sql_csv_bom = defaults.sql_csv_bom;
+                settings.sql_csv_header = defaults.sql_csv_header;
+                settings.sql_show_outcome = defaults.sql_show_outcome;
+                settings.sql_max_objects = defaults.sql_max_objects;
             }
             Self::Assistant => assistant::restore_defaults(settings),
             Self::About => settings.check_for_updates = defaults.check_for_updates,
@@ -375,6 +442,11 @@ impl Dialog {
                     theme::sized_edit(ui, 260.0, edit).labelled_by(name_id);
                 },
             );
+            rows.switch(
+                "Ask for ${…} values",
+                Some("SQL run from the editor that holds ${name} asks for the values first."),
+                &mut settings.sql_placeholders,
+            );
             rows.fact("Found", |ui| match &found {
                 Ok(text) => {
                     ui.label(text);
@@ -391,6 +463,8 @@ impl Dialog {
                 ),
             });
         });
+        running_group(ui, settings);
+        results_group(ui, settings);
         formatting_group(ui, &mut settings.sql_format);
     }
 
@@ -440,6 +514,91 @@ fn appearance_page(ui: &mut Ui, settings: &mut Settings) {
             "Close brackets and quotes",
             Some("Typing ( ' or \" in the editor puts in the closing one too."),
             &mut settings.sql_close_pairs,
+        );
+    });
+}
+
+/// Running, the history and what is remembered (R-SQL-121..123, R-SQL-125, R-SQL-127).
+fn running_group(ui: &mut Ui, settings: &mut Settings) {
+    group(ui, "Running and history", None, |rows| {
+        rows.switch(
+            "Ask before risky statements",
+            Some("DELETE or UPDATE without WHERE, DROP, TRUNCATE, ALTER and CL commands that remove."),
+            &mut settings.sql_confirm_risky,
+        );
+        rows.switch(
+            "Show the outcome after a run",
+            Some(
+                "Results after a query, Messages after other statements; off keeps the tab shown.",
+            ),
+            &mut settings.sql_show_outcome,
+        );
+        rows.switch(
+            "Keep a history",
+            Some("Each run's SQL is kept in the settings file; History's Clear removes it."),
+            &mut settings.sql_history_keep,
+        );
+        rows.row(
+            "Runs kept",
+            Some("Per connection; the oldest go first."),
+            |ui, name_id| {
+                let value = egui::DragValue::new(&mut settings.sql_history_size)
+                    .range(50..=5000)
+                    .speed(10);
+                ui.add_enabled(settings.sql_history_keep, value)
+                    .labelled_by(name_id);
+            },
+        );
+        rows.switch(
+            "Remember values",
+            Some("Values typed for ${…} are offered again after a restart; off forgets them."),
+            &mut settings.sql_remember_values,
+        );
+        rows.row(
+            "Objects per library",
+            Some("Read for the Explorer and completion; more takes longer on big libraries."),
+            |ui, name_id| {
+                let value = egui::DragValue::new(&mut settings.sql_max_objects)
+                    .range(1000..=100_000)
+                    .speed(100);
+                ui.add(value).labelled_by(name_id);
+            },
+        );
+    });
+}
+
+/// How results show NULL, and how CSV is written (R-SQL-124, R-SQL-126).
+fn results_group(ui: &mut Ui, settings: &mut Settings) {
+    use parley_sql_core::transfer::CsvNull;
+    group(ui, "Results and CSV", None, |rows| {
+        rows.row(
+            "NULL shows as",
+            Some("In the grid and a row's values."),
+            |ui, name_id| {
+                let edit = egui::TextEdit::singleline(&mut settings.sql_null_text).char_limit(20);
+                theme::sized_edit(ui, 120.0, edit).labelled_by(name_id);
+            },
+        );
+        rows.row(
+            "NULL in CSV",
+            Some("Empty is the same as an empty text."),
+            |ui, _| {
+                theme::segmented(
+                    ui,
+                    &mut settings.sql_csv_null,
+                    &[(CsvNull::Empty, "Empty"), (CsvNull::Null, "NULL")],
+                );
+            },
+        );
+        rows.switch(
+            "CSV starts with a byte-order mark",
+            Some("Excel then reads æøå; some other programs do not want it."),
+            &mut settings.sql_csv_bom,
+        );
+        rows.switch(
+            "CSV has a header row",
+            Some("The column names as the first line."),
+            &mut settings.sql_csv_header,
         );
     });
 }

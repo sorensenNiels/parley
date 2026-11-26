@@ -19,9 +19,11 @@ pub const MAX_TABS: usize = 10;
 /// One query's result in a tab.
 #[derive(Debug, Clone, PartialEq)]
 struct ResultTab {
-    /// The query's first words.
+    /// The query's first words, or the snippet's title (R-SQL-117).
     title: String,
     view: ResultView,
+    /// The snippet it came from, to run again (R-SQL-117).
+    snippet: Option<crate::snippets::Report>,
 }
 
 /// The result tabs.
@@ -37,7 +39,11 @@ pub struct Results {
     /// The key columns a comparison matches rows by, by name; empty for the first (R-SQL-41).
     compare_keys: Vec<String>,
     /// What separates fields when exporting to CSV (R-SQL-100).
-    pub csv_delimiter: parley_sql_core::transfer::CsvDelimiter,
+    pub csv: parley_sql_core::transfer::CsvOptions,
+    /// What a NULL shows as (R-SQL-124); [`grid::NULL`] when not set.
+    pub null_text: Option<String>,
+    /// "Run again…" clicked on a snippet's result (R-SQL-117).
+    again: Option<crate::snippets::Report>,
 }
 
 /// What the results area asks of the window.
@@ -60,12 +66,26 @@ impl Results {
 
     /// A new tab for `statement`'s result, shown at once (R-SQL-14).
     pub fn add(&mut self, statement: &str, view: ResultView) {
+        self.add_from(statement, view, None);
+    }
+
+    /// A new tab for `statement`'s result, titled by `snippet` when it came from one (R-SQL-14,
+    /// R-SQL-117).
+    pub fn add_from(
+        &mut self,
+        statement: &str,
+        view: ResultView,
+        snippet: Option<crate::snippets::Report>,
+    ) {
         if self.tabs.len() == MAX_TABS {
             self.tabs.remove(0);
         }
         self.tabs.push(ResultTab {
-            title: title(statement),
+            title: snippet
+                .as_ref()
+                .map_or_else(|| title(statement), |r| r.title.clone()),
             view,
+            snippet,
         });
         self.shown = self.tabs.len() - 1;
         self.note = None;
@@ -101,10 +121,21 @@ impl Results {
         self.tabs.is_empty()
     }
 
+    /// The shown tab's title.
+    #[cfg(test)]
+    pub fn shown_title(&self) -> Option<&str> {
+        self.tabs.get(self.shown).map(|t| t.title.as_str())
+    }
+
     /// The tab shown.
     #[cfg(test)]
     pub fn shown_view(&self) -> Option<&ResultView> {
         self.tabs.get(self.shown).map(|t| &t.view)
+    }
+
+    /// The snippet whose "Run again…" was clicked (R-SQL-117); taken once.
+    pub const fn take_again(&mut self) -> Option<crate::snippets::Report> {
+        self.again.take()
     }
 
     fn close(&mut self, index: usize) {
@@ -127,11 +158,16 @@ impl Results {
             return None;
         }
         self.tab_strip(ui);
-        let delimiter = self.csv_delimiter;
+        let csv = self.csv;
         let shown = self.shown;
+        let null_text = self
+            .null_text
+            .clone()
+            .unwrap_or_else(|| crate::grid::NULL.to_owned());
         let tab = self.tabs.get_mut(shown)?;
         let view = &mut tab.view;
         view.header = *header;
+        view.null_text = null_text;
         ui.horizontal(|ui| {
             ui.label(icons::icon(icons::MAGNIFYING_GLASS).color(theme::palette(ui).muted));
             let field =
@@ -159,7 +195,7 @@ impl Results {
         let mut ask = None;
         let note = &mut self.note;
         Panel::bottom("sql-grid-actions").show(ui, |ui| {
-            ask = bar(ui, view, idle, saver, note, delimiter);
+            ask = bar(ui, view, idle, saver, note, csv);
         });
         if let Some(mut shown) = view.chart.take() {
             {
@@ -193,10 +229,20 @@ impl Results {
             })
             .collect();
         let mut close = false;
-        // Room for "Compare with…" and the close button.
+        let snippet = self.tabs.get(self.shown).and_then(|t| t.snippet.clone());
+        // Room for "Compare with…", Run again and the close button.
         let (chosen, ()) =
-            theme::tab_strip(ui, "sql-result-tabs", (self.shown, &items), 150.0, |ui| {
+            theme::tab_strip(ui, "sql-result-tabs", (self.shown, &items), 182.0, |ui| {
                 self.compare_menu(ui);
+                if let Some(report) = snippet {
+                    let glyph = icons::icon(icons::ARROWS_CLOCKWISE);
+                    let again =
+                        icons::add_named(ui, true, theme::ghost_button(glyph), "Run again…")
+                            .on_hover_text("Run the snippet again, with other values");
+                    if again.clicked() {
+                        self.again = Some(report);
+                    }
+                }
                 let button = theme::icon_button(ui, "🗙");
                 close = ui.add(button).on_hover_text("Close this result").clicked();
             });
@@ -301,7 +347,7 @@ fn bar(
     idle: bool,
     saver: Option<&dyn SqlFiles>,
     note: &mut Option<String>,
-    delimiter: parley_sql_core::transfer::CsvDelimiter,
+    csv: parley_sql_core::transfer::CsvOptions,
 ) -> Option<Ask> {
     let mut ask = None;
     ui.horizontal(|ui| {
@@ -340,7 +386,7 @@ fn bar(
                     .clicked()
                 {
                     *note = Some(
-                        match saver.export_csv("query.csv", view.csv(delimiter).as_bytes()) {
+                        match saver.export_csv("query.csv", view.csv(csv).as_bytes()) {
                             Ok(Some(path)) => format!("Saved {path}"),
                             Ok(None) => String::new(),
                             Err(e) => format!("Not saved: {e}"),
@@ -454,7 +500,11 @@ fn detail(ui: &mut Ui, view: &mut ResultView, page: &mut CodePage) {
                             ui.add(egui::Label::new(RichText::new(text).monospace()).wrap());
                         }
                         None => {
-                            ui.label(RichText::new("NULL").italics().color(p.muted));
+                            ui.label(
+                                RichText::new(view.null_text.as_str())
+                                    .italics()
+                                    .color(p.muted),
+                            );
                         }
                     }
                     ui.add_space(6.0);
@@ -596,6 +646,70 @@ mod tests {
             results.note.as_deref(),
             Some("Choose a key column the results have.")
         );
+    }
+
+    #[test]
+    fn a_snippet_s_result_is_named_after_it_and_runs_again_r_sql_117() {
+        use egui_kittest::kittest::Queryable;
+        let report = crate::snippets::Report {
+            snippet: "Active jobs".to_owned(),
+            sql: "SELECT * FROM T WHERE U = ${u as text}".to_owned(),
+            title: "Active jobs — æøå".to_owned(),
+        };
+        let mut results = Results::default();
+        results.add("VALUES 1", view(1, false));
+        results.add_from(
+            "SELECT * FROM T WHERE U = 'æøå'",
+            view(2, false),
+            Some(report.clone()),
+        );
+        assert_eq!(results.tabs[1].title, "Active jobs — æøå");
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(900.0, 500.0))
+            .build_ui_state(
+                |ui, r: &mut Results| {
+                    parley_ui_egui::test_support::install_fonts(ui);
+                    let mut header = HeaderMode::default();
+                    r.show(ui, true, &mut header, None);
+                },
+                results,
+            );
+        harness.run();
+        harness.get_by_label("Run again…").click();
+        harness.run();
+        assert_eq!(harness.state_mut().take_again(), Some(report));
+        assert_eq!(harness.state_mut().take_again(), None, "taken once");
+        harness.state_mut().shown = 0;
+        harness.run();
+        assert!(
+            harness.query_by_label("Run again…").is_none(),
+            "a statement's result has none"
+        );
+    }
+
+    #[test]
+    fn null_shows_as_the_settings_say_r_sql_124() {
+        use egui_kittest::kittest::Queryable;
+        let mut results = Results {
+            null_text: Some("(ingen)".to_owned()),
+            ..Results::default()
+        };
+        let mut v = view(1, false);
+        v.rows = vec![vec![None]];
+        results.add("SELECT A FROM T", v);
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(900.0, 500.0))
+            .build_ui_state(
+                |ui, r: &mut Results| {
+                    parley_ui_egui::test_support::install_fonts(ui);
+                    let mut header = HeaderMode::default();
+                    r.show(ui, true, &mut header, None);
+                },
+                results,
+            );
+        harness.run();
+        harness.get_by_label("(ingen)");
+        assert!(harness.query_by_label("NULL").is_none());
     }
 
     #[test]

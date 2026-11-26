@@ -118,14 +118,23 @@ pub struct Scripts {
     shown_number: Option<u32>,
     /// What the statements run in the window gave, for the gutter (R-SQL-62).
     pub outcomes: gutter::Outcomes,
-    /// A statement's ▶ was clicked: the window runs the selection (R-SQL-62).
-    run_asked: bool,
+    /// What the text asked the window to do since the window last asked.
+    asked: Option<Asked>,
     /// Below the cursor last frame, in screen points.
     cursor_at: Option<egui::Pos2>,
     /// A snippet chosen in the completion list, for the window to put in (R-SQL-64).
     snippet_chosen: Option<usize>,
     /// A routine's parameters while it is called (R-SQL-65).
     help: signature::Help,
+}
+
+/// What the text asks of the window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Asked {
+    /// A statement's ▶ was clicked: the window runs the selection (R-SQL-62).
+    Run,
+    /// "Save as snippet…" was chosen in the text's menu (R-SQL-107).
+    SaveSnippet,
 }
 
 /// What the text field did this frame.
@@ -141,6 +150,10 @@ struct FieldOut {
     selection: Option<(usize, usize)>,
     /// The statement whose ▶ in the gutter was clicked (R-SQL-62).
     run: Option<std::ops::Range<usize>>,
+    /// "Save as snippet…" was chosen in the text's right-click menu (R-SQL-107).
+    save_snippet: bool,
+    /// A snippet dropped on the text: its place in the panel and the byte it fell at (R-SQL-118).
+    dropped: Option<(usize, usize)>,
 }
 
 impl FieldOut {
@@ -159,6 +172,18 @@ impl FieldOut {
         };
         let response = &output.response.response;
         out.hovered = response.hovered();
+        if let Some(dragged) = response.dnd_release_payload::<crate::snippets::Dragged>()
+            && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+        {
+            let cursor = output.galley.cursor_from_pos(pos - output.galley_pos);
+            out.dropped = Some((dragged.0, byte_at(text, cursor.index.0)));
+        }
+        response.context_menu(|ui| {
+            if ui.button("Save as snippet…").clicked() {
+                out.save_snippet = true;
+                ui.close();
+            }
+        });
         if response.hovered()
             && let Some(pos) = response.hover_pos()
         {
@@ -213,7 +238,7 @@ impl Scripts {
             field: None,
             shown_number: None,
             outcomes: gutter::Outcomes::default(),
-            run_asked: false,
+            asked: None,
             cursor_at: None,
             snippet_chosen: None,
             help: signature::Help::default(),
@@ -690,7 +715,7 @@ impl Scripts {
         }
     }
 
-    fn selected_text(&self) -> Option<String> {
+    pub(crate) fn selected_text(&self) -> Option<String> {
         let (start, end) = self.selection;
         (start < end)
             .then(|| self.text().get(start..end).map(str::to_owned))
@@ -720,7 +745,37 @@ impl Scripts {
 
     /// Whether a statement's ▶ was clicked since last asked (R-SQL-62); it is selected.
     pub fn take_run_asked(&mut self) -> bool {
-        std::mem::take(&mut self.run_asked)
+        self.take_asked(Asked::Run)
+    }
+
+    /// Whether "Save as snippet…" was chosen in the text's right-click menu since last asked
+    /// (R-SQL-107).
+    pub fn take_snippet_asked(&mut self) -> bool {
+        self.take_asked(Asked::SaveSnippet)
+    }
+
+    /// What the field asked of the window this frame: the ▶ clicked selects its statement.
+    fn note_asked(&mut self, out: &mut FieldOut) {
+        if out.save_snippet {
+            self.asked = Some(Asked::SaveSnippet);
+        }
+        // R-SQL-118: the cursor goes where the snippet fell, and it goes in as one chosen.
+        if let Some((snippet, at)) = out.dropped {
+            self.select_range((at, at));
+            self.snippet_chosen = Some(snippet);
+        }
+        if let Some(statement) = out.run.take() {
+            self.select_range((statement.start, statement.end));
+            self.asked = Some(Asked::Run);
+        }
+    }
+
+    fn take_asked(&mut self, asked: Asked) -> bool {
+        let was = self.asked == Some(asked);
+        if was {
+            self.asked = None;
+        }
+        was
     }
 
     /// Whether the shown script's text has the keyboard (as of last frame's field).
@@ -809,10 +864,7 @@ impl Scripts {
         if let Some(selection) = out.selection {
             self.selection = selection;
         }
-        if let Some(statement) = out.run.take() {
-            self.select_range((statement.start, statement.end));
-            self.run_asked = true;
-        }
+        self.note_asked(&mut out);
         let (changed, hovered, cursor_at, pointer_at) =
             (out.changed, out.hovered, out.cursor_at, out.pointer_at);
         self.cursor_at = cursor_at.or(self.cursor_at);

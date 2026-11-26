@@ -69,9 +69,10 @@ const MAX_ROWS: u32 = 10_000;
 const MAX_LINES: u32 = 1_000_000;
 
 impl Ask {
-    fn sql(&self) -> String {
+    /// The question's SQL; a library's objects at most `max_objects` (R-SQL-127).
+    fn sql(&self, max_objects: u32) -> String {
         match self {
-            Ask::Objects(library) => catalog::objects(library),
+            Ask::Objects(library) => catalog::objects(library, max_objects),
             Ask::Columns { library, table } => catalog::columns(library, table),
             Ask::Parameters { library, name } => catalog::parameters(library, name),
             Ask::Ddl {
@@ -85,11 +86,12 @@ impl Ask {
         }
     }
 
-    fn max_rows(&self) -> u32 {
+    fn max_rows(&self, max_objects: u32) -> u32 {
         match self {
             Ask::Batch { .. } => MAX_LINES,
-            Ask::Objects(_)
-            | Ask::Columns { .. }
+            // Every object asked for, so no cursor stays open (R-SQL-127).
+            Ask::Objects(_) => MAX_ROWS.max(max_objects),
+            Ask::Columns { .. }
             | Ask::Parameters { .. }
             | Ask::Ddl { .. }
             | Ask::Service(_)
@@ -127,6 +129,8 @@ pub struct Database {
     queue: VecDeque<Ask>,
     /// Answers not yet taken.
     answers: Vec<Answered>,
+    /// The most objects of a library read, as the settings say (R-SQL-127).
+    pub max_objects: u32,
 }
 
 impl Default for Database {
@@ -137,6 +141,7 @@ impl Default for Database {
             waiting: None,
             queue: VecDeque::new(),
             answers: Vec::new(),
+            max_objects: catalog::MAX_OBJECTS,
         }
     }
 }
@@ -209,8 +214,8 @@ impl Database {
             return;
         };
         let run = Request::Run {
-            sql: ask.sql(),
-            max_rows: ask.max_rows(),
+            sql: ask.sql(self.max_objects),
+            max_rows: ask.max_rows(self.max_objects),
             timeout: TIMEOUT,
             params: Vec::new(),
         };
@@ -260,7 +265,10 @@ impl Database {
                             // Not read further; the helper frees the cursor, nothing waits.
                             runner.send(Request::CloseCursor { cursor });
                         }
-                        Err(format!("More than {} rows.", ask.max_rows()))
+                        Err(format!(
+                            "More than {} rows.",
+                            ask.max_rows(self.max_objects)
+                        ))
                     }
                     Ok(Outcome::Rows { rows, .. }) => Ok(rows),
                     Ok(Outcome::Count { .. }) => Ok(Vec::new()),
@@ -321,6 +329,19 @@ mod tests {
     use parley_sql_core::protocol::Answer;
 
     use super::*;
+
+    #[test]
+    fn a_library_s_objects_are_read_as_many_as_set_r_sql_127() {
+        let ask = Ask::Objects("QGPL".to_owned());
+        assert!(ask.sql(40_000).contains("FETCH FIRST 40000 ROWS"));
+        assert_eq!(
+            ask.max_rows(40_000),
+            40_000,
+            "every one, no cursor left open"
+        );
+        assert_eq!(ask.max_rows(1000), MAX_ROWS);
+        assert_eq!(Database::default().max_objects, catalog::MAX_OBJECTS);
+    }
 
     fn answered(d: &mut Database, json: &str) {
         let tag = d.waiting.as_ref().map_or(0, |w| w.0);

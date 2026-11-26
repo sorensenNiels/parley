@@ -20,6 +20,44 @@
   connections open with nothing above it, then folding and kept; Recent with "Not saved" and Save as connection…; quick connect refusing a port; no
   groups. **Open:** seen in the running app, and the owner's check.
 
+- **R-SQL-106..109** (Phase 44, built 2026-11-25; Linux under WSL, tests only). The Snippets header's `+` opens
+  "New snippet" with the selection or empty, and the panel says how to make one until one of one's own exists; the
+  editor's right-click menu and Ctrl+Shift+S (a Shortcuts action, `save-snippet`) open "Save as snippet"; the dialog
+  lists what the SQL asks for as it is typed; the values form shows the filled SQL and offers Insert and Run. Tests in
+  `parley-sql-ui` (`*_r_sql_106`, `*_r_sql_107`, `*_r_sql_108`, `*_r_sql_109`). **Open:** seen in the running app.
+- **R-SQL-110, R-SQL-111** (Phase 44, built 2026-11-25; Linux under WSL, tests only). `${name as text|number|date|name}`
+  checks and writes values (`snippet::placeholder`), the form names a refused value and waits, the dialog names unknown
+  types and text quoted twice; the dialog lists the SQL's literals with "Ask for it" (`snippet::literals`). Tests in
+  `parley-sql-core` (`snippet::placeholder::tests::*_r_sql_110`, `snippet::literals::tests::*_r_sql_111`) and
+  `parley-sql-ui` (`*_r_sql_110`, `*_r_sql_111`). **Open:** seen in the running app.
+- **R-SQL-112** (Phase 44, built 2026-11-25; Linux under WSL, tests only). `snippet::fill` doubles the `'` of an untyped
+  value inside a `'…'` string (`'${u}'`, `LIKE '%${t}%'`), found on the SQL with its placeholders blanked so a `'` in a
+  default does not move the strings. Tests `*_r_sql_112` in `parley-sql-core`. **Open:** seen in the running app.
+- **R-SQL-113..115** (Phase 44, built 2026-11-25; Linux under WSL, tests only). Recent values: `SnippetPanel::remember`
+  (five, newest first, not empty or password-like names), kept in `sql_snippet_values` by connection through
+  `hosting::keep`/`rename`, offered by a ▾ menu beside the field. `as list` writes `'a', 'b'`. `as library`/`as table`
+  are names; the form's "Names" list comes from `Browser::library_names`/`table_names` through
+  `SqlWindow::offer_placeholder_names`. Tests `*_r_sql_113`, `*_r_sql_114`, `*_r_sql_115` in both crates. **Open:**
+  seen in the running app, with a table's names read from the owner's IBM i.
+- **R-SQL-116..119** (Phase 44, built 2026-11-25; Linux under WSL, tests only). Run snippet (`snippets/finder.rs`,
+  Ctrl+Shift+R, `run-snippet`; the window's keys wait while it is open); a snippet's result titled by it with "Run
+  again…" (`snippets::Report`, `SqlWindow::snippet_run`, `Results::add_from`); a snippet row dragged onto the editor
+  (`snippets::Dragged`, `FieldOut::dropped`); a title and tags suggested (`snippet::suggest`). Tests `*_r_sql_116` ..
+  `*_r_sql_119` in both crates; the drag is a kittest drag from the row to the text. **Open:** seen in the running
+  app, the drag with a real mouse.
+- **R-SQL-120** (Phase 44, built 2026-11-25; Linux under WSL, tests only). `sql_placeholders` (on at first, Settings ▸
+  SQL "Ask for ${…} values") reaches the window as `Around::placeholders`; Run and Run all ask through
+  `SnippetPanel::ask_for_editor` (the values form with Run and Run as written), then run the filled SQL as Run all does.
+  Tests `*_r_sql_120` in `parley-sql-ui`. **Open:** seen in the running app; a statement's gutter mark after a filled
+  run (the marks are matched by text, which the values changed).
+- **R-SQL-121..127** (Phase 44, built 2026-11-25; Linux under WSL, tests only; D66). Settings ▸ SQL's new groups
+  "Running and history" and "Results and CSV". History kept and its size, and values remembered, in `hosting::keep`
+  (`history::add` takes the limit); the rest reaches the window as `Choices` through `Around` (`SqlWindow::apply`):
+  `confirm_risky` in `next_statement`, `show_outcome` in `answers.rs`, the NULL text in the grid and a row's values,
+  `CsvOptions` (byte-order mark, header, NULL) in Export and Download, `max_objects` in `Database` and the Explorer's
+  "The first N only.". Tests `*_r_sql_121` .. `*_r_sql_127` in both crates. **Open:** seen in the running app; a
+  library of more than 5000 objects read whole on the owner's IBM i.
+
 - **R-SQL-92** (built 2026-11-15 in the code audit, finished 2026-11-20; Linux under WSL, tests only). `text::segments`
   skips the `;`s inside `BEGIN … END`, tells `END IF`/`WHILE`/`LOOP`/`FOR`/`REPEAT`/`CASE` and `CASE … END`
   expressions apart, and ignores `BEGIN`/`END` in strings, quoted names and comments; an unclosed `BEGIN` runs to the

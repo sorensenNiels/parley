@@ -49,6 +49,7 @@ modern take on what surrounds the screen: sessions, keyboard mapping, copy and p
 | Phase 22: GUI elements (beta) | Built behind a session switch (D38, D57): R-DS-10..12; the owner's checks in the running app are open ([FEATURES.md](FEATURES.md)), then it stays a beta switch (D60). |
 | Phase 42: screen history | Built 2026-11-21 (D60, D61): R-UI-37..39; the owner's checks in the running app are open ([FEATURES.md](FEATURES.md)). |
 | Phase 43: a start screen for many sessions | Planned 2026-11-22 (D64): R-UI-40..42, and R-SQL-105 for Parley SQL. |
+| Phase 44: snippets, easier to make and use | Planned 2026-11-25, Parley SQL only: R-SQL-106..127 ([sql/ROADMAP.md](sql/ROADMAP.md)). |
 
 ## 4. Phases
 
@@ -149,4 +150,4 @@ The decisions, with the question, the choice and the alternatives, are in [DECIS
   (`D`), phases and ideas (`IDEA`, in [IDEAS.md](IDEAS.md)) take their next number here, whichever roadmap uses it,
   so a number never means two things.
 
-Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-12` · `R-DS-13` · `R-EBC-3` · `R-KEY-13` · `R-UI-45` · `R-ADD-4` · `R-NF-6` · `D66` · `Phase 44` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); `R-SSH`: [ssh/ROADMAP.md](ssh/ROADMAP.md); ideas: last line of IDEAS.md).
+Next free IDs (removed rows keep their numbers): `R-P-6` · `R-NET-12` · `R-DS-13` · `R-EBC-3` · `R-KEY-13` · `R-UI-45` · `R-ADD-4` · `R-NF-6` · `D67` · `Phase 45` (`R-SQL`: [sql/ROADMAP.md](sql/ROADMAP.md); `R-SSH`: [ssh/ROADMAP.md](ssh/ROADMAP.md); ideas: last line of IDEAS.md).

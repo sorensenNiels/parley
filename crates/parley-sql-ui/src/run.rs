@@ -16,6 +16,8 @@ impl SqlWindow {
     /// The editor with its Run buttons, and the results below or beside it (R-SQL-49).
     pub(crate) fn work(&mut self, ui: &mut Ui, around: Around<'_>) {
         self.scripts.close_pairs = around.close_pairs;
+        self.snippets.ask_in_editor = around.placeholders;
+        self.apply(around.choices.cloned().unwrap_or_default());
         self.scripts.format = around.format;
         let keys = around.keys.cloned().unwrap_or_default();
         if keys != self.scripts.keys {
@@ -150,15 +152,30 @@ impl SqlWindow {
         }
     }
 
+    /// "Save as snippet…" on the selection, or the statement under the cursor (R-SQL-25,
+    /// R-SQL-107); nothing when the editor is empty.
+    pub(crate) fn save_as_snippet(&mut self) {
+        if let Some(sql) = self.scripts.current_statement() {
+            self.snippets.save_as(&sql);
+            self.show_snippets();
+        }
+    }
+
     /// The window's shortcuts (R-SQL-60), taken before the editor sees them: Run, Run all and
     /// Cancel here, the rest in the editor.
     pub(crate) fn keys(&mut self, ui: &Ui, files: Option<&dyn SqlFiles>) {
+        // Run snippet takes Enter, Escape and the arrows itself (R-SQL-116).
+        if self.snippets.finding() {
+            return;
+        }
         for action in self.scripts.take_keys(ui, files) {
             match action {
                 keys::SqlAction::Run => self.run_current(),
                 keys::SqlAction::RunAll => self.run_all(),
                 keys::SqlAction::Cancel => self.cancel(),
                 keys::SqlAction::SidePanel => self.toggle_side_panel(),
+                keys::SqlAction::SaveSnippet => self.save_as_snippet(),
+                keys::SqlAction::RunSnippet => self.snippets.open_finder(),
                 // The editor's own: done in `take_keys`, never handed to the window.
                 keys::SqlAction::NewScript
                 | keys::SqlAction::CloseScript
@@ -221,9 +238,8 @@ impl SqlWindow {
                 let clicked = icons::add_named(ui, current.is_some(), save, "Save as snippet…")
                     .on_hover_text("The selection, or the statement under the cursor")
                     .clicked();
-                if clicked && let Some(sql) = current {
-                    self.snippets.save_as(&sql);
-                    self.show_snippets();
+                if clicked {
+                    self.save_as_snippet();
                 }
             });
         });
@@ -234,7 +250,11 @@ impl SqlWindow {
         if self.waiting.is_some() || !self.queue.is_empty() {
             return;
         }
+        self.snippet_run = None;
         if let Some(statement) = self.scripts.current_statement() {
+            if self.asks_for_values(&statement) {
+                return;
+            }
             self.queue.push_back(statement);
             self.next_statement();
         }
@@ -243,6 +263,11 @@ impl SqlWindow {
     /// Every statement in the editor, in order, stopping at the first error.
     pub(crate) fn run_all(&mut self) {
         if self.waiting.is_some() || !self.queue.is_empty() {
+            return;
+        }
+        self.snippet_run = None;
+        // R-SQL-120: the script's `${…}`, asked for once.
+        if self.snippets.ask_in_editor && self.snippets.ask_for_editor(self.scripts.text()) {
             return;
         }
         let script = self.scripts.text();
@@ -254,6 +279,23 @@ impl SqlWindow {
         self.next_statement();
     }
 
+    /// Takes what the settings choose, when it changed (R-SQL-123..127).
+    pub(crate) fn apply(&mut self, choices: crate::Choices) {
+        if choices == self.choices {
+            return;
+        }
+        self.results.csv = choices.csv;
+        self.results.null_text = Some(choices.null_text.clone());
+        self.database.max_objects = choices.max_objects;
+        self.choices = choices;
+    }
+
+    /// Opens the values form for the `${…}` in `sql` when the setting is on; the filled SQL runs
+    /// as Run all does (R-SQL-120). `false` when there is nothing to ask.
+    fn asks_for_values(&mut self, sql: &str) -> bool {
+        self.snippets.ask_in_editor && self.snippets.ask_for_editor(sql)
+    }
+
     /// Runs the next statement queued, after asking when it changes much (R-SQL-9).
     pub(crate) fn next_statement(&mut self) {
         if self.waiting.is_some() || self.confirm.is_some() || self.parameters.is_some() {
@@ -262,7 +304,9 @@ impl SqlWindow {
         let Some(statement) = self.queue.pop_front() else {
             return;
         };
-        if let Some(risk) = text::risk(&statement) {
+        if self.choices.confirm_risky
+            && let Some(risk) = text::risk(&statement)
+        {
             self.confirm = Some((statement, risk));
             return;
         }
@@ -377,6 +421,12 @@ impl SqlWindow {
             }
             Some(results::Ask::Download) => self.transfer.ask(download::Source::Tab),
             None => {}
+        }
+        // R-SQL-117: Run again on a snippet's result.
+        if let Some(report) = self.results.take_again()
+            && let Some(used) = self.snippets.run_again(&report)
+        {
+            self.use_snippet(used);
         }
     }
 }

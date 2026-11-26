@@ -47,12 +47,20 @@ pub fn open(
     .with_limits(settings.sql_rows, settings.sql_timeout)
     .with_header(settings.sql_header)
     .with_side(settings.sql_side, groups)
-    .with_csv(settings.sql_csv_delimiter))
+    .with_snippet_values(
+        settings
+            .sql_snippet_values
+            .get(name)
+            .filter(|_| settings.sql_remember_values)
+            .cloned()
+            .unwrap_or_default(),
+    ))
 }
 
 /// Keeps what `window` for session `name` changed in `settings`: the statements it ran
 /// (R-SQL-7), the headings chosen (R-SQL-29), the side panel's layout and the library groups
-/// (R-SQL-82, R-SQL-83) and the scripts (R-SQL-20), these only when their count moved on from
+/// (R-SQL-82, R-SQL-83), the placeholder values used (R-SQL-113) and the scripts (R-SQL-20),
+/// these only when their count moved on from
 /// `scripts_kept`.
 pub fn keep(window: &mut SqlWindow, name: &str, settings: &mut Settings, scripts_kept: &mut u64) {
     settings.sql_header = window.header;
@@ -64,6 +72,15 @@ pub fn keep(window: &mut SqlWindow, name: &str, settings: &mut Settings, scripts
     if settings.sql_groups.get(name).map(Vec::as_slice) != Some(groups) {
         settings.sql_groups.insert(name.to_owned(), groups.to_vec());
     }
+    // R-SQL-122: kept only while the settings say so; turned off, those kept go.
+    let values = window.snippet_values();
+    if !settings.sql_remember_values {
+        settings.sql_snippet_values.clear();
+    } else if settings.sql_snippet_values.get(name) != Some(values) && !values.is_empty() {
+        settings
+            .sql_snippet_values
+            .insert(name.to_owned(), values.clone());
+    }
     // The pinned libraries are in the groups now (R-SQL-83).
     settings.sql_pinned.remove(name);
     if window.scripts_generation() != *scripts_kept {
@@ -71,11 +88,13 @@ pub fn keep(window: &mut SqlWindow, name: &str, settings: &mut Settings, scripts
         *scripts_kept = generation;
         settings.sql_scripts.insert(name.to_owned(), scripts);
     }
+    // R-SQL-121: runs are kept while the settings say so, as many as they say.
     let ran = window.take_ran();
-    if !ran.is_empty() {
+    if !ran.is_empty() && settings.sql_history_keep {
         history::add(
             settings.sql_history.entry(name.to_owned()).or_default(),
             ran,
+            settings.sql_history_size,
         );
     }
     // R-SQL-90, R-SQL-91: Remove from history and Clear history.
@@ -99,7 +118,8 @@ pub fn keep(window: &mut SqlWindow, name: &str, settings: &mut Settings, scripts
     }
 }
 
-/// Moves what the settings keep for session `old` (history, scripts, library groups) to its
+/// Moves what the settings keep for session `old` (history, scripts, library groups, placeholder
+/// values) to its
 /// new name `new` (R-SQL-46).
 pub fn rename(settings: &mut Settings, old: &str, new: &str) {
     if let Some(history) = settings.sql_history.remove(old) {
@@ -113,6 +133,9 @@ pub fn rename(settings: &mut Settings, old: &str, new: &str) {
     }
     if let Some(groups) = settings.sql_groups.remove(old) {
         settings.sql_groups.insert(new.to_owned(), groups);
+    }
+    if let Some(values) = settings.sql_snippet_values.remove(old) {
+        settings.sql_snippet_values.insert(new.to_owned(), values);
     }
 }
 
@@ -221,6 +244,58 @@ mod tests {
         rename(&mut settings, "Prod", "Production");
         assert_eq!(settings.sql_groups["Production"][0].libraries, ["QSYS2"]);
         assert!(!settings.sql_groups.contains_key("Prod"));
+    }
+
+    #[test]
+    fn placeholder_values_are_kept_by_connection_and_follow_a_rename_r_sql_113() {
+        let mut settings = Settings::default();
+        let used = crate::RecentValues::from([("lib".to_owned(), vec!["æøå".to_owned()])]);
+        let mut window = crate::tests::window().with_snippet_values(used.clone());
+        keep(&mut window, "Prod", &mut settings, &mut 0);
+        assert_eq!(settings.sql_snippet_values["Prod"], used);
+        let text = serde_json::to_string(&settings).expect("settings write");
+        let read: Settings = serde_json::from_str(&text).expect("settings read");
+        assert_eq!(read.sql_snippet_values["Prod"], used, "after a restart");
+        rename(&mut settings, "Prod", "Production");
+        assert_eq!(settings.sql_snippet_values["Production"], used);
+        assert!(!settings.sql_snippet_values.contains_key("Prod"));
+    }
+
+    #[test]
+    fn runs_are_kept_as_many_as_set_and_not_while_the_history_is_off_r_sql_121() {
+        let mut settings = Settings {
+            sql_history_size: 2,
+            ..Settings::default()
+        };
+        let mut window = crate::tests::window();
+        window.ran = vec![run("A"), run("B"), run("æøå")];
+        keep(&mut window, "Prod", &mut settings, &mut 0);
+        let kept: Vec<&str> = settings.sql_history["Prod"]
+            .iter()
+            .map(|e| e.statement.as_str())
+            .collect();
+        assert_eq!(kept, ["B", "æøå"]);
+        settings.sql_history_keep = false;
+        window.ran = vec![run("C")];
+        keep(&mut window, "Prod", &mut settings, &mut 0);
+        assert_eq!(
+            settings.sql_history["Prod"].len(),
+            2,
+            "none added, none removed"
+        );
+    }
+
+    #[test]
+    fn values_are_forgotten_when_remembering_is_turned_off_r_sql_122() {
+        let mut settings = Settings::default();
+        let used = crate::RecentValues::from([("lib".to_owned(), vec!["æøå".to_owned()])]);
+        settings
+            .sql_snippet_values
+            .insert("Other".to_owned(), used.clone());
+        let mut window = crate::tests::window().with_snippet_values(used);
+        settings.sql_remember_values = false;
+        keep(&mut window, "Prod", &mut settings, &mut 0);
+        assert!(settings.sql_snippet_values.is_empty(), "those kept go too");
     }
 
     #[test]

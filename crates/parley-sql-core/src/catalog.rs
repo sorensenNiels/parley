@@ -9,7 +9,8 @@ use super::protocol::Row;
 pub const JOB: &str = "SELECT CURRENT SCHEMA, SYSTEM_SCHEMA_NAME, TYPE, CURRENT SERVER \
     FROM QSYS2.LIBRARY_LIST_INFO ORDER BY ORDINAL_POSITION";
 
-/// At most this many objects of a library are listed in the browser (R-SQL-34).
+/// How many objects of a library are listed in the browser at first; a setting changes it
+/// (R-SQL-34, R-SQL-127).
 pub const MAX_OBJECTS: u32 = 5000;
 
 /// `value` as an SQL string literal, its quotes doubled: names from the catalog are host data.
@@ -19,8 +20,8 @@ pub(crate) fn literal(value: &str) -> String {
 
 /// The tables, views, indexes, procedures and functions in `library` (its system name), each as
 /// kind code, SQL name, system name and text, by kind and name (R-SQL-34). Read with
-/// [`objects_from`].
-pub fn objects(library: &str) -> String {
+/// [`objects_from`]. At most `max` (R-SQL-127).
+pub fn objects(library: &str, max: u32) -> String {
     let lib = literal(library);
     format!(
         "SELECT KIND, NAME, SYSTEM_NAME, TEXT FROM (\
@@ -32,7 +33,7 @@ pub fn objects(library: &str) -> String {
          UNION ALL SELECT CASE ROUTINE_TYPE WHEN 'PROCEDURE' THEN 'P' ELSE 'F' END, \
          ROUTINE_NAME, SPECIFIC_NAME, CAST(LONG_COMMENT AS VARCHAR(2000)) \
          FROM QSYS2.SYSROUTINES WHERE ROUTINE_SCHEMA = {lib}\
-         ) X ORDER BY KIND, NAME FETCH FIRST {MAX_OBJECTS} ROWS ONLY"
+         ) X ORDER BY KIND, NAME FETCH FIRST {max} ROWS ONLY"
     )
 }
 
@@ -339,9 +340,11 @@ mod tests {
 
     #[test]
     fn catalog_queries_quote_names_from_the_host_r_sql_34() {
-        let sql = objects("O'NEIL");
+        let sql = objects("O'NEIL", MAX_OBJECTS);
         assert!(sql.contains("SYSTEM_TABLE_SCHEMA = 'O''NEIL'"), "{sql}");
         assert!(sql.contains(&format!("FETCH FIRST {MAX_OBJECTS} ROWS")));
+        // R-SQL-127: the number of objects is the setting's.
+        assert!(objects("QGPL", 40_000).contains("FETCH FIRST 40000 ROWS"));
         let sql = columns("QSYS2", "SYSTABLES");
         assert!(sql.contains("SYSTEM_TABLE_NAME = 'SYSTABLES'"), "{sql}");
     }

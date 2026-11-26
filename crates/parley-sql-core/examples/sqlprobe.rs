@@ -1169,7 +1169,10 @@ fn browser(
     // The profile's own library too: NODEJT400's is the one Claude may look into (D22).
     let own = parley_sql_core::text::system_name(user);
     for library in ["QGPL", "QSYS2"].into_iter().chain(own.as_deref()) {
-        match run(&format!("Objects in {library}"), catalog::objects(library)) {
+        match run(
+            &format!("Objects in {library}"),
+            catalog::objects(library, catalog::MAX_OBJECTS),
+        ) {
             Ok(Outcome::Rows { rows, .. }) => {
                 let objects = catalog::objects_from(&rows);
                 for kind in catalog::Kind::ALL {

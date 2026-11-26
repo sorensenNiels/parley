@@ -153,7 +153,7 @@ impl SqlWindow {
                     &columns,
                     &names,
                     &sheet,
-                    self.csv_delimiter,
+                    self.choices.csv,
                 ) {
                     Ok(writer) => {
                         self.transfer.done = None;
@@ -365,7 +365,7 @@ impl SqlWindow {
                     &columns,
                     &names,
                     &sheet,
-                    self.csv_delimiter,
+                    self.choices.csv,
                 ) {
                     Ok(writer) => {
                         running.writer = Some(writer);

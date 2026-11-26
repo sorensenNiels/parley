@@ -82,6 +82,8 @@ pub struct ResultView {
     pub detail: Option<usize>,
     /// What the headings say (R-SQL-29), as the window's choice sets it.
     pub header: HeaderMode,
+    /// What a NULL shows as, as the settings say (R-SQL-124).
+    pub null_text: String,
     /// Values marked as different in a comparison (R-SQL-41): (row in `rows`, column).
     pub marked: BTreeSet<(usize, usize)>,
     /// The chart shown instead of the grid, while it is (R-SQL-42).
@@ -104,6 +106,7 @@ impl ResultView {
             widths: Vec::new(),
             detail: None,
             header: HeaderMode::default(),
+            null_text: NULL.to_owned(),
             marked: BTreeSet::new(),
             chart: None,
         };
@@ -233,24 +236,17 @@ impl ResultView {
         }
     }
 
-    /// The rows shown as CSV (RFC 4180, UTF-8 with a byte-order mark so spreadsheets read
-    /// æøå): the column names, then the rows in the order shown; NULL as an empty field.
-    pub fn csv(&self, delimiter: transfer::CsvDelimiter) -> String {
+    /// The rows shown as CSV (RFC 4180, UTF-8): the column names, then the rows in the order
+    /// shown, the byte-order mark, header and NULL as `csv` says (R-SQL-124, R-SQL-126).
+    pub fn csv(&self, csv: transfer::CsvOptions) -> String {
         let names: Vec<String> = self
             .columns
             .iter()
             .map(|c| header_text(c, self.header))
             .collect();
-        let mut out = String::from('\u{FEFF}');
-        out.push_str(&transfer::csv_line(
-            names.iter().map(String::as_str),
-            delimiter,
-        ));
+        let mut out = csv.start(names.iter().map(String::as_str));
         for (_, row) in self.shown() {
-            out.push_str(&transfer::csv_line(
-                row.iter().map(|v| v.as_deref().unwrap_or("")),
-                delimiter,
-            ));
+            out.push_str(&csv.row(row));
         }
         out
     }
@@ -393,7 +389,7 @@ impl ResultView {
                             ui.painter()
                                 .rect_filled(at, 2.0, p.warning_text.gamma_multiply(0.2));
                         }
-                        cell(ui, width, value.as_deref(), numeric);
+                        cell(ui, width, value.as_deref(), numeric, &self.null_text);
                     }
                 }
                 clicked
@@ -530,8 +526,11 @@ enum Heading {
     Fit,
 }
 
-/// One value: right-aligned when numeric, NULL muted in italics.
-fn cell(ui: &mut Ui, width: f32, value: Option<&str>, numeric: bool) {
+/// What a NULL shows as at first (R-SQL-124).
+pub const NULL: &str = "NULL";
+
+/// One value: right-aligned when numeric, NULL as `null` muted in italics.
+fn cell(ui: &mut Ui, width: f32, value: Option<&str>, numeric: bool, null: &str) {
     let p = theme::palette(ui);
     ui.allocate_ui(vec2(width, ROW_HEIGHT), |ui| {
         ui.set_width(width - 8.0);
@@ -543,7 +542,7 @@ fn cell(ui: &mut Ui, width: f32, value: Option<&str>, numeric: bool) {
         ui.with_layout(layout, |ui| {
             let text = match value {
                 Some(text) => RichText::new(text),
-                None => RichText::new("NULL").italics().color(p.muted),
+                None => RichText::new(null).italics().color(p.muted),
             };
             ui.add(Label::new(text).truncate().selectable(false));
         });
@@ -671,7 +670,10 @@ mod tests {
             0,
         );
         assert_eq!(
-            v.csv(transfer::CsvDelimiter::Comma),
+            v.csv(transfer::CsvOptions {
+                delimiter: transfer::CsvDelimiter::Comma,
+                ..transfer::CsvOptions::default()
+            }),
             "\u{FEFF}A,B\r\n\"say \"\"hi\"\", æøå\",\r\n"
         );
         assert_eq!(v.cursor, None, "no more rows");
@@ -680,7 +682,10 @@ mod tests {
     #[test]
     fn exported_csv_uses_the_chosen_delimiter_r_sql_100() {
         let v = view();
-        let csv = v.csv(transfer::CsvDelimiter::Semicolon);
+        let csv = v.csv(transfer::CsvOptions {
+            delimiter: transfer::CsvDelimiter::Semicolon,
+            ..transfer::CsvOptions::default()
+        });
         let header = csv.lines().next().unwrap_or_default();
         assert!(header.contains(';') && !header.contains(','), "{header}");
     }
@@ -693,7 +698,10 @@ mod tests {
         assert_eq!(v.counts(), (1, 4));
         assert_eq!(v.tsv(), "AMOUNT\tNAME\n10.5\tæøå");
         assert_eq!(
-            v.csv(transfer::CsvDelimiter::Comma),
+            v.csv(transfer::CsvOptions {
+                delimiter: transfer::CsvDelimiter::Comma,
+                ..transfer::CsvOptions::default()
+            }),
             "\u{FEFF}AMOUNT,NAME\r\n10.5,æøå\r\n"
         );
         "nothing like it".clone_into(&mut v.filter);
@@ -775,7 +783,12 @@ mod tests {
         assert_eq!(v.tsv().lines().next(), Some("REGSEQ\tT"));
         v.header = HeaderMode::Both;
         assert_eq!(
-            v.csv(transfer::CsvDelimiter::Comma).lines().next(),
+            v.csv(transfer::CsvOptions {
+                delimiter: transfer::CsvDelimiter::Comma,
+                ..transfer::CsvOptions::default()
+            })
+            .lines()
+            .next(),
             Some("\u{FEFF}REGSEQ · &Registration.Sequence,T")
         );
     }

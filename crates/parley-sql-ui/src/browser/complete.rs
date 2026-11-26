@@ -110,6 +110,32 @@ impl Browser {
         items
     }
 
+    /// The libraries of the job's library list `list` and of the groups starting with `prefix`
+    /// (in capitals), in that order, each once: what a library placeholder offers (R-SQL-115).
+    pub fn library_names(&self, prefix: &str, list: &[(String, String)]) -> Vec<String> {
+        let grouped = self.groups.iter().flat_map(|g| &g.libraries);
+        let mut names: Vec<String> = Vec::new();
+        for library in list.iter().map(|(l, _)| l).chain(grouped) {
+            if library.to_uppercase().starts_with(prefix) && !names.contains(library) {
+                names.push(library.clone());
+            }
+        }
+        names
+    }
+
+    /// The objects but indexes of `library` starting with `prefix` (in capitals), asked for
+    /// when not read: what a table placeholder offers (R-SQL-115).
+    pub fn table_names(&mut self, library: &str, prefix: &str, db: &mut Database) -> Vec<String> {
+        self.objects_of(library, db)
+            .map_or_else(Vec::new, |objects| {
+                objects
+                    .iter()
+                    .filter(|o| o.kind != Kind::Index && o.name.to_uppercase().starts_with(prefix))
+                    .map(|o| o.name.clone())
+                    .collect()
+            })
+    }
+
     /// The objects of `library` (asked for when not read), but its indexes.
     fn objects_of(&mut self, library: &str, db: &mut Database) -> Option<&[Object]> {
         text::system_name(library)?;

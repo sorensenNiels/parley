@@ -39,7 +39,7 @@ pub use app::{ParleySqlUi, SAVE_EVERY, SqlConnection};
 pub use assistant::ApiKeys;
 pub use editor::SavedScript;
 pub use settings::{Assistant, Settings};
-pub use snippets::SnippetStore;
+pub use snippets::{RecentValues, SnippetStore};
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -103,10 +103,41 @@ pub struct Around<'a> {
     pub results: layout::ResultsPlace,
     /// Brackets and quotes close themselves in the editor (R-SQL-55).
     pub close_pairs: bool,
+    /// SQL run from the editor asks for its `${…}` values first (R-SQL-120).
+    pub placeholders: bool,
+    /// What the settings choose (R-SQL-123..127); `None` for the defaults.
+    pub choices: Option<&'a Choices>,
     /// How Format SQL writes (R-SQL-77).
     pub format: parley_sql_core::text::Style,
     /// The window's shortcuts (R-SQL-60); `None` for the default keys, as in Parley.
     pub keys: Option<&'a keys::SqlKeys>,
+}
+
+/// What the settings choose for the window (R-SQL-123..127); as Parley always did by default.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Choices {
+    /// Ask before a statement R-SQL-9 names (R-SQL-123).
+    pub confirm_risky: bool,
+    /// Show Results or Messages after a run (R-SQL-125).
+    pub show_outcome: bool,
+    /// What a NULL shows as in the grid (R-SQL-124).
+    pub null_text: String,
+    /// How CSV is written (R-SQL-100, R-SQL-124, R-SQL-126).
+    pub csv: parley_sql_core::transfer::CsvOptions,
+    /// The most objects read per library (R-SQL-127).
+    pub max_objects: u32,
+}
+
+impl Default for Choices {
+    fn default() -> Self {
+        Self {
+            confirm_risky: true,
+            show_outcome: true,
+            null_text: grid::NULL.to_owned(),
+            csv: parley_sql_core::transfer::CsvOptions::default(),
+            max_objects: parley_sql_core::catalog::MAX_OBJECTS,
+        }
+    }
 }
 
 /// How far the window is, for Parley SQL's status bar (R-SQL-45).
@@ -237,7 +268,8 @@ pub struct SqlWindow {
     /// The saved connection's database options, sent at sign-on (R-SQL-97..100).
     options: parley_sql_core::options::ConnectOptions,
     /// What separates fields in CSV downloads and exports (R-SQL-100).
-    csv_delimiter: parley_sql_core::transfer::CsvDelimiter,
+    /// What the settings choose (R-SQL-123..127).
+    choices: Choices,
     java: PathBuf,
     files: HelperFiles,
     stage: Stage,
@@ -256,6 +288,9 @@ pub struct SqlWindow {
     results: results::Results,
     tab: Tab,
     snippets: snippets::SnippetPanel,
+    /// The statements of the snippet run last and what it was, for their results' titles
+    /// (R-SQL-117); cleared by any other run.
+    snippet_run: Option<(Vec<String>, snippets::Report)>,
     browser: browser::Browser,
     messages: Vec<Note>,
     /// The help asked for an error in Messages (R-SQL-31).
@@ -329,7 +364,7 @@ impl SqlWindow {
         Self {
             config: config.clone(),
             options: parley_sql_core::options::ConnectOptions::default(),
-            csv_delimiter: parley_sql_core::transfer::CsvDelimiter::default(),
+            choices: Choices::default(),
             java,
             files,
             stage: Stage::SignIn,
@@ -344,6 +379,7 @@ impl SqlWindow {
             results: results::Results::reading(config.code_page),
             tab: Tab::Results,
             snippets: snippets::SnippetPanel::default(),
+            snippet_run: None,
             browser: browser::Browser::default(),
             messages: Vec::new(),
             helps: tools::Helps::new(),
@@ -419,14 +455,6 @@ impl SqlWindow {
         self
     }
 
-    /// CSV downloads and exports separate fields with `delimiter` (R-SQL-100).
-    #[must_use]
-    pub const fn with_csv(mut self, delimiter: parley_sql_core::transfer::CsvDelimiter) -> Self {
-        self.csv_delimiter = delimiter;
-        self.results.csv_delimiter = delimiter;
-        self
-    }
-
     /// Signs on with the saved connection's `options`, and starts Autocommit as they say
     /// (R-SQL-97..100).
     #[must_use]
@@ -463,6 +491,18 @@ impl SqlWindow {
     }
 
     /// The library groups now, to keep in the settings (R-SQL-83).
+    /// Offers `values`, the placeholder values used on this connection before (R-SQL-113).
+    #[must_use]
+    pub fn with_snippet_values(mut self, values: RecentValues) -> Self {
+        self.snippets.set_recent(values);
+        self
+    }
+
+    /// The placeholder values used, as the settings keep them (R-SQL-113).
+    pub const fn snippet_values(&self) -> &RecentValues {
+        self.snippets.recent()
+    }
+
     pub fn library_groups(&self) -> &[browser::LibraryGroup] {
         self.browser.library_groups()
     }
@@ -550,11 +590,15 @@ impl SqlWindow {
         if self.scripts.take_run_asked() {
             self.run_current();
         }
+        if self.scripts.take_snippet_asked() {
+            self.save_as_snippet();
+        }
         if let Some(i) = self.scripts.take_snippet_chosen()
             && let Some(used) = self.snippets.start(i, false)
         {
             self.use_snippet(used);
         }
+        self.offer_placeholder_names();
         let used = self
             .snippets
             .dialogs(ui.ctx(), around.snippets, around.shared);
@@ -713,6 +757,30 @@ mod tests {
         assert_eq!(w.tab, Tab::Results);
         assert_eq!(statements(w.take_ran()), ["SELECT NAME FROM T"]);
         assert!(w.waiting.is_none());
+    }
+
+    /// R-SQL-117: rows of a snippet's statement are titled by the snippet; another run's are not.
+    #[test]
+    fn a_snippet_s_rows_are_titled_by_it_until_another_run_r_sql_117() {
+        let rows = r#"{"id":1,"ok":{"kind":"rows","cursor":3,"columns":[{"name":"NAME","type":"VARCHAR","length":10,"scale":0,"nullable":true,"numeric":false}],"rows":[["æøå"]],"more":false}}"#;
+        let report = snippets::Report {
+            snippet: "Names".to_owned(),
+            sql: "SELECT NAME FROM T WHERE N = ${n}".to_owned(),
+            title: "Names — æøå".to_owned(),
+        };
+        let mut w = window();
+        w.snippet_run = Some((
+            vec!["SELECT NAME FROM T WHERE N = 'æøå'".to_owned()],
+            report,
+        ));
+        running(&mut w, "SELECT NAME FROM T WHERE N = 'æøå'");
+        answer(&mut w, rows);
+        assert_eq!(w.results.shown_title(), Some("Names — æøå"));
+        w.run_current();
+        assert!(w.snippet_run.is_none(), "another run forgets it");
+        running(&mut w, "SELECT NAME FROM T WHERE N = 'æøå'");
+        answer(&mut w, rows);
+        assert_ne!(w.results.shown_title(), Some("Names — æøå"));
     }
 
     /// R-SQL-62: each run leaves its outcome for the gutter, an error too.
@@ -900,6 +968,102 @@ mod tests {
         w.run_all();
         // Without a helper nothing is sent; the first statement left the queue to be run.
         assert_eq!(w.queue, ["VALUES 'æøå'"]);
+    }
+
+    /// R-SQL-120: Run all asks once for every statement's `${…}`, then runs the filled SQL; Run
+    /// as written sends it unchanged; with the setting off nothing is asked.
+    #[test]
+    fn running_sql_with_placeholders_asks_once_unless_the_setting_is_off_r_sql_120() {
+        use egui_kittest::kittest::Queryable;
+        const SCRIPT: &str = "VALUES 1;\nVALUES ${a as text:æøå};\nVALUES ${a as text};\n";
+        let click_last = |harness: &mut egui_kittest::Harness<'static, SqlWindow>, label: &str| {
+            harness
+                .get_all_by_label(label)
+                .last()
+                .expect("the form's button")
+                .click();
+            harness.run_steps(3);
+        };
+        for (button, queued) in [
+            ("Run", ["VALUES 'æøå'", "VALUES 'æøå'"]),
+            (
+                "Run as written",
+                ["VALUES ${a as text:æøå}", "VALUES ${a as text}"],
+            ),
+        ] {
+            let mut w = window();
+            w.snippets.ask_in_editor = true;
+            w.scripts.set_text(SCRIPT, 0);
+            w.run_all();
+            assert!(w.queue.is_empty(), "nothing runs before the values");
+            let mut harness = drawn(w, Vec::new());
+            harness.run_steps(3);
+            harness.get_by_label("Values for the SQL");
+            assert!(harness.query_by_label("Insert").is_none(), "no Insert here");
+            click_last(&mut harness, button);
+            assert_eq!(harness.state().queue, queued, "{button}");
+        }
+        let mut w = window();
+        w.snippets.ask_in_editor = false;
+        w.scripts.set_text(SCRIPT, 0);
+        w.run_all();
+        assert_eq!(
+            w.queue,
+            ["VALUES ${a as text:æøå}", "VALUES ${a as text}"],
+            "the setting off"
+        );
+    }
+
+    #[test]
+    fn asking_for_placeholder_values_is_on_at_first_r_sql_120() {
+        let read: settings::Settings = serde_json::from_str("{}").expect("old settings read");
+        assert!(read.sql_placeholders);
+    }
+
+    #[test]
+    fn a_risky_statement_runs_without_asking_when_the_setting_says_so_r_sql_123() {
+        let mut w = window();
+        w.scripts.set_text("DROP TABLE T", 0);
+        w.run_current();
+        assert!(w.confirm.is_some(), "asked at first");
+        let mut w = window();
+        w.choices.confirm_risky = false;
+        w.scripts.set_text("DROP TABLE T", 0);
+        w.run_current();
+        assert!(w.confirm.is_none(), "not asked");
+    }
+
+    #[test]
+    fn the_tab_shown_stays_after_a_run_when_the_setting_says_so_r_sql_125() {
+        let rows = r#"{"id":1,"ok":{"kind":"rows","cursor":3,"columns":[{"name":"NAME","type":"VARCHAR","length":10,"scale":0,"nullable":true,"numeric":false}],"rows":[["æøå"]],"more":false}}"#;
+        let mut w = window();
+        w.choices.show_outcome = false;
+        w.tab = Tab::History;
+        running(&mut w, "SELECT NAME FROM T");
+        answer(&mut w, rows);
+        assert_eq!(w.tab, Tab::History, "stayed");
+        assert!(
+            w.results.shown_view().is_some(),
+            "the result is there all the same"
+        );
+        w.choices.show_outcome = true;
+        running(&mut w, "SELECT NAME FROM T");
+        answer(&mut w, rows);
+        assert_eq!(w.tab, Tab::Results);
+    }
+
+    #[test]
+    fn choices_reach_the_results_and_the_catalog_r_sql_124_r_sql_127() {
+        let mut w = window();
+        let choices = Choices {
+            null_text: "(ingen)".to_owned(),
+            max_objects: 40_000,
+            ..Choices::default()
+        };
+        w.apply(choices.clone());
+        assert_eq!(w.results.null_text.as_deref(), Some("(ingen)"));
+        assert_eq!(w.database.max_objects, 40_000);
+        assert_eq!(w.choices, choices);
     }
 
     #[test]
@@ -1317,6 +1481,76 @@ mod tests {
             Some("Wait for the statement running to end."),
             "the click reached the window, which runs one statement at a time"
         );
+    }
+
+    /// R-SQL-107: right-clicking the editor's text saves the statement under the cursor as a
+    /// snippet; R-SQL-106: the Snippets header's + opens an empty new snippet.
+    #[test]
+    fn the_editor_s_menu_and_the_snippets_plus_open_the_snippet_dialog_r_sql_106_r_sql_107() {
+        use egui_kittest::kittest::Queryable;
+        let mut w = window();
+        w.scripts.set_text("SELECT 'æøå' FROM T", 0);
+        let mut harness = drawn(w, Vec::new());
+        harness.run_steps(3);
+        harness
+            .get_by_role(egui::accesskit::Role::MultilineTextInput)
+            .click_secondary();
+        harness.run_steps(3);
+        let shown = harness.get_all_by_label("Save as snippet…").count();
+        assert_eq!(shown, 2, "the run bar's button and the menu's");
+        harness
+            .get_all_by_label("Save as snippet…")
+            .last()
+            .expect("the menu's")
+            .click();
+        harness.run_steps(3);
+        harness.get_by_label("Save as snippet");
+        harness.get_by_label("Asks for no values. Write ${name} or ${name:default} where a value is asked for when the snippet is used.");
+        // The run bar has a Cancel too; the dialog's is drawn last.
+        harness
+            .get_all_by_label("Cancel")
+            .last()
+            .expect("the dialog's")
+            .click();
+        harness.run_steps(3);
+        assert!(harness.query_by_label("Save as snippet").is_none());
+        harness.get_by_label("New snippet…").click();
+        harness.run_steps(3);
+        harness.get_by_label("New snippet");
+    }
+
+    /// R-SQL-118: a snippet dragged from the panel goes into the editor where it is dropped.
+    #[test]
+    fn a_snippet_dropped_on_the_editor_goes_in_where_it_fell_r_sql_118() {
+        use egui_kittest::kittest::Queryable;
+        let mut w = window();
+        w.scripts.set_text("VALUES 'æøå'", 0);
+        w.snippets.query = "system status".to_owned();
+        let mut harness = drawn(w, Vec::new());
+        harness.run_steps(3);
+        let from = harness
+            .get_by_role_and_label(egui::accesskit::Role::Button, "System status")
+            .rect()
+            .center();
+        let to = harness
+            .get_by_role(egui::accesskit::Role::MultilineTextInput)
+            .rect()
+            .left_top()
+            + egui::vec2(2.0, 2.0);
+        harness.hover_at(from);
+        harness.run();
+        harness.drag_at(from);
+        harness.run();
+        for step in [0.25, 0.5, 0.75, 1.0] {
+            harness.hover_at(from + (to - from) * step);
+            harness.run();
+        }
+        harness.drop_at(to);
+        harness.run_steps(3);
+        let text = harness.state().scripts.text().to_owned();
+        let snippet = text.find("SYSTEM_STATUS_INFO").expect("inserted");
+        let before = text.find("VALUES 'æøå'").expect("kept");
+        assert!(snippet < before, "where it fell, before the text: {text}");
     }
 
     /// R-SQL-88: the snippets are groups that fold; a snippet's right-click menu inserts or

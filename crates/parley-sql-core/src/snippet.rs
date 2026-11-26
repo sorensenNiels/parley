@@ -9,9 +9,18 @@
 //! SELECT … WHERE OBJECT_NAME = UPPER('${object}')
 //! ```
 //!
-//! `${name}` and `${name:default}` are placeholders, asked for when the snippet is used.
+//! `${name}` and `${name:default}` are placeholders, asked for when the snippet is used; with a
+//! type, `${name as text:default}` (R-SQL-110), see [`placeholder`].
 
 use std::fmt::Write as _;
+
+mod literals;
+mod placeholder;
+mod suggest;
+
+pub use literals::{Literal, ask_for, literals};
+pub use placeholder::{BadValue, Placeholder, ValueType, fill, placeholders, quoted_twice};
+pub use suggest::suggest;
 
 /// A snippet read from its text.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -101,71 +110,6 @@ impl Snippet {
 /// A header value on one line: a line break would end the header early.
 fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// A placeholder in a snippet's SQL: its name and the default written with it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Placeholder {
-    pub name: String,
-    pub default: Option<String>,
-}
-
-/// The placeholders of `sql`, each name once, in the order they first appear.
-pub fn placeholders(sql: &str) -> Vec<Placeholder> {
-    let mut found: Vec<Placeholder> = Vec::new();
-    for (_, inside) in placeholder_spans(sql) {
-        let (name, default) = match inside.split_once(':') {
-            Some((name, default)) => (name.trim(), Some(default.to_owned())),
-            None => (inside.trim(), None),
-        };
-        if !name.is_empty() && !found.iter().any(|p| p.name == name) {
-            found.push(Placeholder {
-                name: name.to_owned(),
-                default,
-            });
-        }
-    }
-    found
-}
-
-/// `sql` with each placeholder replaced by `value(name)`, or its default when that is `None`
-/// (an empty text when it has none). Values go in as given: the snippet writes the quotes.
-pub fn fill(sql: &str, value: impl Fn(&str) -> Option<String>) -> String {
-    let mut out = String::with_capacity(sql.len());
-    let mut at = 0;
-    for (range, inside) in placeholder_spans(sql) {
-        out.push_str(sql.get(at..range.start).unwrap_or_default());
-        let (name, default) = match inside.split_once(':') {
-            Some((name, default)) => (name.trim(), default),
-            None => (inside.trim(), ""),
-        };
-        out.push_str(&value(name).unwrap_or_else(|| default.to_owned()));
-        at = range.end;
-    }
-    out.push_str(sql.get(at..).unwrap_or_default());
-    out
-}
-
-/// Each `${…}` in `sql`: its byte range and what is inside the braces.
-fn placeholder_spans(sql: &str) -> Vec<(std::ops::Range<usize>, &str)> {
-    let mut spans = Vec::new();
-    let mut from = 0;
-    while let Some(start) = sql
-        .get(from..)
-        .and_then(|rest| rest.find("${"))
-        .map(|n| from + n)
-    {
-        let Some(end) = sql
-            .get(start + 2..)
-            .and_then(|rest| rest.find('}'))
-            .map(|n| start + 2 + n)
-        else {
-            break;
-        };
-        spans.push((start..end + 1, sql.get(start + 2..end).unwrap_or_default()));
-        from = end + 1;
-    }
-    spans
 }
 
 /// The snippets Parley comes with (R-SQL-27, R-SQL-81): what IBM i Services can answer, tagged
@@ -322,14 +266,17 @@ mod tests {
             [
                 Placeholder {
                     name: "lib".to_owned(),
+                    kind: ValueType::Any,
                     default: Some("QGPL".to_owned())
                 },
                 Placeholder {
                     name: "n".to_owned(),
+                    kind: ValueType::Any,
                     default: None
                 },
                 Placeholder {
                     name: "empty".to_owned(),
+                    kind: ValueType::Any,
                     default: Some(String::new())
                 },
             ]

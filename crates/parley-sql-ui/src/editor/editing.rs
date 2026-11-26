@@ -81,7 +81,12 @@ impl Scripts {
         let text = self.text().to_owned();
         let selection = self.selection;
         let edit = match action {
-            SqlAction::Run | SqlAction::RunAll | SqlAction::Cancel | SqlAction::SidePanel => {
+            SqlAction::Run
+            | SqlAction::RunAll
+            | SqlAction::Cancel
+            | SqlAction::SidePanel
+            | SqlAction::SaveSnippet
+            | SqlAction::RunSnippet => {
                 return false;
             }
             SqlAction::NewScript => {

@@ -19,5 +19,6 @@ No open ideas for the final push: the last were built or parked (D62, [../PARKED
 a theme file in `ideas/`.
 
 - [Working with results](ideas/results.md) (IDEA-44..60)
+- [Snippets](ideas/snippets.md) (IDEA-61..75)
 
 Next free ID: see the last line of [../IDEAS.md](../IDEAS.md).

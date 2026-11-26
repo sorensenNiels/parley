@@ -1,5 +1,5 @@
 //! The SQL window's history (R-SQL-89..91, D35): every run, with when it ran, how long it took
-//! and how it ended, the last [`LIMIT`] per saved connection; never results (R-SQL-7). The
+//! and how it ended, the last [`LIMIT`] per saved connection at first (R-SQL-121); never results (R-SQL-7). The
 //! outcome is the one the editor's gutter shows too (R-SQL-62).
 
 use std::time::Duration;
@@ -7,7 +7,7 @@ use std::time::Duration;
 use chrono::{DateTime, Local, NaiveDate};
 use serde::{Deserialize, Serialize};
 
-/// Runs kept per saved connection (R-SQL-89).
+/// Runs kept per saved connection at first; a setting changes it (R-SQL-89, R-SQL-121).
 pub const LIMIT: usize = 500;
 /// An error is kept as its first line, at most this many characters.
 const ERROR_CHARS: usize = 300;
@@ -170,10 +170,10 @@ pub enum Show {
     Failed,
 }
 
-/// Adds `ran` to `history`, keeping the last [`LIMIT`] (R-SQL-89).
-pub fn add(history: &mut Vec<Entry>, ran: Vec<Entry>) {
+/// Adds `ran` to `history`, keeping the last `limit` (R-SQL-89, R-SQL-121).
+pub fn add(history: &mut Vec<Entry>, ran: Vec<Entry>, limit: usize) {
     history.extend(ran);
-    let excess = history.len().saturating_sub(LIMIT);
+    let excess = history.len().saturating_sub(limit);
     history.drain(..excess);
 }
 
@@ -249,14 +249,30 @@ mod tests {
     #[test]
     fn every_run_is_kept_up_to_the_limit_r_sql_89() {
         let mut history = vec![entry("A", None)];
-        add(&mut history, vec![entry("A", None), entry("B", None)]);
+        add(
+            &mut history,
+            vec![entry("A", None), entry("B", None)],
+            LIMIT,
+        );
         assert_eq!(history.len(), 3, "a run again is an entry of its own");
         add(
             &mut history,
             (0..600).map(|n| entry(&format!("S{n}"), None)).collect(),
+            LIMIT,
         );
         assert_eq!(history.len(), LIMIT);
         assert_eq!(history.last().map(|e| e.statement.as_str()), Some("S599"));
+    }
+
+    /// R-SQL-121: a smaller limit drops the oldest at the next run.
+    #[test]
+    fn a_smaller_limit_keeps_only_the_newest_r_sql_121() {
+        let mut history: Vec<Entry> = (0..10).map(|n| entry(&format!("S{n}"), None)).collect();
+        add(&mut history, vec![entry("æøå", None)], 3);
+        let kept: Vec<&str> = history.iter().map(|e| e.statement.as_str()).collect();
+        assert_eq!(kept, ["S8", "S9", "æøå"]);
+        add(&mut history, Vec::new(), 0);
+        assert_eq!(history, [], "none kept");
     }
 
     /// R-SQL-89: an error is kept as its first line, cut short.

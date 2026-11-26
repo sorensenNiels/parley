@@ -157,14 +157,23 @@ impl SqlWindow {
                     rows.len(),
                     if more { ", more to fetch" } else { "" }
                 )));
-                self.results
-                    .add(statement, ResultView::new(columns, rows, more, cursor));
-                self.tab = Tab::Results;
+                // R-SQL-117: a snippet's result is named after it.
+                let snippet = self
+                    .snippet_run
+                    .as_ref()
+                    .filter(|(statements, _)| statements.iter().any(|s| s == statement))
+                    .map(|(_, report)| report.clone());
+                let view = ResultView::new(columns, rows, more, cursor);
+                self.results.add_from(statement, view, snippet);
+                if self.choices.show_outcome {
+                    self.tab = Tab::Results;
+                }
             }
             Ok(Outcome::Count { .. }) if text::cl_command(statement).is_some() => {
                 self.note_outcome(statement, gutter::Outcome::Done);
                 self.messages.push(Note::Info(format!("{short}: done")));
-                if self.queue.is_empty() {
+                // R-SQL-125: the outcome shows unless the settings keep the tab.
+                if self.queue.is_empty() && self.choices.show_outcome {
                     self.tab = Tab::Messages;
                 }
             }
@@ -175,7 +184,8 @@ impl SqlWindow {
                 if !self.autocommit {
                     self.uncommitted = true;
                 }
-                if self.queue.is_empty() {
+                // R-SQL-125: the outcome shows unless the settings keep the tab.
+                if self.queue.is_empty() && self.choices.show_outcome {
                     self.tab = Tab::Messages;
                 }
             }

@@ -54,6 +54,64 @@ impl CsvDelimiter {
     }
 }
 
+/// What a NULL is in a CSV file (R-SQL-124).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CsvNull {
+    /// An empty field, as an empty text is.
+    #[default]
+    Empty,
+    /// The word `NULL`.
+    Null,
+}
+
+/// How CSV is written (R-SQL-100, R-SQL-124, R-SQL-126).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CsvOptions {
+    pub delimiter: CsvDelimiter,
+    /// A byte-order mark first, so Excel reads æøå.
+    pub bom: bool,
+    /// The column names as the first line.
+    pub header: bool,
+    pub null: CsvNull,
+}
+
+impl Default for CsvOptions {
+    fn default() -> Self {
+        Self {
+            delimiter: CsvDelimiter::default(),
+            bom: true,
+            header: true,
+            null: CsvNull::default(),
+        }
+    }
+}
+
+impl CsvOptions {
+    /// What a CSV text starts with: the byte-order mark and the header line, as chosen.
+    pub fn start<'a>(&self, names: impl IntoIterator<Item = &'a str>) -> String {
+        let mut out = String::new();
+        if self.bom {
+            out.push('\u{FEFF}');
+        }
+        if self.header {
+            out.push_str(&csv_line(names, self.delimiter));
+        }
+        out
+    }
+
+    /// One row as a CSV line, NULL as chosen.
+    pub fn row(&self, row: &[Option<String>]) -> String {
+        let null = match self.null {
+            CsvNull::Empty => "",
+            CsvNull::Null => "NULL",
+        };
+        csv_line(
+            row.iter().map(|v| v.as_deref().unwrap_or(null)),
+            self.delimiter,
+        )
+    }
+}
+
 /// One line of CSV (RFC 4180): fields with the delimiter, a quote or a line break are quoted.
 pub fn csv_line<'a>(fields: impl IntoIterator<Item = &'a str>, delimiter: CsvDelimiter) -> String {
     let d = delimiter.char();
@@ -88,7 +146,7 @@ pub struct Download {
 
 #[derive(Debug)]
 enum Sink {
-    Csv(BufWriter<File>, CsvDelimiter),
+    Csv(BufWriter<File>, CsvOptions),
     Excel(Box<Excel>),
     Sql(Box<Script>),
 }
@@ -104,8 +162,8 @@ struct Script {
 
 impl Download {
     /// Starts `path` in `format` with a header row of `names` (one per column of `columns`);
-    /// an Excel file's first sheet is called `sheet` (made a valid sheet name); a CSV file's
-    /// fields are separated by `delimiter`.
+    /// an Excel file's first sheet is called `sheet` (made a valid sheet name); a CSV file is
+    /// written as `csv` says.
     ///
     /// # Errors
     /// When the file cannot be created.
@@ -115,16 +173,15 @@ impl Download {
         columns: &[Column],
         names: &[String],
         sheet: &str,
-        delimiter: CsvDelimiter,
+        csv: CsvOptions,
     ) -> Result<Self> {
         let sink = match format {
             Format::Csv => {
                 let file = File::create(path).map_err(|e| file_error(path, &e))?;
                 let mut out = BufWriter::new(file);
-                let header = csv_line(names.iter().map(String::as_str), delimiter);
-                out.write_all(format!("\u{FEFF}{header}").as_bytes())
+                out.write_all(csv.start(names.iter().map(String::as_str)).as_bytes())
                     .map_err(|e| file_error(path, &e))?;
-                Sink::Csv(out, delimiter)
+                Sink::Csv(out, csv)
             }
             Format::Excel => Sink::Excel(Box::new(Excel::new(columns, names, sheet)?)),
             Format::Sql => {
@@ -194,9 +251,9 @@ impl Download {
     /// When the file cannot be written.
     pub fn write(&mut self, rows: &[Row]) -> Result<()> {
         match &mut self.sink {
-            Sink::Csv(out, delimiter) => {
+            Sink::Csv(out, csv) => {
                 for row in rows {
-                    let line = csv_line(row.iter().map(|v| v.as_deref().unwrap_or("")), *delimiter);
+                    let line = csv.row(row);
                     out.write_all(line.as_bytes())
                         .map_err(|e| file_error(&self.path, &e))?;
                 }
@@ -520,6 +577,27 @@ mod tests {
     }
 
     #[test]
+    fn csv_starts_and_writes_null_as_chosen_r_sql_124_r_sql_126() {
+        let row = vec![Some("æøå".to_owned()), None, Some(String::new())];
+        let plain = CsvOptions::default();
+        assert_eq!(plain.start(["A", "B"]), "\u{FEFF}A,B\r\n");
+        assert_eq!(plain.row(&row), "æøå,,\r\n", "NULL and '' alike");
+        let chosen = CsvOptions {
+            delimiter: CsvDelimiter::Semicolon,
+            bom: false,
+            header: false,
+            null: CsvNull::Null,
+        };
+        assert_eq!(chosen.start(["A", "B"]), "");
+        assert_eq!(chosen.row(&row), "æøå;NULL;\r\n", "told apart");
+        let header_only = CsvOptions {
+            bom: false,
+            ..CsvOptions::default()
+        };
+        assert_eq!(header_only.start(["A"]), "A\r\n");
+    }
+
+    #[test]
     fn a_csv_download_writes_the_header_then_each_batch_as_it_comes_r_sql_71() {
         let scratch = Scratch::new("csv");
         let path = scratch.file("kunder.csv");
@@ -534,7 +612,7 @@ mod tests {
             &columns,
             &names,
             "KUNDER",
-            CsvDelimiter::Comma,
+            CsvOptions::default(),
         )
         .expect("created");
         download
@@ -563,7 +641,7 @@ mod tests {
             &columns,
             &[],
             "KUNDER",
-            CsvDelimiter::Comma,
+            CsvOptions::default(),
         )
         .expect("created");
         download
@@ -614,7 +692,7 @@ mod tests {
                 &columns,
                 &["A".to_owned()],
                 "T",
-                CsvDelimiter::Comma,
+                CsvOptions::default(),
             )
             .expect("created");
             download.write(&[row(&[Some("1")])]).expect("written");
@@ -626,7 +704,7 @@ mod tests {
     #[test]
     fn a_folder_that_is_not_there_is_an_error_naming_the_file_r_sql_71() {
         let path = Path::new("/no/such/folder/æøå.csv");
-        let err = Download::create(path, Format::Csv, &[], &[], "T", CsvDelimiter::Comma)
+        let err = Download::create(path, Format::Csv, &[], &[], "T", CsvOptions::default())
             .expect_err("no folder");
         assert!(err.to_string().contains("æøå.csv"), "{err}");
     }
@@ -650,7 +728,7 @@ mod tests {
             &columns,
             &names,
             "KUNDER",
-            CsvDelimiter::Comma,
+            CsvOptions::default(),
         )
         .expect("created");
         download

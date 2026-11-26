@@ -38,19 +38,25 @@ pub enum SqlAction {
     ZoomReset,
     /// Fold or open the side panel (R-SQL-82).
     SidePanel,
+    /// Save the selection or the statement under the cursor as a snippet (R-SQL-107).
+    SaveSnippet,
+    /// Find a snippet and run it (R-SQL-116).
+    RunSnippet,
 }
 
 impl SqlAction {
     /// Every action, in the order the settings list them.
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 26] = [
         Self::Run,
         Self::RunAll,
         Self::Cancel,
+        Self::RunSnippet,
         Self::NewScript,
         Self::CloseScript,
         Self::NextScript,
         Self::Open,
         Self::Save,
+        Self::SaveSnippet,
         Self::Find,
         Self::Replace,
         Self::GoToLine,
@@ -96,6 +102,8 @@ impl SqlAction {
             Self::ZoomOut => "zoom-out",
             Self::ZoomReset => "zoom-reset",
             Self::SidePanel => "side-panel",
+            Self::SaveSnippet => "save-snippet",
+            Self::RunSnippet => "run-snippet",
         }
     }
 
@@ -125,16 +133,21 @@ impl SqlAction {
             Self::ZoomOut => "Smaller text",
             Self::ZoomReset => "Text at 100 %",
             Self::SidePanel => "Show or hide the side panel",
+            Self::SaveSnippet => "Save as snippet",
+            Self::RunSnippet => "Run a snippet",
         }
     }
 
     /// The heading it is listed under.
     pub const fn group(self) -> &'static str {
         match self {
-            Self::Run | Self::RunAll | Self::Cancel => "Run",
-            Self::NewScript | Self::CloseScript | Self::NextScript | Self::Open | Self::Save => {
-                "Scripts"
-            }
+            Self::Run | Self::RunAll | Self::Cancel | Self::RunSnippet => "Run",
+            Self::NewScript
+            | Self::CloseScript
+            | Self::NextScript
+            | Self::Open
+            | Self::Save
+            | Self::SaveSnippet => "Scripts",
             Self::Find | Self::Replace | Self::GoToLine => "Find",
             Self::Format
             | Self::UpperCase
@@ -176,7 +189,9 @@ impl SqlAction {
             | Self::Format
             | Self::UpperCase
             | Self::LowerCase
-            | Self::SidePanel => false,
+            | Self::SidePanel
+            | Self::SaveSnippet
+            | Self::RunSnippet => false,
         }
     }
 
@@ -208,6 +223,8 @@ impl SqlAction {
             Self::ZoomOut => &["Ctrl+Minus"],
             Self::ZoomReset => &["Ctrl+0"],
             Self::SidePanel => &["Ctrl+B"],
+            Self::SaveSnippet => &["Ctrl+Shift+S"],
+            Self::RunSnippet => &["Ctrl+Shift+R"],
         }
     }
 
@@ -501,6 +518,32 @@ mod tests {
             assert_eq!(refusal(chord(text)), None, "{text}");
         }
         assert!(refusal(Chord::CtrlAlone).is_some());
+    }
+
+    #[test]
+    fn ctrl_shift_s_saves_as_a_snippet_not_the_script_r_sql_107() {
+        let mut harness = egui_kittest::Harness::builder().build_ui_state(
+            |ui, pressed: &mut Vec<SqlAction>| {
+                pressed.extend(SqlKeys::default().take(ui, false, false));
+            },
+            Vec::new(),
+        );
+        harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::S);
+        harness.run();
+        assert_eq!(harness.state(), &[SqlAction::SaveSnippet]);
+    }
+
+    #[test]
+    fn ctrl_shift_r_runs_a_snippet_r_sql_116() {
+        let mut harness = egui_kittest::Harness::builder().build_ui_state(
+            |ui, pressed: &mut Vec<SqlAction>| {
+                pressed.extend(SqlKeys::default().take(ui, false, false));
+            },
+            Vec::new(),
+        );
+        harness.key_press_modifiers(Modifiers::COMMAND | Modifiers::SHIFT, Key::R);
+        harness.run();
+        assert_eq!(harness.state(), &[SqlAction::RunSnippet]);
     }
 
     #[test]

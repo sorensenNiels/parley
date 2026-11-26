@@ -277,6 +277,7 @@ impl ParleySqlUi {
             .get(&name)
             .map_or(&[][..], Vec::as_slice);
         let keys = crate::keys::SqlKeys::new(&self.settings.sql_keys);
+        let choices = self.settings.sql_choices();
         let around = crate::Around {
             history,
             files: self.files.as_deref(),
@@ -285,6 +286,8 @@ impl ParleySqlUi {
             // One connection at a time: no Run on… (D26).
             results: self.settings.sql_results,
             close_pairs: self.settings.sql_close_pairs,
+            placeholders: self.settings.sql_placeholders,
+            choices: Some(&choices),
             format: self.settings.sql_format,
             keys: Some(&keys),
         };
@@ -588,6 +591,47 @@ mod tests {
         assert_eq!(style.case, parley_sql_core::text::KeywordCase::Lower);
         assert!(style.commas_first);
         assert_eq!(style.indent, 4, "left as it was");
+    }
+
+    /// R-SQL-121..127: the new settings are on the SQL page and saved from it.
+    #[test]
+    fn running_history_and_csv_are_chosen_on_the_sql_page_r_sql_121_to_r_sql_127() {
+        let mut harness = app_with(Vec::new());
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("SQL").click();
+        harness.run();
+        for name in [
+            "Keep a history",
+            "Remember values",
+            "Ask before risky statements",
+            "Show the outcome after a run",
+            "CSV starts with a byte-order mark",
+            "CSV has a header row",
+        ] {
+            harness
+                .get_all_by_label(name)
+                .last()
+                .expect(name)
+                .scroll_to_me();
+            harness.run();
+            harness.get_all_by_label(name).last().expect(name).click();
+            harness.run();
+        }
+        harness.get_by_label("NULL").scroll_to_me();
+        harness.run();
+        harness.get_by_label("NULL").click();
+        harness.run();
+        harness.get_by_label("Save").click();
+        harness.run();
+        let s = &harness.state().settings;
+        assert!(!s.sql_history_keep && !s.sql_remember_values);
+        assert!(!s.sql_confirm_risky && !s.sql_show_outcome);
+        assert!(!s.sql_csv_bom && !s.sql_csv_header);
+        assert_eq!(s.sql_csv_null, parley_sql_core::transfer::CsvNull::Null);
+        let choices = s.sql_choices();
+        assert!(!choices.confirm_risky && !choices.csv.header);
+        assert_eq!(choices.max_objects, parley_sql_core::catalog::MAX_OBJECTS);
     }
 
     #[test]

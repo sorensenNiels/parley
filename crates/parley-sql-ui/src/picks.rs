@@ -128,11 +128,45 @@ impl SqlWindow {
         }
     }
 
+    /// Offers the values form the libraries or tables its field wants (R-SQL-115).
+    pub(crate) fn offer_placeholder_names(&mut self) {
+        let Some(wanted) = self.snippets.names_wanted() else {
+            return;
+        };
+        let (schema, libraries) = self
+            .job
+            .as_ref()
+            .map(|j| (Some(j.schema.clone()), j.libraries.clone()))
+            .unwrap_or_default();
+        let names = match wanted {
+            snippets::Wanted::Libraries { prefix } => {
+                self.browser.library_names(&prefix, &libraries)
+            }
+            snippets::Wanted::Tables { library, prefix } => library
+                .or(schema)
+                .map(|l| self.browser.table_names(&l, &prefix, &mut self.database))
+                .unwrap_or_default(),
+        };
+        self.snippets.offer_names(names);
+    }
+
     /// A snippet into the editor at the cursor, or run (R-SQL-25).
     pub(crate) fn use_snippet(&mut self, used: snippets::Use) {
+        let report = self.snippets.take_report();
         match used {
             snippets::Use::Insert(sql) => self.scripts.insert(&sql),
-            snippets::Use::Run(sql) => self.run_now(&sql),
+            snippets::Use::Run(sql) => {
+                let idle = !self.busy();
+                self.run_now(&sql);
+                // R-SQL-117: its results are named after the snippet.
+                if idle && let Some(report) = report {
+                    let statements = text::statements(&sql)
+                        .into_iter()
+                        .filter_map(|r| sql.get(r).map(str::to_owned))
+                        .collect();
+                    self.snippet_run = Some((statements, report));
+                }
+            }
         }
     }
 
@@ -142,6 +176,7 @@ impl SqlWindow {
             self.error_line = Some(WAIT.to_owned());
             return;
         }
+        self.snippet_run = None;
         self.queue.extend(
             text::statements(sql)
                 .into_iter()
